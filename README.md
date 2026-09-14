@@ -9,6 +9,7 @@ Den innehåller tre delar, som alla går att använda var för sig:
 | --- | --- |
 | `packages/husdata_h66.yaml` | Skapar alla entiteter från H66:ns MQTT-topics |
 | `dashboards/heatpump.yaml` | Själva dashboarden |
+| `dashboards/heatpump-h66-discovery.yaml` | Dashboard för H66 auto-discovery med `h66_`-prefix |
 | `www/husdata/heatpump-schematic.svg` | Schematiken som värdena läggs ovanpå |
 
 ![Dashboarden](docs/dashboard-oversikt.png)

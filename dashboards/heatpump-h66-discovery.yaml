@@ -1,0 +1,356 @@
+# Husdata H66 auto-discovery - dashboard anpassad till denna installation
+#
+# Laggs till via Installningar > Dashboards > Lagg till dashboard, eller i
+# configuration.yaml (se README). Alla entiteter kommer fran
+# H66:ns MQTT auto-discovery med MQTT_PREFIX=HP och MQTT_NAME=H66.
+#
+# Entiteterna har prefixet h66_, t.ex. sensor.h66_hpoutdoor.
+
+title: Varmepump
+views:
+  - title: Oversikt
+    path: oversikt
+    icon: mdi:heat-pump
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: conditional
+            grid_options:
+              columns: full
+            conditions:
+              - condition: state
+                entity: binary_sensor.h66_hpalarm
+                state: "on"
+            card:
+              type: markdown
+              content: >-
+                ## Larm fran varmepumpen
+
+                Pumpen rapporterar ett aktivt larm. Kontrollera displayen pa
+                pumpen och H66:ns loggsida.
+
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Just nu
+            heading_style: title
+            icon: mdi:thermometer
+          - type: tile
+            entity: sensor.h66_hpoutdoor
+            name: Ute
+            icon: mdi:snowflake-thermometer
+          - type: tile
+            entity: sensor.h66_hpindoor
+            name: Inne
+            icon: mdi:home-thermometer
+          - type: tile
+            entity: sensor.h66_hpwarm_water_1_top
+            name: Varmvatten topp
+            icon: mdi:water-thermometer
+          - type: tile
+            entity: sensor.h66_hphot_gas
+            name: Hetgas
+            icon: mdi:thermometer-high
+          - type: heading
+            heading: Drift
+            heading_style: subtitle
+            icon: mdi:cog
+          - type: tile
+            entity: binary_sensor.h66_hpcompressor
+            name: Kompressor
+            color: orange
+          - type: tile
+            entity: binary_sensor.h66_hpswitch_valve_1
+            name: Vaxelventil
+            color: cyan
+          - type: tile
+            entity: sensor.h66_hpadd_heat_status
+            name: Tillskottsvarme
+            color: red
+          - type: tile
+            entity: binary_sensor.h66_hpalarm
+            name: Larm
+            color: red
+
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Kompressor och vaxelventil
+            heading_style: title
+            icon: mdi:chart-timeline
+          - type: history-graph
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: binary_sensor.h66_hpcompressor
+                name: Kompressor
+              - entity: binary_sensor.h66_hpswitch_valve_1
+                name: Vaxelventil
+              - entity: binary_sensor.h66_hppump_cold_circuit
+                name: Koldbararpump
+              - entity: binary_sensor.h66_hppump_radiator
+                name: Radiatorpump
+          - type: heading
+            heading: Temperaturer
+            heading_style: title
+            icon: mdi:chart-line
+          - type: history-graph
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: sensor.h66_hpheat_carrier_forwrd
+                name: Framledning
+              - entity: sensor.h66_hpradiator_forward
+                name: Radiator fram
+              - entity: sensor.h66_hpheat_carrier_return
+                name: Radiator retur
+              - entity: sensor.h66_hpbrine_in_evaporator
+                name: Kollektor in
+              - entity: sensor.h66_hpbrine_out_condenser
+                name: Kollektor ut
+              - entity: sensor.h66_hpwarm_water_1_top
+                name: Varmvatten topp
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Systemoversikt
+            heading_style: title
+            icon: mdi:sitemap-outline
+          - type: picture-elements
+            grid_options:
+              columns: full
+            image: /local/husdata/heatpump-schematic.svg
+            elements:
+              - type: state-label
+                entity: sensor.h66_hpoutdoor
+                style:
+                  top: 19.4%
+                  left: 6.6%
+                  color: &value_color "#eef3f8"
+                  font-size: &value_size clamp(13px, 1.65vw, 34px)
+                  font-weight: &value_weight "600"
+                  text-shadow: &value_shadow 0 1px 4px rgba(0, 0, 0, 0.9)
+              - type: state-label
+                entity: sensor.h66_hpindoor
+                style:
+                  top: 50%
+                  left: 18%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpradiator_forward
+                style:
+                  top: 27.6%
+                  left: 46%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpheat_carrier_return
+                style:
+                  top: 58.5%
+                  left: 50%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpheat_carrier_forwrd
+                style:
+                  top: 27.6%
+                  left: 64%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-icon
+                entity: binary_sensor.h66_hpcompressor
+                icon: mdi:air-conditioner
+                tap_action:
+                  action: more-info
+                style:
+                  top: 60.3%
+                  left: 70.5%
+                  "--mdc-icon-size": clamp(22px, 2.6vw, 52px)
+              - type: state-label
+                entity: sensor.h66_hphot_gas
+                style:
+                  top: 70%
+                  left: 70.5%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpwarm_water_1_top
+                style:
+                  top: 34.2%
+                  left: 89.5%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpbrine_in_evaporator
+                style:
+                  top: 86.4%
+                  left: 17%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpbrine_out_condenser
+                style:
+                  top: 95.5%
+                  left: 17%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Varmeinstallningar
+            heading_style: title
+            icon: mdi:tune
+          - type: gauge
+            entity: sensor.h66_hpindoor
+            name: Rumstemperatur
+            unit: "°C"
+            min: 10
+            max: 30
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 10
+                color: "#3d92d1"
+              - from: 19
+                color: "#43a047"
+              - from: 23
+                color: "#e8623a"
+          - type: gauge
+            entity: sensor.h66_hpheating_setpoint
+            name: Varmeborvarde
+            unit: "°C"
+            min: 0
+            max: 50
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 0
+                color: "#3d92d1"
+              - from: 20
+                color: "#43a047"
+              - from: 40
+                color: "#e8623a"
+          - type: gauge
+            entity: sensor.h66_hpadd_heat_status
+            name: Tillskottsvarme
+            unit: "%"
+            min: 0
+            max: 100
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 0
+                color: "#43a047"
+              - from: 1
+                color: "#e8623a"
+
+  - title: Alla varden
+    path: varden
+    icon: mdi:format-list-bulleted
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Temperaturer
+            heading_style: title
+            icon: mdi:thermometer
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.h66_hpoutdoor
+                name: Ute
+              - entity: sensor.h66_hpindoor
+                name: Inne
+              - entity: sensor.h66_hpradiator_forward
+                name: Radiator fram
+              - entity: sensor.h66_hpheat_carrier_forwrd
+                name: Framledning
+              - entity: sensor.h66_hpheat_carrier_return
+                name: Returledning
+              - entity: sensor.h66_hphot_gas
+                name: Hetgas
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Kollektor och varmvatten
+            heading_style: title
+            icon: mdi:water-thermometer
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.h66_hpbrine_in_evaporator
+                name: Kollektor in
+              - entity: sensor.h66_hpbrine_out_condenser
+                name: Kollektor ut
+              - entity: sensor.h66_hpwarm_water_1_top
+                name: Varmvatten topp
+              - entity: sensor.h66_hpwarm_water_setpoint
+                name: Varmvatten borvarde
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Status och installningar
+            heading_style: title
+            icon: mdi:cog-outline
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: binary_sensor.h66_hpcompressor
+                name: Kompressor
+              - entity: binary_sensor.h66_hpswitch_valve_1
+                name: Vaxelventil
+              - entity: binary_sensor.h66_hppump_cold_circuit
+                name: Koldbararpump
+              - entity: binary_sensor.h66_hppump_heat_circuit
+                name: Varmebararpump
+              - entity: binary_sensor.h66_hppump_radiator
+                name: Radiatorpump
+              - entity: binary_sensor.h66_hpalarm
+                name: Larm
+              - type: divider
+              - entity: sensor.h66_hpheating_setpoint
+                name: Borvarde varme
+              - entity: sensor.h66_hpindoor
+                name: Rumstemperatur
+              - entity: sensor.h66_hpadd_heat_status
+                name: Tillskottsvarme
