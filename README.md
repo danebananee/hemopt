@@ -10,7 +10,9 @@ Den innehåller tre delar, som alla går att använda var för sig:
 | `packages/husdata_h66.yaml` | Skapar alla entiteter från H66:ns MQTT-topics |
 | `dashboards/heatpump.yaml` | Själva dashboarden |
 | `dashboards/heatpump-h66-discovery.yaml` | Dashboard för H66 auto-discovery med `h66_`-prefix |
+| `dashboards/kostnadsoptimering.yaml` | Vy för optimeringstjänsten |
 | `www/husdata/heatpump-schematic.svg` | Schematiken som värdena läggs ovanpå |
+| `optimizer/` | Tjänst som flyttar last till billiga timmar och kapar effekttoppar |
 
 ![Dashboarden](docs/dashboard-oversikt.png)
 
@@ -33,6 +35,27 @@ Den innehåller tre delar, som alla går att använda var för sig:
 efter ArcHub/fördelare. Varje rum visar temperatur, luftfuktighet och batteri,
 plus en gemensam temperaturgraf för våningen. Vyerna använder entitets-ID:n som
 skapats av community-integrationen `angoyd/ha-lksystems`.
+
+**Kostnadsoptimering** visar spotpris, planerad effekt, månadens effekttoppar
+och en prioritetsreglage per rum. Vyn kräver att tjänsten i `optimizer/` körs.
+
+## Kostnadsoptimering
+
+`optimizer/` är en separat tjänst som flyttar uppvärmning och varmvatten till
+billiga timmar och håller nere effektavgiften. Den läser rumstemperaturerna
+från Home Assistant, hämtar Nordpools kvartspriser, lär sig husets tröghet och
+varmvattenvanor, och skriver tillbaka börvärden till termostaterna.
+
+```bash
+cd optimizer
+uv sync
+uv run hemopt --demo serve --port 47318
+```
+
+Demoläget kör den riktiga optimeraren mot verkliga SE3-priser men ett simulerat
+hus, så du kan titta på den innan något kopplas in. Se
+[`optimizer/README.md`](optimizer/README.md) för skarp installation,
+effektavgiftsmodellen och hur den körs på en Raspberry Pi.
 
 ## Installation
 
