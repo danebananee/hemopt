@@ -166,6 +166,10 @@ styrvariabler. De är inte samma sak som EXT-kabelns H66-utgångar `12FA` och
 
 ### Rego 1000 CAN-rumsregulator
 
+Den här funktionen ska bara användas när ingen fysisk IVT CAN-rumsgivare är
+ansluten. Finns en fysisk givare, sätt `ROOM_CTRL = 0` och låt den ensam
+rapportera rumstemperaturen till Rego.
+
 H66 kan emulera en CAN-rumsregulator för värmekrets 1. Sätt `ROOM_CTRL = 1`
 och starta om H66. Använd inte emuleringen om en fysisk CAN-rumsgivare redan är
 ansluten, och använd den bara på system med en värmekrets.
