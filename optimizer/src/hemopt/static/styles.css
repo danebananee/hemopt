@@ -381,6 +381,10 @@ main {
 .key-pump::before {
   background: var(--warm);
 }
+.key-hourly::before {
+  background: var(--violet);
+}
+
 .key-threshold::before {
   background: var(--hot);
   height: 0;

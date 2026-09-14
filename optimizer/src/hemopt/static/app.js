@@ -168,6 +168,40 @@ function renderPlanChart(host, plan, nowIso) {
     );
   }
 
+  // Hourly means are what the peak tariff actually bills, so they get their
+  // own step line: individual quarters may cross the threshold without
+  // costing anything as long as the hour they belong to does not.
+  const hours = plan.hour_peaks || [];
+  if (hours.length) {
+    const steps = [];
+    for (const hour of hours) {
+      const t0 = new Date(hour.hour_start).getTime();
+      steps.push([x(t0), yPower(hour.mean_kw)], [x(t0 + 3600000), yPower(hour.mean_kw)]);
+    }
+    root.appendChild(
+      el("path", {
+        d: linePath(steps),
+        fill: "none",
+        stroke: "#a481ff",
+        "stroke-width": 1.5,
+        opacity: 0.85,
+      }),
+    );
+    for (const hour of hours) {
+      if (!hour.billable || hour.over_threshold_kw <= 0.01) continue;
+      const t0 = new Date(hour.hour_start).getTime();
+      root.appendChild(
+        el("rect", {
+          x: x(t0),
+          y: yPower(hour.mean_kw),
+          width: Math.max(x(t0 + 3600000) - x(t0), 1),
+          height: Math.max(yPower(plan.peak_threshold_kw) - yPower(hour.mean_kw), 1),
+          fill: "rgba(255,95,86,0.45)",
+        }),
+      );
+    }
+  }
+
   // total and pump power
   root.appendChild(
     el("path", {
