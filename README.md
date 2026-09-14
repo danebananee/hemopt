@@ -164,6 +164,25 @@ Registren `2233` och `2234` (`External control`) är pumpens egna externa
 styrvariabler. De är inte samma sak som EXT-kabelns H66-utgångar `12FA` och
 `12FB`.
 
+### Rego 1000 CAN-rumsregulator
+
+H66 kan emulera en CAN-rumsregulator för värmekrets 1. Sätt `ROOM_CTRL = 1`
+och starta om H66. Använd inte emuleringen om en fysisk CAN-rumsgivare redan är
+ansluten, och använd den bara på system med en värmekrets.
+
+Dashboarden visar:
+
+- `climate.h66_hproom_controller` – aktuell temperatur som H66 skickar till
+  Rego var sjätte sekund (H66-register `02F1`)
+- `climate.h66_hproom_temp_setpoint` – önskat rumsvärde (`0203`)
+- `climate.h66_hproom_sensor_influence` – rumsgivarens påverkan (`2204`)
+
+För automatisk uppdatering av den emulerade temperaturen behöver en automation
+kopiera värdet från en verklig rumsgivare i Home Assistant till
+`climate.h66_hproom_controller`. Använd inte `sensor.h66_hpindoor` som källa,
+eftersom det är värdet som kommer tillbaka från pumpen och skulle skapa en
+återkopplingsloop.
+
 ## Köra demon lokalt
 
 Mappen `demo/` startar en Home Assistant med påhittade värden, så du kan se

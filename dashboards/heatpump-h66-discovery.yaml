@@ -309,6 +309,43 @@ views:
         column_span: 3
         cards:
           - type: heading
+            heading: CAN-rumsreglering
+            heading_style: title
+            icon: mdi:home-thermometer-outline
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              H66 emulerar en Rego 1000-rumsregulator för värmekrets 1.
+              **Emulerad rumstemperatur är ett mätvärde**, medan rumsvärdet är
+              den temperatur du vill ha. Använd inte emuleringen parallellt
+              med en fysisk CAN-rumsgivare.
+          - type: tile
+            entity: climate.h66_hproom_controller
+            name: Emulerad rumstemperatur
+            grid_options:
+              columns: 12
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.h66_hproom_temp_setpoint
+            name: Onskad rumstemperatur
+            grid_options:
+              columns: 12
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.h66_hproom_sensor_influence
+            name: Rumsgivarpaverkan
+            grid_options:
+              columns: 12
+            features:
+              - type: target-temperature
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
             heading: Varmeinstallningar
             heading_style: title
             icon: mdi:tune
@@ -444,6 +481,13 @@ views:
                 name: EXT-port 1
               - entity: climate.h66_hpext_control_port_2
                 name: EXT-port 2
+              - type: divider
+              - entity: climate.h66_hproom_controller
+                name: Emulerad rumstemperatur
+              - entity: climate.h66_hproom_temp_setpoint
+                name: Onskad rumstemperatur
+              - entity: climate.h66_hproom_sensor_influence
+                name: Rumsgivarpaverkan
               - type: divider
               - entity: sensor.h66_hpheating_setpoint
                 name: Borvarde varme
