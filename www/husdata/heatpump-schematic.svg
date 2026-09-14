@@ -16,8 +16,8 @@
   </defs>
 
   <style>
-    .cap { fill: #7f8d9c; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 15px; text-anchor: middle; }
-    .cap-s { fill: #6d7a89; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 13px; text-anchor: middle; }
+    .cap { fill: #93a1b0; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 18px; text-anchor: middle; }
+    .cap-s { fill: #7f8d9c; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 17px; text-anchor: middle; }
     .outline { fill: #161d26; stroke: #47576a; stroke-width: 2.5; }
     .pipe-warm { fill: none; stroke: #e8623a; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
     .pipe-return { fill: none; stroke: #b4703f; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
@@ -26,8 +26,8 @@
   </style>
 
   <rect x="0" y="0" width="1000" height="660" rx="14" fill="url(#sky)"/>
-  <path d="M0 490 H1000 V646 a14 14 0 0 1 -14 14 H14 a14 14 0 0 1 -14 -14 Z" fill="url(#ground)"/>
-  <line x1="0" y1="490" x2="1000" y2="490" stroke="#2b3642" stroke-width="2"/>
+  <path d="M0 505 H1000 V646 a14 14 0 0 1 -14 14 H14 a14 14 0 0 1 -14 -14 Z" fill="url(#ground)"/>
+  <line x1="0" y1="505" x2="1000" y2="505" stroke="#2b3642" stroke-width="2"/>
 
   <!-- Ute -->
   <g>
@@ -38,64 +38,64 @@
       <line x1="41" y1="52" x2="48" y2="52"/>
       <line x1="84" y1="52" x2="91" y2="52"/>
     </g>
-    <text class="cap-s" x="66" y="101">Ute</text>
+    <text class="cap-s" x="66" y="98">Ute</text>
   </g>
 
   <!-- Hus -->
   <g>
     <polygon points="40,243 180,142 320,243" class="outline"/>
     <rect x="66" y="243" width="228" height="190" rx="4" class="outline"/>
-    <rect x="96" y="278" width="58" height="46" rx="3" fill="#0f151d" stroke="#47576a" stroke-width="2"/>
-    <rect x="212" y="348" width="54" height="85" rx="3" fill="#0f151d" stroke="#47576a" stroke-width="2"/>
-    <text class="cap-s" x="180" y="283">Inne</text>
+    <rect x="90" y="278" width="52" height="44" rx="3" fill="#0f151d" stroke="#47576a" stroke-width="2"/>
+    <rect x="216" y="348" width="54" height="85" rx="3" fill="#0f151d" stroke="#47576a" stroke-width="2"/>
+    <text class="cap-s" x="180" y="300">Inne</text>
   </g>
 
   <!-- Radiator -->
   <g>
-    <rect x="400" y="196" width="162" height="120" rx="6" class="outline"/>
+    <rect x="400" y="206" width="162" height="120" rx="6" class="outline"/>
     <g stroke="#47576a" stroke-width="2.5">
-      <line x1="426" y1="206" x2="426" y2="306"/>
-      <line x1="453" y1="206" x2="453" y2="306"/>
-      <line x1="480" y1="206" x2="480" y2="306"/>
-      <line x1="507" y1="206" x2="507" y2="306"/>
-      <line x1="534" y1="206" x2="534" y2="306"/>
+      <line x1="426" y1="216" x2="426" y2="316"/>
+      <line x1="453" y1="216" x2="453" y2="316"/>
+      <line x1="480" y1="216" x2="480" y2="316"/>
+      <line x1="507" y1="216" x2="507" y2="316"/>
+      <line x1="534" y1="216" x2="534" y2="316"/>
     </g>
-    <text class="cap-s" x="481" y="188">Radiator fram</text>
-    <text class="cap-s" x="481" y="340">Radiator retur</text>
+    <text class="cap-s" x="460" y="152">Radiator fram</text>
+    <text class="cap-s" x="500" y="356">Radiator retur</text>
   </g>
 
-  <!-- Framledning fran varmepump, delas mellan radiatorer och beredare -->
-  <path class="pipe-warm" d="M705 330 V190 H521 V196"/>
-  <path class="pipe-warm" d="M705 190 H830"/>
-  <circle cx="705" cy="190" r="11" fill="#161d26" stroke="#e8623a" stroke-width="4"/>
-  <text class="cap-s" x="640" y="146">Framledning</text>
+  <!-- Framledning: gemensam stam till radiatorer och beredare -->
+  <path class="pipe-warm" d="M540 206 V120 H790 V200 H830"/>
+  <path class="pipe-warm" d="M705 120 V330"/>
+  <circle cx="705" cy="120" r="11" fill="#161d26" stroke="#e8623a" stroke-width="4"/>
+  <text class="cap-s" x="640" y="152">Framledning</text>
 
   <!-- Returledningar -->
-  <path class="pipe-return" d="M441 316 V412 H620"/>
-  <path class="pipe-return" d="M830 412 H790"/>
+  <path class="pipe-return" d="M430 326 V412 H620"/>
+  <path class="pipe-return" d="M830 410 H790"/>
 
   <!-- Varmepump -->
   <g>
-    <rect x="620" y="330" width="170" height="150" rx="8" class="outline"/>
+    <rect x="620" y="330" width="170" height="158" rx="8" class="outline"/>
     <text class="cap-s" x="705" y="356">Varmepump</text>
-    <text class="cap-s" x="705" y="428">Hetgas</text>
+    <text class="cap-s" x="705" y="432">Hetgas</text>
   </g>
 
   <!-- Varmvattenberedare -->
   <g>
-    <rect x="830" y="140" width="130" height="300" rx="56" fill="url(#tank)" stroke="#7a4436" stroke-width="2.5"/>
-    <line x1="830" y1="288" x2="960" y2="288" stroke="#00000055" stroke-width="2"/>
-    <text class="cap" x="895" y="124">Varmvatten</text>
-    <text class="cap-s" x="895" y="180">Topp</text>
-    <text class="cap-s" x="895" y="312">Mitt</text>
+    <rect x="830" y="150" width="130" height="300" rx="56" fill="url(#tank)" stroke="#7a4436" stroke-width="2.5"/>
+    <line x1="830" y1="300" x2="960" y2="300" stroke="#00000055" stroke-width="2"/>
+    <text class="cap" x="895" y="132">Varmvatten</text>
+    <text class="cap-s" x="895" y="196" fill="#f6dcd2">Topp</text>
+    <text class="cap-s" x="895" y="316" fill="#f6dcd2">Mitt</text>
   </g>
 
   <!-- Kollektor och borrhal -->
   <g>
-    <path class="pipe-cold" d="M660 480 V560 H250 V652"/>
-    <path class="pipe-cold-out" d="M740 480 V604 H222 V652"/>
-    <text class="cap-s" x="120" y="528">Kollektor in</text>
-    <text class="cap-s" x="120" y="592">Kollektor ut</text>
-    <text class="cap-s" x="860" y="636">Berg / mark</text>
+    <path class="pipe-cold" d="M660 488 V575 H260 V660"/>
+    <path class="pipe-cold-out" d="M740 488 V620 H232 V660"/>
+    <text class="cap-s" x="170" y="540">Kollektor in</text>
+    <text class="cap-s" x="170" y="600">Kollektor ut</text>
+    <text class="cap-s" x="860" y="640">Berg / mark</text>
   </g>
 </svg>

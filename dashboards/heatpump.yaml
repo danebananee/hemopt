@@ -19,6 +19,8 @@ views:
         column_span: 3
         cards:
           - type: conditional
+            grid_options:
+              columns: full
             conditions:
               - condition: state
                 entity: binary_sensor.hp_alarm
@@ -42,8 +44,6 @@ views:
             entity: sensor.hp_outdoor
             name: Ute
             icon: mdi:snowflake-thermometer
-            features_position: bottom
-            vertical: false
           - type: tile
             entity: sensor.hp_indoor
             name: Inne
@@ -52,6 +52,10 @@ views:
             entity: sensor.hp_warm_water_top
             name: Varmvatten topp
             icon: mdi:water-thermometer
+          - type: tile
+            entity: sensor.hp_hot_gas
+            name: Hetgas
+            icon: mdi:thermometer-high
           - type: heading
             heading: Drift
             heading_style: subtitle
@@ -68,6 +72,10 @@ views:
             entity: sensor.hp_add_heat
             name: Tillskottsvarme
             color: red
+          - type: tile
+            entity: binary_sensor.hp_alarm
+            name: Larm
+            color: red
 
       - type: grid
         column_span: 2
@@ -77,6 +85,8 @@ views:
             heading_style: title
             icon: mdi:chart-timeline
           - type: history-graph
+            grid_options:
+              columns: full
             hours_to_show: 24
             show_names: true
             entities:
@@ -93,6 +103,8 @@ views:
             heading_style: title
             icon: mdi:chart-line
           - type: history-graph
+            grid_options:
+              columns: full
             hours_to_show: 24
             show_names: true
             entities:
@@ -117,80 +129,109 @@ views:
             heading_style: title
             icon: mdi:sitemap-outline
           - type: picture-elements
+            grid_options:
+              columns: full
             image: /local/husdata/heatpump-schematic.svg
             elements:
               - type: state-label
                 entity: sensor.hp_outdoor
-                style: &value
-                  top: 19.2%
+                style:
+                  top: 19.4%
                   left: 6.6%
-                  color: "#e9eef3"
-                  font-size: 20px
-                  font-weight: "500"
-                  text-shadow: 0 1px 3px rgba(0,0,0,0.85)
+                  color: &value_color "#eef3f8"
+                  font-size: &value_size clamp(13px, 1.65vw, 34px)
+                  font-weight: &value_weight "600"
+                  text-shadow: &value_shadow 0 1px 4px rgba(0, 0, 0, 0.9)
               - type: state-label
                 entity: sensor.hp_indoor
                 style:
-                  <<: *value
-                  top: 47%
+                  top: 50%
                   left: 18%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-label
                 entity: sensor.hp_radiator_forward
                 style:
-                  <<: *value
-                  top: 24.8%
-                  left: 48.1%
+                  top: 27.6%
+                  left: 46%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-label
                 entity: sensor.hp_radiator_return
                 style:
-                  <<: *value
-                  top: 55.2%
-                  left: 48.1%
+                  top: 58.5%
+                  left: 50%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-label
                 entity: sensor.hp_heat_carrier_forward
                 style:
-                  <<: *value
-                  top: 25.8%
+                  top: 27.6%
                   left: 64%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-icon
                 entity: binary_sensor.hp_compressor
                 icon: mdi:air-conditioner
                 tap_action:
                   action: more-info
                 style:
-                  top: 59.4%
+                  top: 60.3%
                   left: 70.5%
-                  "--mdc-icon-size": 34px
+                  "--mdc-icon-size": clamp(22px, 2.6vw, 52px)
               - type: state-label
                 entity: sensor.hp_hot_gas
                 style:
-                  <<: *value
-                  top: 68.5%
+                  top: 70%
                   left: 70.5%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-label
                 entity: sensor.hp_warm_water_top
                 style:
-                  <<: *value
-                  top: 32.1%
+                  top: 34.2%
                   left: 89.5%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-label
                 entity: sensor.hp_warm_water_mid
                 style:
-                  <<: *value
-                  top: 52.1%
+                  top: 52.4%
                   left: 89.5%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-label
                 entity: sensor.hp_brine_in
                 style:
-                  <<: *value
-                  top: 84.2%
-                  left: 12%
+                  top: 86.4%
+                  left: 17%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
               - type: state-label
                 entity: sensor.hp_brine_out
                 style:
-                  <<: *value
-                  top: 93.9%
-                  left: 12%
+                  top: 95.5%
+                  left: 17%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
 
       - type: grid
         column_span: 3
@@ -199,48 +240,52 @@ views:
             heading: Varmeinstallningar
             heading_style: title
             icon: mdi:tune
-          - type: horizontal-stack
-            cards:
-              - type: gauge
-                entity: sensor.hp_room_temp_target
-                name: Rumstemperatur
-                unit: "°C"
-                min: 10
-                max: 30
-                needle: true
-                segments:
-                  - from: 10
-                    color: "#3d92d1"
-                  - from: 19
-                    color: "#43a047"
-                  - from: 23
-                    color: "#e8623a"
-              - type: gauge
-                entity: sensor.hp_curve_fine
-                name: Kurva finjustering
-                min: -10
-                max: 10
-                needle: true
-                segments:
-                  - from: -10
-                    color: "#3d92d1"
-                  - from: -2
-                    color: "#43a047"
-                  - from: 2
-                    color: "#e8623a"
-              - type: gauge
-                entity: sensor.hp_curve
-                name: Kurva
-                min: 0
-                max: 10
-                needle: true
-                segments:
-                  - from: 0
-                    color: "#3d92d1"
-                  - from: 3
-                    color: "#43a047"
-                  - from: 7
-                    color: "#e8623a"
+          - type: gauge
+            entity: sensor.hp_room_temp_target
+            name: Rumstemperatur
+            unit: "°C"
+            min: 10
+            max: 30
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 10
+                color: "#3d92d1"
+              - from: 19
+                color: "#43a047"
+              - from: 23
+                color: "#e8623a"
+          - type: gauge
+            entity: sensor.hp_curve_fine
+            name: Kurva finjustering
+            min: -10
+            max: 10
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: -10
+                color: "#3d92d1"
+              - from: -2
+                color: "#43a047"
+              - from: 2
+                color: "#e8623a"
+          - type: gauge
+            entity: sensor.hp_curve
+            name: Kurva
+            min: 0
+            max: 10
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 0
+                color: "#3d92d1"
+              - from: 3
+                color: "#43a047"
+              - from: 7
+                color: "#e8623a"
 
   - title: Alla varden
     path: varden
@@ -255,6 +300,8 @@ views:
             heading_style: title
             icon: mdi:thermometer
           - type: entities
+            grid_options:
+              columns: full
             entities:
               - entity: sensor.hp_outdoor
                 name: Ute
@@ -278,6 +325,8 @@ views:
             heading_style: title
             icon: mdi:water-thermometer
           - type: entities
+            grid_options:
+              columns: full
             entities:
               - entity: sensor.hp_brine_in
                 name: Kollektor in
@@ -297,6 +346,8 @@ views:
             heading_style: title
             icon: mdi:cog-outline
           - type: entities
+            grid_options:
+              columns: full
             entities:
               - entity: binary_sensor.hp_compressor
                 name: Kompressor
