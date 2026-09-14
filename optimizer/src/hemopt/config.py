@@ -167,7 +167,11 @@ class HeatPumpConfig(BaseModel):
     aux_heater_kw: float = 6.0
     power_entity: str | None = None
     outdoor_entity: str | None = None
-    can_heat_and_dhw_together: bool = False
+    # The three-way valve serves either heating or the tank, but over a
+    # 15-minute step it can split between them, so a shared capacity limit is
+    # the accurate model. Forcing a hard per-step choice adds one binary per
+    # step and roughly ten times the solve time for no physical gain.
+    strict_dhw_interlock: bool = False
 
     def cop(self, outdoor_c: float, hot_water: bool = False) -> float:
         slope = (self.cop_at_plus_10 - self.cop_at_minus_5) / 15.0

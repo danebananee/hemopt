@@ -279,7 +279,15 @@ def solve(problem: OptimisationInput) -> Plan:
             for r in range(len(problem.rooms))
         )
         heat_thermal.append(thermal)
-        solver.addConstr(thermal <= heat_pump.max_thermal_kw)
+
+        # Heating and the tank share one compressor, so they share its output.
+        if dhw_charge:
+            solver.addConstr(
+                thermal + dhw_charge[index] * dhw.config.reheat_power_kw
+                <= heat_pump.max_thermal_kw
+            )
+        else:
+            solver.addConstr(thermal <= heat_pump.max_thermal_kw)
 
         electrical = thermal * (1.0 / cop_heat[index])
         if dhw_charge:
@@ -290,7 +298,7 @@ def solve(problem: OptimisationInput) -> Plan:
         solver.addConstr(power == electrical)
         hp_power.append(power)
 
-    if dhw_charge and not heat_pump.can_heat_and_dhw_together:
+    if dhw_charge and heat_pump.strict_dhw_interlock:
         for index in range(steps):
             switch = solver.addBinary()
             solver.addConstr(heat_thermal[index] <= heat_pump.max_thermal_kw * (1 - switch))
@@ -450,7 +458,10 @@ def solve_baseline(problem: OptimisationInput) -> Plan:
     """Solve the same horizon with price and peak signals removed.
 
     This is the thermostat-only reference the savings figure is measured
-    against: same comfort bands, same physics, no attempt to shift load.
+    against: same comfort bands, same physics, no reason to shift load. A flat
+    price and a zero peak charge are enough to produce that behaviour, so the
+    comfort limits stay untouched and the baseline can never be infeasible
+    when the real plan was not.
     """
     flat_price = sum(problem.price_sek_per_kwh) / len(problem.price_sek_per_kwh)
     baseline = OptimisationInput(
@@ -460,17 +471,7 @@ def solve_baseline(problem: OptimisationInput) -> Plan:
         price_sek_per_kwh=[flat_price] * problem.steps,
         outdoor_c=problem.outdoor_c,
         base_load_kw=problem.base_load_kw,
-        rooms=[
-            RoomInput(
-                config=room.config.model_copy(
-                    update={"max_preheat_offset": 0.0, "max_setback_offset": 0.0}
-                ),
-                model=room.model,
-                initial_temperature=room.initial_temperature,
-                nominal_heat_kw=room.nominal_heat_kw,
-            )
-            for room in problem.rooms
-        ],
+        rooms=problem.rooms,
         heat_pump=problem.heat_pump,
         peak=PeakInput(
             threshold_kw=problem.peak.threshold_kw,
