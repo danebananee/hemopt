@@ -12,6 +12,7 @@ from hemopt.optimizer import (
     PeakInput,
     RoomInput,
     solve,
+    solve_baseline,
 )
 from hemopt.thermal import ThermalModel
 
@@ -29,6 +30,7 @@ def build_problem(
     priorities: dict[str, int] | None = None,
     with_hot_water: bool = True,
     base_load: float = 0.5,
+    move_penalty: float = 0.0,
 ) -> OptimisationInput:
     start = datetime(2026, 1, 12, 0, 0, tzinfo=TZ)
     times = [start + timedelta(minutes=step_minutes * i) for i in range(steps)]
@@ -105,6 +107,7 @@ def build_problem(
         fuse_limit_kw=13.8,
         hot_water=hot_water,
         solver_time_limit_s=60.0,
+        move_penalty_sek=move_penalty,
     )
 
 
@@ -220,3 +223,56 @@ def test_supports_quarter_and_hourly_resolution(step_minutes: int):
     steps = int(24 * 60 / step_minutes)
     plan = solve(build_problem(steps=steps, step_minutes=step_minutes))
     assert len(plan.times) == steps
+
+
+def _total_movement(plan) -> float:
+    return sum(
+        sum(abs(b - a) for a, b in zip(room.heat_fraction, room.heat_fraction[1:], strict=False))
+        for room in plan.rooms
+    )
+
+
+def test_move_penalty_smooths_the_schedule():
+    jittery = solve(build_problem(move_penalty=0.0))
+    smooth = solve(build_problem(move_penalty=0.08))
+
+    assert _total_movement(smooth) < _total_movement(jittery) * 0.75
+
+
+def test_move_penalty_keeps_the_savings():
+    """Smoothing must be close to free, otherwise it is not worth having."""
+    problem = build_problem(move_penalty=0.0)
+    unconstrained = solve(problem)
+    smooth = solve(build_problem(move_penalty=0.08))
+
+    dt = problem.step_hours
+    cost = lambda plan: sum(  # noqa: E731
+        p * dt * kw
+        for p, kw in zip(problem.price_sek_per_kwh, plan.heat_pump_kw, strict=True)
+    )
+    assert cost(smooth) <= cost(unconstrained) * 1.05
+
+
+@pytest.mark.parametrize("start_temperature", [12.0, 28.0])
+def test_a_room_outside_its_band_still_gets_a_plan(start_temperature: float):
+    """A cold snap or a changed comfort setting must not break planning."""
+    problem = build_problem()
+    problem.rooms[0].initial_temperature = start_temperature
+
+    plan = solve(problem)
+
+    assert plan.status == "kOptimal"
+    room = plan.rooms[0]
+    if start_temperature < room.comfort_min:
+        assert room.temperature[-1] > start_temperature, "plan should recover the room"
+    else:
+        assert room.temperature[-1] < start_temperature, "plan should let the room cool"
+
+
+def test_baseline_is_more_expensive_than_the_optimised_plan():
+    problem = build_problem(move_penalty=0.08)
+    plan = solve(problem)
+    baseline = solve_baseline(problem)
+
+    assert baseline.status in {"kOptimal", "kTimeLimit"}
+    assert baseline.energy_cost_sek > plan.energy_cost_sek

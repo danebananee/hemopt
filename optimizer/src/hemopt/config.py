@@ -213,6 +213,12 @@ class OptimiserConfig(BaseModel):
     mip_gap: float = 0.01
     run_interval_minutes: int = 15
     apply_controls: bool = False
+    # Cost charged per unit of step-to-step change in a room's heat output.
+    # A pure cost minimum is bang-bang, which would make the thermostats jitter
+    # every quarter hour; this buys smooth setpoints for a negligible amount of
+    # money. Raise it if the valves still hunt, drop it to zero to see the
+    # unconstrained economic optimum.
+    move_penalty_sek: float = 0.08
 
     @property
     def steps(self) -> int:

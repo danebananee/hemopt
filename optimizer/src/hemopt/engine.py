@@ -410,6 +410,7 @@ class Engine:
             hot_water=hot_water,
             solver_time_limit_s=settings.solver_time_limit_s,
             mip_gap=settings.mip_gap,
+            move_penalty_sek=settings.move_penalty_sek,
         )
 
         try:

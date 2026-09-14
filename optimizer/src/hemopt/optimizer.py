@@ -73,6 +73,7 @@ class OptimisationInput:
     hot_water: HotWaterInput | None = None
     solver_time_limit_s: float = 30.0
     mip_gap: float = 0.01
+    move_penalty_sek: float = 0.0
 
     @property
     def steps(self) -> int:
@@ -195,8 +196,18 @@ def solve(problem: OptimisationInput) -> Plan:
     room_temp: list[list] = []
     room_heat: list[list] = []
     for room in problem.rooms:
-        hard_floor = room.config.comfort_min - room.config.max_setback_offset
-        hard_ceiling = room.config.comfort_max + room.config.max_preheat_offset
+        # The band is widened to cover wherever the room actually is right
+        # now. A room that has drifted outside its limits, or whose comfort
+        # settings were just changed, must still produce a plan that walks it
+        # back rather than reporting the whole house as infeasible.
+        hard_floor = min(
+            room.config.comfort_min - room.config.max_setback_offset,
+            room.initial_temperature - 0.1,
+        )
+        hard_ceiling = max(
+            room.config.comfort_max + room.config.max_preheat_offset,
+            room.initial_temperature + 0.1,
+        )
 
         temps = [solver.addVariable(lb=hard_floor, ub=hard_ceiling) for _ in range(steps + 1)]
         heats = [solver.addVariable(lb=0.0, ub=1.0) for _ in range(steps)]
@@ -217,6 +228,13 @@ def solve(problem: OptimisationInput) -> Plan:
             solver.addConstr(temps[index + 1] <= room.config.comfort_max + above)
             objective.append(weight * dt * below)
             objective.append(weight * PREHEAT_DISCOMFORT_RATIO * dt * above)
+
+        if problem.move_penalty_sek > 0:
+            for index in range(1, steps):
+                rise = solver.addVariable(lb=0.0)
+                fall = solver.addVariable(lb=0.0)
+                solver.addConstr(heats[index] - heats[index - 1] == rise - fall)
+                objective.append(problem.move_penalty_sek * (rise + fall))
 
         room_temp.append(temps)
         room_heat.append(heats)
@@ -485,6 +503,7 @@ def solve_baseline(problem: OptimisationInput) -> Plan:
         hot_water=problem.hot_water,
         solver_time_limit_s=problem.solver_time_limit_s,
         mip_gap=problem.mip_gap,
+        move_penalty_sek=problem.move_penalty_sek,
     )
     plan = solve(baseline)
 
