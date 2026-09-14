@@ -143,6 +143,27 @@ värmekurva från Home Assistant:
 4. Byt `sensor.hp_room_temp_target`, `sensor.hp_curve` och
    `sensor.hp_curve_fine` mot `number.*` i mätarna i dashboarden.
 
+## Styra EXT-kabeln
+
+Den auto-discovery-anpassade dashboarden har kontroller för H66-register
+`12FA` och `12FB`:
+
+- `climate.h66_hpext_control_port_1`
+- `climate.h66_hpext_control_port_2`
+
+H66 representerar 0/1-reglagen som climate-entiteter. Dashboardens knappar
+anropar `climate.set_temperature` med `1` för att aktivera EXT-signalen och `0`
+för att frisläppa den. Aktiveringsknapparna kräver bekräftelse.
+
+Sätt `EXP_PORT = EXT` och `MQTT_SUBS = 1` i H66. Koppla och konfigurera sedan
+respektive EXT-ingång enligt värmepumpens manual. En aktiv signal kan stoppa
+kompressor, varmvatten eller eltillskott omedelbart. Testa därför en port i
+taget och kontrollera alltid att `0` verkligen frisläpper den igen.
+
+Registren `2233` och `2234` (`External control`) är pumpens egna externa
+styrvariabler. De är inte samma sak som EXT-kabelns H66-utgångar `12FA` och
+`12FB`.
+
 ## Köra demon lokalt
 
 Mappen `demo/` startar en Home Assistant med påhittade värden, så du kan se

@@ -227,6 +227,88 @@ views:
         column_span: 3
         cards:
           - type: heading
+            heading: EXT-styrning
+            heading_style: title
+            icon: mdi:electric-switch
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              **1 = aktiv EXT-signal, 0 = frisläppt.** Vad respektive port
+              blockerar bestäms av kabelanslutningen och värmepumpens
+              konfiguration. Aktivering kan stoppa kompressor, varmvatten eller
+              eltillskott omedelbart.
+          - type: tile
+            entity: climate.h66_hpext_control_port_1
+            name: EXT-port 1
+            grid_options:
+              columns: 18
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.h66_hpext_control_port_2
+            name: EXT-port 2
+            grid_options:
+              columns: 18
+            features:
+              - type: target-temperature
+          - type: button
+            name: Aktivera EXT 1
+            icon: mdi:pause-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_1
+              data:
+                temperature: 1
+              confirmation:
+                text: Aktivera EXT-port 1? Funktionen som porten styr blockeras.
+          - type: button
+            name: Frisläpp EXT 1
+            icon: mdi:play-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_1
+              data:
+                temperature: 0
+          - type: button
+            name: Aktivera EXT 2
+            icon: mdi:pause-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_2
+              data:
+                temperature: 1
+              confirmation:
+                text: Aktivera EXT-port 2? Funktionen som porten styr blockeras.
+          - type: button
+            name: Frisläpp EXT 2
+            icon: mdi:play-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_2
+              data:
+                temperature: 0
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
             heading: Varmeinstallningar
             heading_style: title
             icon: mdi:tune
@@ -281,7 +363,7 @@ views:
     path: varden
     icon: mdi:format-list-bulleted
     type: sections
-    max_columns: 3
+    max_columns: 4
     sections:
       - type: grid
         cards:
@@ -297,6 +379,8 @@ views:
                 name: Ute
               - entity: sensor.h66_hpindoor
                 name: Inne
+              - entity: sensor.h66_hpindoor_2
+                name: Inne 2
               - entity: sensor.h66_hpradiator_forward
                 name: Radiator fram
               - entity: sensor.h66_hpheat_carrier_forwrd
@@ -338,19 +422,61 @@ views:
               - entity: binary_sensor.h66_hpcompressor
                 name: Kompressor
               - entity: binary_sensor.h66_hpswitch_valve_1
-                name: Vaxelventil
+                name: Vaxelventil 1
+              - entity: binary_sensor.h66_hpswitch_valve_2
+                name: Vaxelventil 2
               - entity: binary_sensor.h66_hppump_cold_circuit
                 name: Koldbararpump
               - entity: binary_sensor.h66_hppump_heat_circuit
                 name: Varmebararpump
               - entity: binary_sensor.h66_hppump_radiator
                 name: Radiatorpump
+              - entity: binary_sensor.h66_hpfan
+                name: Flakt
+              - entity: binary_sensor.h66_hpheating_cable
+                name: Varmekabel
+              - entity: binary_sensor.h66_hpcrank_case_heater
+                name: Vevhusvarmare
               - entity: binary_sensor.h66_hpalarm
                 name: Larm
               - type: divider
+              - entity: climate.h66_hpext_control_port_1
+                name: EXT-port 1
+              - entity: climate.h66_hpext_control_port_2
+                name: EXT-port 2
+              - type: divider
               - entity: sensor.h66_hpheating_setpoint
                 name: Borvarde varme
+              - entity: sensor.h66_hpheating_setpoint_2
+                name: Borvarde varme 2
               - entity: sensor.h66_hpindoor
                 name: Rumstemperatur
               - entity: sensor.h66_hpadd_heat_status
                 name: Tillskottsvarme
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Energi
+            heading_style: title
+            icon: mdi:lightning-bolt
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.h66_hppower_consumption
+                name: Effekt just nu
+              - entity: sensor.h66_hpaccumulated_consumption
+                name: Ackumulerad forbrukning
+              - entity: sensor.h66_hpsupp_energy_heating
+                name: Levererad varmeenergi
+              - entity: sensor.h66_hpsupp_energy_hotwater
+                name: Levererad varmvattenenergi
+              - entity: sensor.h66_hpcompr_cons_heating
+                name: Kompressor varme
+              - entity: sensor.h66_hpcompr_cons_hotwat
+                name: Kompressor varmvatten
+              - entity: sensor.h66_hpaux_cons_heating
+                name: Eltillskott varme
+              - entity: sensor.h66_hpaux_cons_hot_water
+                name: Eltillskott varmvatten
