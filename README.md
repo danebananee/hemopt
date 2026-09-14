@@ -29,6 +29,11 @@ Den innehåller tre delar, som alla går att använda var för sig:
 
 **Alla värden** listar samtliga register som tabeller.
 
+**Golvvärme nere** och **Golvvärme uppe** visar LK ArcSense-givarna grupperade
+efter ArcHub/fördelare. Varje rum visar temperatur, luftfuktighet och batteri,
+plus en gemensam temperaturgraf för våningen. Vyerna använder entitets-ID:n som
+skapats av community-integrationen `angoyd/ha-lksystems`.
+
 ## Installation
 
 ### 1. Koppla H66 till Home Assistant över MQTT

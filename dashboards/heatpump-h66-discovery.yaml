@@ -359,6 +359,202 @@ views:
               - from: 1
                 color: "#e8623a"
 
+  - title: Golvvarme nere
+    path: golvvarme-nere
+    icon: mdi:home-floor-0
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Bottenvaning
+            heading_style: title
+            icon: mdi:heating-coil
+          - type: history-graph
+            grid_options:
+              columns: full
+            title: Temperaturer senaste dygnet
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: sensor.e0_ec_2c_c8_5e_2c_temperature
+                name: Tvattstuga
+              - entity: sensor.e9_bd_23_4a_e9_a8_temperature
+                name: Salong
+              - entity: sensor.ce_9f_90_cd_bf_74_temperature
+                name: Lekrum
+              - entity: sensor.ca_97_f7_ba_7d_23_temperature
+                name: Entre
+          - type: entities
+            title: Tvattstuga
+            icon: mdi:washing-machine
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e0_ec_2c_c8_5e_2c_temperature
+                name: Temperatur
+              - entity: sensor.e0_ec_2c_c8_5e_2c_humidity
+                name: Luftfuktighet
+              - entity: sensor.e0_ec_2c_c8_5e_2c_battery
+                name: Batteri
+          - type: entities
+            title: Salong
+            icon: mdi:sofa
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e9_bd_23_4a_e9_a8_temperature
+                name: Temperatur
+              - entity: sensor.e9_bd_23_4a_e9_a8_humidity
+                name: Luftfuktighet
+              - entity: sensor.e9_bd_23_4a_e9_a8_battery
+                name: Batteri
+          - type: entities
+            title: Lekrum
+            icon: mdi:toy-brick
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.ce_9f_90_cd_bf_74_temperature
+                name: Temperatur
+              - entity: sensor.ce_9f_90_cd_bf_74_humidity
+                name: Luftfuktighet
+              - entity: sensor.ce_9f_90_cd_bf_74_battery
+                name: Batteri
+          - type: entities
+            title: Entre
+            icon: mdi:door
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.ca_97_f7_ba_7d_23_temperature
+                name: Temperatur
+              - entity: sensor.ca_97_f7_ba_7d_23_humidity
+                name: Luftfuktighet
+              - entity: sensor.ca_97_f7_ba_7d_23_battery
+                name: Batteri
+
+  - title: Golvvarme uppe
+    path: golvvarme-uppe
+    icon: mdi:home-floor-1
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Overvaning
+            heading_style: title
+            icon: mdi:heating-coil
+          - type: history-graph
+            grid_options:
+              columns: full
+            title: Temperaturer senaste dygnet
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: sensor.d5_ba_fd_c1_0c_c1_temperature
+                name: Garderob
+              - entity: sensor.c8_1b_04_e0_7e_90_temperature
+                name: Sovrum
+              - entity: sensor.fa_6a_ee_c8_9a_63_temperature
+                name: Vardagsrum uppe
+              - entity: sensor.f7_d4_23_14_49_da_temperature
+                name: Badrum
+              - entity: sensor.e3_09_14_3f_f0_f0_temperature
+                name: Pysselrum
+              - entity: sensor.e6_5e_d9_54_a8_e7_temperature
+                name: Rios rum
+              - entity: sensor.d0_f5_31_05_49_9d_temperature
+                name: Kontor
+          - type: entities
+            title: Garderob
+            icon: mdi:wardrobe
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.d5_ba_fd_c1_0c_c1_temperature
+                name: Temperatur
+              - entity: sensor.d5_ba_fd_c1_0c_c1_humidity
+                name: Luftfuktighet
+              - entity: sensor.d5_ba_fd_c1_0c_c1_battery
+                name: Batteri
+          - type: entities
+            title: Sovrum
+            icon: mdi:bed
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.c8_1b_04_e0_7e_90_temperature
+                name: Temperatur
+              - entity: sensor.c8_1b_04_e0_7e_90_humidity
+                name: Luftfuktighet
+              - entity: sensor.c8_1b_04_e0_7e_90_battery
+                name: Batteri
+          - type: entities
+            title: Vardagsrum uppe
+            icon: mdi:sofa
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.fa_6a_ee_c8_9a_63_temperature
+                name: Temperatur
+              - entity: sensor.fa_6a_ee_c8_9a_63_humidity
+                name: Luftfuktighet
+              - entity: sensor.fa_6a_ee_c8_9a_63_battery
+                name: Batteri
+          - type: entities
+            title: Badrum
+            icon: mdi:shower
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.f7_d4_23_14_49_da_temperature
+                name: Temperatur
+              - entity: sensor.f7_d4_23_14_49_da_humidity
+                name: Luftfuktighet
+              - entity: sensor.f7_d4_23_14_49_da_battery
+                name: Batteri
+          - type: entities
+            title: Pysselrum
+            icon: mdi:palette
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e3_09_14_3f_f0_f0_temperature
+                name: Temperatur
+              - entity: sensor.e3_09_14_3f_f0_f0_humidity
+                name: Luftfuktighet
+              - entity: sensor.e3_09_14_3f_f0_f0_battery
+                name: Batteri
+          - type: entities
+            title: Rios rum
+            icon: mdi:cat
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e6_5e_d9_54_a8_e7_temperature
+                name: Temperatur
+              - entity: sensor.e6_5e_d9_54_a8_e7_humidity
+                name: Luftfuktighet
+              - entity: sensor.e6_5e_d9_54_a8_e7_battery
+                name: Batteri
+          - type: entities
+            title: Kontor
+            icon: mdi:desk
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.d0_f5_31_05_49_9d_temperature
+                name: Temperatur
+              - entity: sensor.d0_f5_31_05_49_9d_humidity
+                name: Luftfuktighet
+              - entity: sensor.d0_f5_31_05_49_9d_battery
+                name: Batteri
+
   - title: Alla varden
     path: varden
     icon: mdi:format-list-bulleted
