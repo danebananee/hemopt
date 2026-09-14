@@ -1,0 +1,45 @@
+[project]
+name = "hemopt"
+version = "0.1.0"
+description = "Cost-optimising heating and hot water scheduler for Home Assistant, Nordpool spot prices and Swedish peak-power tariffs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "highspy>=1.7",
+    "paho-mqtt>=2.1",
+    "jinja2>=3.1",
+]
+
+[project.scripts]
+hemopt = "hemopt.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hemopt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

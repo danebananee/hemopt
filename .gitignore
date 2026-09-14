@@ -4,3 +4,8 @@ agent-tools/
 *.db-wal
 __pycache__/
 .venv/
+
+# hemopt
+optimizer/.venv/
+optimizer/*.db
+.pytest_cache/
