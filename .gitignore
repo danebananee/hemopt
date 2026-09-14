@@ -1,0 +1,6 @@
+agent-tools/
+*.db
+*.db-shm
+*.db-wal
+__pycache__/
+.venv/

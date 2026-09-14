@@ -1,0 +1,138 @@
+# Latsasentiteter med samma entity_id som packages/husdata_h66.yaml skapar.
+# Varden ar hamtade fran en bergvarmepump en kall hostdag.
+
+- sensor:
+    - name: hp_outdoor
+      unique_id: demo_hp_outdoor
+      state: "-1.7"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_indoor
+      unique_id: demo_hp_indoor
+      state: "22.3"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_radiator_forward
+      unique_id: demo_hp_radiator_forward
+      state: "34.6"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_radiator_return
+      unique_id: demo_hp_radiator_return
+      state: "31.2"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_heat_carrier_forward
+      unique_id: demo_hp_heat_carrier_forward
+      state: "36.1"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_heat_carrier_return
+      unique_id: demo_hp_heat_carrier_return
+      state: "30.4"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_brine_in
+      unique_id: demo_hp_brine_in
+      state: "-3.2"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_brine_out
+      unique_id: demo_hp_brine_out
+      state: "-6.1"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_warm_water_top
+      unique_id: demo_hp_warm_water_top
+      state: "49.4"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_warm_water_mid
+      unique_id: demo_hp_warm_water_mid
+      state: "36.3"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_hot_gas
+      unique_id: demo_hp_hot_gas
+      state: "89.2"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_heating_setpoint
+      unique_id: demo_hp_heating_setpoint
+      state: "36.5"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_warm_water_setpoint
+      unique_id: demo_hp_warm_water_setpoint
+      state: "51.0"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_add_heat
+      unique_id: demo_hp_add_heat
+      state: "0"
+      unit_of_measurement: "%"
+      state_class: measurement
+      icon: mdi:flash
+    - name: hp_room_temp_target
+      unique_id: demo_hp_room_temp_target
+      state: "20.5"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+    - name: hp_curve
+      unique_id: demo_hp_curve
+      state: "4.2"
+      state_class: measurement
+      icon: mdi:chart-bell-curve-cumulative
+    - name: hp_curve_fine
+      unique_id: demo_hp_curve_fine
+      state: "1.0"
+      state_class: measurement
+      icon: mdi:tune-vertical
+
+- binary_sensor:
+    - name: hp_compressor
+      unique_id: demo_hp_compressor
+      state: "true"
+      icon: mdi:air-conditioner
+    - name: hp_switch_valve
+      unique_id: demo_hp_switch_valve
+      state: "false"
+      icon: mdi:valve
+    - name: hp_brine_pump
+      unique_id: demo_hp_brine_pump
+      state: "true"
+      icon: mdi:pump
+    - name: hp_heat_carrier_pump
+      unique_id: demo_hp_heat_carrier_pump
+      state: "true"
+      icon: mdi:pump
+    - name: hp_radiator_pump
+      unique_id: demo_hp_radiator_pump
+      state: "true"
+      icon: mdi:pump
+    - name: hp_add_heat_step_1
+      unique_id: demo_hp_add_heat_step_1
+      state: "false"
+      icon: mdi:radiator
+    - name: hp_add_heat_step_2
+      unique_id: demo_hp_add_heat_step_2
+      state: "false"
+      icon: mdi:radiator
+    - name: hp_alarm
+      unique_id: demo_hp_alarm
+      state: "false"
+      device_class: problem

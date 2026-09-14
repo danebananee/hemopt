@@ -1,0 +1,327 @@
+# Husdata H66 - dashboard for varmepump
+#
+# Laggs till via Installningar > Dashboards > Lagg till dashboard, eller i
+# configuration.yaml (se README). Alla entiteter kommer fran
+# packages/husdata_h66.yaml eller H66:ns MQTT auto-discovery.
+#
+# Har dina entiteter andra namn: sok upp dem i Utvecklarverktyg > Tillstand
+# och byt ut sensor.hp_* nedan.
+
+title: Varmepump
+views:
+  - title: Oversikt
+    path: oversikt
+    icon: mdi:heat-pump
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.hp_alarm
+                state: "on"
+            card:
+              type: markdown
+              content: >-
+                ## Larm fran varmepumpen
+
+                Pumpen rapporterar ett aktivt larm. Kontrollera displayen pa
+                pumpen och H66:ns loggsida.
+
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Just nu
+            heading_style: title
+            icon: mdi:thermometer
+          - type: tile
+            entity: sensor.hp_outdoor
+            name: Ute
+            icon: mdi:snowflake-thermometer
+            features_position: bottom
+            vertical: false
+          - type: tile
+            entity: sensor.hp_indoor
+            name: Inne
+            icon: mdi:home-thermometer
+          - type: tile
+            entity: sensor.hp_warm_water_top
+            name: Varmvatten topp
+            icon: mdi:water-thermometer
+          - type: heading
+            heading: Drift
+            heading_style: subtitle
+            icon: mdi:cog
+          - type: tile
+            entity: binary_sensor.hp_compressor
+            name: Kompressor
+            color: orange
+          - type: tile
+            entity: binary_sensor.hp_switch_valve
+            name: Vaxelventil
+            color: cyan
+          - type: tile
+            entity: sensor.hp_add_heat
+            name: Tillskottsvarme
+            color: red
+
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Kompressor och vaxelventil
+            heading_style: title
+            icon: mdi:chart-timeline
+          - type: history-graph
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: binary_sensor.hp_compressor
+                name: Kompressor
+              - entity: binary_sensor.hp_switch_valve
+                name: Vaxelventil
+              - entity: binary_sensor.hp_brine_pump
+                name: Koldbararpump
+              - entity: binary_sensor.hp_radiator_pump
+                name: Radiatorpump
+          - type: heading
+            heading: Temperaturer
+            heading_style: title
+            icon: mdi:chart-line
+          - type: history-graph
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: sensor.hp_heat_carrier_forward
+                name: Framledning
+              - entity: sensor.hp_radiator_forward
+                name: Radiator fram
+              - entity: sensor.hp_radiator_return
+                name: Radiator retur
+              - entity: sensor.hp_brine_in
+                name: Kollektor in
+              - entity: sensor.hp_brine_out
+                name: Kollektor ut
+              - entity: sensor.hp_warm_water_top
+                name: Varmvatten topp
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Systemoversikt
+            heading_style: title
+            icon: mdi:sitemap-outline
+          - type: picture-elements
+            image: /local/husdata/heatpump-schematic.svg
+            elements:
+              - type: state-label
+                entity: sensor.hp_outdoor
+                style: &value
+                  top: 19.2%
+                  left: 6.6%
+                  color: "#e9eef3"
+                  font-size: 20px
+                  font-weight: "500"
+                  text-shadow: 0 1px 3px rgba(0,0,0,0.85)
+              - type: state-label
+                entity: sensor.hp_indoor
+                style:
+                  <<: *value
+                  top: 47%
+                  left: 18%
+              - type: state-label
+                entity: sensor.hp_radiator_forward
+                style:
+                  <<: *value
+                  top: 24.8%
+                  left: 48.1%
+              - type: state-label
+                entity: sensor.hp_radiator_return
+                style:
+                  <<: *value
+                  top: 55.2%
+                  left: 48.1%
+              - type: state-label
+                entity: sensor.hp_heat_carrier_forward
+                style:
+                  <<: *value
+                  top: 25.8%
+                  left: 64%
+              - type: state-icon
+                entity: binary_sensor.hp_compressor
+                icon: mdi:air-conditioner
+                tap_action:
+                  action: more-info
+                style:
+                  top: 59.4%
+                  left: 70.5%
+                  "--mdc-icon-size": 34px
+              - type: state-label
+                entity: sensor.hp_hot_gas
+                style:
+                  <<: *value
+                  top: 68.5%
+                  left: 70.5%
+              - type: state-label
+                entity: sensor.hp_warm_water_top
+                style:
+                  <<: *value
+                  top: 32.1%
+                  left: 89.5%
+              - type: state-label
+                entity: sensor.hp_warm_water_mid
+                style:
+                  <<: *value
+                  top: 52.1%
+                  left: 89.5%
+              - type: state-label
+                entity: sensor.hp_brine_in
+                style:
+                  <<: *value
+                  top: 84.2%
+                  left: 12%
+              - type: state-label
+                entity: sensor.hp_brine_out
+                style:
+                  <<: *value
+                  top: 93.9%
+                  left: 12%
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Varmeinstallningar
+            heading_style: title
+            icon: mdi:tune
+          - type: horizontal-stack
+            cards:
+              - type: gauge
+                entity: sensor.hp_room_temp_target
+                name: Rumstemperatur
+                unit: "°C"
+                min: 10
+                max: 30
+                needle: true
+                segments:
+                  - from: 10
+                    color: "#3d92d1"
+                  - from: 19
+                    color: "#43a047"
+                  - from: 23
+                    color: "#e8623a"
+              - type: gauge
+                entity: sensor.hp_curve_fine
+                name: Kurva finjustering
+                min: -10
+                max: 10
+                needle: true
+                segments:
+                  - from: -10
+                    color: "#3d92d1"
+                  - from: -2
+                    color: "#43a047"
+                  - from: 2
+                    color: "#e8623a"
+              - type: gauge
+                entity: sensor.hp_curve
+                name: Kurva
+                min: 0
+                max: 10
+                needle: true
+                segments:
+                  - from: 0
+                    color: "#3d92d1"
+                  - from: 3
+                    color: "#43a047"
+                  - from: 7
+                    color: "#e8623a"
+
+  - title: Alla varden
+    path: varden
+    icon: mdi:format-list-bulleted
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Temperaturer
+            heading_style: title
+            icon: mdi:thermometer
+          - type: entities
+            entities:
+              - entity: sensor.hp_outdoor
+                name: Ute
+              - entity: sensor.hp_indoor
+                name: Inne
+              - entity: sensor.hp_radiator_forward
+                name: Radiator fram
+              - entity: sensor.hp_radiator_return
+                name: Radiator retur
+              - entity: sensor.hp_heat_carrier_forward
+                name: Framledning
+              - entity: sensor.hp_heat_carrier_return
+                name: Returledning
+              - entity: sensor.hp_hot_gas
+                name: Hetgas
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Kollektor och varmvatten
+            heading_style: title
+            icon: mdi:water-thermometer
+          - type: entities
+            entities:
+              - entity: sensor.hp_brine_in
+                name: Kollektor in
+              - entity: sensor.hp_brine_out
+                name: Kollektor ut
+              - entity: sensor.hp_warm_water_top
+                name: Varmvatten topp
+              - entity: sensor.hp_warm_water_mid
+                name: Varmvatten mitt
+              - entity: sensor.hp_warm_water_setpoint
+                name: Varmvatten borvarde
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Status och installningar
+            heading_style: title
+            icon: mdi:cog-outline
+          - type: entities
+            entities:
+              - entity: binary_sensor.hp_compressor
+                name: Kompressor
+              - entity: binary_sensor.hp_switch_valve
+                name: Vaxelventil
+              - entity: binary_sensor.hp_brine_pump
+                name: Koldbararpump
+              - entity: binary_sensor.hp_heat_carrier_pump
+                name: Varmebararpump
+              - entity: binary_sensor.hp_radiator_pump
+                name: Radiatorpump
+              - entity: binary_sensor.hp_add_heat_step_1
+                name: Tillskott steg 1
+              - entity: binary_sensor.hp_add_heat_step_2
+                name: Tillskott steg 2
+              - entity: binary_sensor.hp_alarm
+                name: Larm
+              - type: divider
+              - entity: sensor.hp_heating_setpoint
+                name: Borvarde varme
+              - entity: sensor.hp_room_temp_target
+                name: Rumstemperatur borvarde
+              - entity: sensor.hp_curve
+                name: Kurva
+              - entity: sensor.hp_curve_fine
+                name: Kurva finjustering
+              - entity: sensor.hp_add_heat
+                name: Tillskottsvarme
