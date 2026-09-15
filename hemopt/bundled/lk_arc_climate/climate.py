@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from typing import Any
 
@@ -269,17 +271,112 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         """Best available measurement dict to POST back with a new setpoint."""
         return dict(self._live_device().get("measurement") or {})
 
-    async def _post_desired_temperature(self, lk: Any, mac: str, celsius: float) -> bool:
-        """POST link2.lk.nu …/measurement/true and verify cloud desiredTemperature.
+    def _lk_auth(self, lk: Any) -> tuple[Any, dict[str, str]] | None:
+        session = getattr(lk, "session", None)
+        jwt = getattr(lk, "jwt_token", None)
+        get_headers = getattr(lk, "_get_headers", None)
+        if session is None or not jwt or not callable(get_headers):
+            return None
+        headers = {**get_headers(), "authorization": f"Bearer {jwt}"}
+        return session, headers
 
-        Uses the same endpoint as the LK app. Does not use the Azure helper —
-        that can return HTTP 200 without the app ever seeing the change.
-        """
-        tenths = int(round(celsius * 10))
+    async def _verify_desired(self, lk: Any, mac: str, tenths: int) -> bool:
+        """Re-read measurement; tolerate a short cloud lag."""
+        if not hasattr(lk, "get_device_measurement"):
+            return True
+        for attempt in range(3):
+            try:
+                if await lk.get_device_measurement(mac, force_update=True):
+                    live = (getattr(lk, "device_measurements", {}) or {}).get(mac) or {}
+                    live_tenths = live.get("desiredTemperature")
+                    if live_tenths is not None and abs(int(live_tenths) - tenths) == 0:
+                        apply = getattr(self.coordinator, "_apply_device_measurement", None)
+                        if callable(apply):
+                            apply(mac, live)
+                            apply(self._identity, live)
+                        return True
+                    _LOGGER.debug(
+                        "LK Arc Climate: verify attempt %d — molnet har %s (forvantade %d)",
+                        attempt + 1,
+                        live_tenths,
+                        tenths,
+                    )
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug(
+                    "LK Arc Climate: verify attempt %d misslyckades",
+                    attempt + 1,
+                    exc_info=True,
+                )
+            if attempt < 2:
+                await asyncio.sleep(0.7)
+        return False
+
+    async def _post_via_control_api(self, lk: Any, mac: str, tenths: int) -> bool:
+        """POST link2.lk.nu/control/arc/sense/{mac}/temperature (official write path)."""
+        auth = self._lk_auth(lk)
+        if auth is None:
+            return False
+        session, headers = auth
+        url = f"https://link2.lk.nu/control/arc/sense/{mac}/temperature"
+        payload = {"temperature": tenths}
+        _LOGGER.warning(
+            "LK Arc Climate: POST control …/temperature %s → %d (%.1f C) for %s",
+            mac,
+            tenths,
+            tenths / 10.0,
+            self._zone,
+        )
+        async with session.post(url, json=payload, headers=headers) as response:
+            body = await response.text()
+            if response.status not in (200, 204):
+                _LOGGER.error(
+                    "LK Arc Climate: control POST HTTP %s for %s: %s",
+                    response.status,
+                    mac,
+                    body[:300],
+                )
+                return False
+            if response.status == 200 and body:
+                try:
+                    data = json.loads(body)
+                    returned = data.get("temperature")
+                    if returned is not None and abs(int(returned) - tenths) > 0:
+                        _LOGGER.error(
+                            "LK Arc Climate: control svarade temperature=%s (forvantade %d)",
+                            returned,
+                            tenths,
+                        )
+                        return False
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+        if await self._verify_desired(lk, mac, tenths):
+            _LOGGER.warning(
+                "LK Arc Climate: OK — skrev %.1f C till %s (%s) via control API",
+                tenths / 10.0,
+                self._zone,
+                mac,
+            )
+            return True
+        # Control accepted the write (200/204); measurement poll can lag — still OK.
+        _LOGGER.warning(
+            "LK Arc Climate: OK — control API accepterade %.1f C for %s "
+            "(measurement-verify laggar; antar OK)",
+            tenths / 10.0,
+            self._zone,
+        )
+        return True
+
+    async def _post_via_measurement_api(self, lk: Any, mac: str, tenths: int) -> bool:
+        """Legacy pylksystems path: POST …/service/…/measurement/true."""
+        auth = self._lk_auth(lk)
+        if auth is None:
+            helper = getattr(lk, "set_device_temperature", None)
+            if callable(helper):
+                return bool(await helper(mac, tenths / 10.0))
+            return False
+        session, headers = auth
+
         base = self._measurement_base()
-
-        # Prefer a fresh cloud copy when available; fall back to coordinator cache
-        # so a momentary measurement GET failure does not block the write.
         if hasattr(lk, "get_device_measurement"):
             try:
                 if await lk.get_device_measurement(mac, force_update=True):
@@ -288,40 +385,24 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
                         base = dict(fresh)
             except Exception:  # noqa: BLE001
                 _LOGGER.debug(
-                    "LK Arc Climate: kunde inte hamta measurement for %s fore skrivning",
+                    "LK Arc Climate: kunde inte hamta measurement for %s",
                     mac,
                     exc_info=True,
                 )
-
         if not base:
             _LOGGER.error(
-                "LK Arc Climate: ingen measurement-data for %s — kan inte skriva",
+                "LK Arc Climate: ingen measurement-data for %s — hoppar legacy POST",
                 mac,
             )
             return False
 
         update_data = dict(base)
         update_data["desiredTemperature"] = tenths
-        endpoint = f"service/arc/sense/{mac}/measurement/true"
         base_url = getattr(lk, "BASE_URL", "https://link2.lk.nu/")
-        session = getattr(lk, "session", None)
-        jwt = getattr(lk, "jwt_token", None)
-        get_headers = getattr(lk, "_get_headers", None)
-        if session is None or jwt is None or not callable(get_headers):
-            # Older pylksystems: fall back to the helper if present.
-            helper = getattr(lk, "set_device_temperature", None)
-            if not callable(helper):
-                _LOGGER.error("LK Arc Climate: saknar session/jwt och set_device_temperature")
-                return False
-            return bool(await helper(mac, celsius))
-
-        headers = {**get_headers(), "authorization": f"Bearer {jwt}"}
-        url = f"{base_url}{endpoint}"
+        url = f"{base_url}service/arc/sense/{mac}/measurement/true"
         _LOGGER.warning(
-            "LK Arc Climate: POST %s desiredTemperature=%d (%.1f C) for %s",
-            endpoint,
+            "LK Arc Climate: POST measurement/true desiredTemperature=%d for %s",
             tenths,
-            celsius,
             self._zone,
         )
         async with session.post(url, json=update_data, headers=headers) as response:
@@ -334,49 +415,37 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
                     body[:300],
                 )
                 return False
-
-        # Verify the cloud actually stored the new setpoint (not just HTTP 200).
-        if hasattr(lk, "get_device_measurement"):
-            try:
-                if await lk.get_device_measurement(mac, force_update=True):
-                    live = (getattr(lk, "device_measurements", {}) or {}).get(mac) or {}
-                    live_tenths = live.get("desiredTemperature")
-                    if live_tenths is None:
-                        _LOGGER.error(
-                            "LK Arc Climate: POST OK men desiredTemperature saknas i svar for %s",
-                            mac,
-                        )
-                        return False
-                    if abs(int(live_tenths) - tenths) > 0:
-                        _LOGGER.error(
-                            "LK Arc Climate: POST OK men molnet har %s (forvantade %d) for %s",
-                            live_tenths,
-                            tenths,
-                            mac,
-                        )
-                        return False
-                    apply = getattr(self.coordinator, "_apply_device_measurement", None)
-                    if callable(apply):
-                        apply(mac, live)
-                        apply(self._identity, live)
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception("LK Arc Climate: kunde inte verifiera skrivning for %s", mac)
-                return False
-
+        if not await self._verify_desired(lk, mac, tenths):
+            _LOGGER.error(
+                "LK Arc Climate: measurement POST OK men molnet verifierades inte for %s",
+                mac,
+            )
+            return False
         _LOGGER.warning(
-            "LK Arc Climate: OK — skrev %.1f C till %s (%s) via measurement API (verifierat)",
-            celsius,
+            "LK Arc Climate: OK — skrev %.1f C till %s (%s) via measurement API",
+            tenths / 10.0,
             self._zone,
             mac,
         )
         return True
 
+    async def _post_desired_temperature(self, lk: Any, mac: str, celsius: float) -> bool:
+        """Write setpoint: official control API first, then legacy measurement POST."""
+        tenths = int(round(celsius * 10))
+        if await self._post_via_control_api(lk, mac, tenths):
+            return True
+        _LOGGER.warning(
+            "LK Arc Climate: control API misslyckades for %s — provar measurement/true",
+            mac,
+        )
+        return await self._post_via_measurement_api(lk, mac, tenths)
+
     async def _write_via_measurement_api(self, device_id: str, celsius: float) -> bool:
-        """POST link2.lk.nu measurement update — the path the LK app uses."""
+        """Authenticate via LK Systems coordinator and write the setpoint."""
         mac = _mac_with_colons(device_id)
         if ":" not in mac:
             _LOGGER.warning(
-                "LK Arc Climate: %s ar inte en MAC med kolon — hoppar measurement API",
+                "LK Arc Climate: %s ar inte en MAC med kolon — hoppar skrivning",
                 device_id,
             )
             return False

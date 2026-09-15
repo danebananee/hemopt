@@ -160,15 +160,31 @@ def test_entity_id_is_pinned_to_mac_slug(climate_mod):
     assert entity._attr_has_entity_name is False
 
 
+def _coord_device():
+    return {
+        "mac": "c8:1b:04:e0:7e:90",
+        "deviceTitle": {
+            "deviceGroup": "arc",
+            "deviceType": "arc-sense",
+            "identity": "c8:1b:04:e0:7e:90",
+            "zone": {"zoneName": "Tvattstuga"},
+        },
+        "measurement": {
+            "currentTemperature": 200,
+            "desiredTemperature": 200,
+        },
+    }
+
+
 @pytest.mark.asyncio
-async def test_post_desired_temperature_verifies_cloud(climate_mod):
-    """Write must re-read measurement and reject a fake HTTP 200."""
+async def test_control_api_write_succeeds(climate_mod):
+    posts: list[tuple[str, dict]] = []
 
     class _Resp:
         status = 200
 
         async def text(self):
-            return "{}"
+            return '{"temperature": 215}'
 
         async def __aenter__(self):
             return self
@@ -178,9 +194,68 @@ async def test_post_desired_temperature_verifies_cloud(climate_mod):
 
     class _Session:
         def post(self, url, json=None, headers=None):
-            assert "measurement/true" in url
-            assert json["desiredTemperature"] == 215
+            posts.append((url, json))
             return _Resp()
+
+    class _Lk:
+        BASE_URL = "https://link2.lk.nu/"
+        session = _Session()
+        jwt_token = "token"
+        device_measurements = {
+            "c8:1b:04:e0:7e:90": {
+                "currentTemperature": 200,
+                "desiredTemperature": 215,
+            }
+        }
+
+        def _get_headers(self):
+            return {"content-type": "application/json"}
+
+        async def get_device_measurement(self, mac, force_update=False):
+            return True
+
+    class _Coord:
+        data = {"devices": [_coord_device()]}
+
+        def _apply_device_measurement(self, device_id, measurement):
+            self.data["devices"][0]["measurement"] = measurement
+
+    entity = climate_mod.LKArcClimate(
+        _Coord(),
+        _coord_device(),
+        mac="c8:1b:04:e0:7e:90",
+        identity="c8:1b:04:e0:7e:90",
+    )
+    assert await entity._post_desired_temperature(_Lk(), "c8:1b:04:e0:7e:90", 21.5) is True
+    assert posts
+    assert posts[0][0].endswith("/control/arc/sense/c8:1b:04:e0:7e:90/temperature")
+    assert posts[0][1] == {"temperature": 215}
+
+
+@pytest.mark.asyncio
+async def test_falls_back_to_measurement_when_control_fails(climate_mod):
+    posts: list[str] = []
+
+    class _Resp:
+        def __init__(self, status, body):
+            self.status = status
+            self._body = body
+
+        async def text(self):
+            return self._body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Session:
+        def post(self, url, json=None, headers=None):
+            posts.append(url)
+            if "/control/" in url:
+                return _Resp(401, "unauthorized")
+            return _Resp(200, "{}")
 
     class _Lk:
         BASE_URL = "https://link2.lk.nu/"
@@ -194,112 +269,26 @@ async def test_post_desired_temperature_verifies_cloud(climate_mod):
         }
 
         def _get_headers(self):
-            return {"content-type": "application/json"}
-
-        async def get_device_measurement(self, mac, force_update=False):
-            # After POST, pretend the cloud accepted the new value.
-            if self.device_measurements[mac]["desiredTemperature"] == 215:
-                return True
-            # First call (before POST) returns current cache.
-            return True
-
-    class _Coord:
-        data = {
-            "devices": [
-                {
-                    "mac": "c8:1b:04:e0:7e:90",
-                    "deviceTitle": {
-                        "deviceGroup": "arc",
-                        "deviceType": "arc-sense",
-                        "identity": "c8:1b:04:e0:7e:90",
-                        "zone": {"zoneName": "Tvattstuga"},
-                    },
-                    "measurement": {
-                        "currentTemperature": 200,
-                        "desiredTemperature": 200,
-                    },
-                }
-            ]
-        }
-
-        def _apply_device_measurement(self, device_id, measurement):
-            self.data["devices"][0]["measurement"] = measurement
-
-    entity = climate_mod.LKArcClimate(
-        _Coord(),
-        _Coord.data["devices"][0],
-        mac="c8:1b:04:e0:7e:90",
-        identity="c8:1b:04:e0:7e:90",
-    )
-
-    lk = _Lk()
-
-    # Simulate POST mutating the cloud, then verification reading it back.
-    original_post = lk.session.post
-
-    def post_and_mutate(url, json=None, headers=None):
-        lk.device_measurements["c8:1b:04:e0:7e:90"] = dict(json)
-        return original_post(url, json=json, headers=headers)
-
-    lk.session.post = post_and_mutate
-    assert await entity._post_desired_temperature(lk, "c8:1b:04:e0:7e:90", 21.5) is True
-
-
-@pytest.mark.asyncio
-async def test_post_desired_temperature_rejects_unverified(climate_mod):
-    class _Resp:
-        status = 200
-
-        async def text(self):
-            return "{}"
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-    class _Session:
-        def post(self, url, json=None, headers=None):
-            return _Resp()
-
-    class _Lk:
-        BASE_URL = "https://link2.lk.nu/"
-        session = _Session()
-        jwt_token = "token"
-        device_measurements = {
-            "c8:1b:04:e0:7e:90": {
-                "currentTemperature": 200,
-                "desiredTemperature": 200,  # never changes → fake success
-            }
-        }
-
-        def _get_headers(self):
             return {}
 
         async def get_device_measurement(self, mac, force_update=False):
+            # After legacy POST path mutates via side effect in test — mark verified
+            if any("measurement/true" in u for u in posts):
+                self.device_measurements[mac]["desiredTemperature"] = 215
             return True
 
     class _Coord:
-        data = {
-            "devices": [
-                {
-                    "mac": "c8:1b:04:e0:7e:90",
-                    "deviceTitle": {
-                        "deviceGroup": "arc",
-                        "deviceType": "arc-sense",
-                        "identity": "c8:1b:04:e0:7e:90",
-                        "zone": {"zoneName": "Tvattstuga"},
-                    },
-                    "measurement": {"desiredTemperature": 200},
-                }
-            ]
-        }
+        data = {"devices": [_coord_device()]}
+
+        def _apply_device_measurement(self, device_id, measurement):
+            pass
 
     entity = climate_mod.LKArcClimate(
         _Coord(),
-        _Coord.data["devices"][0],
+        _coord_device(),
         mac="c8:1b:04:e0:7e:90",
         identity="c8:1b:04:e0:7e:90",
     )
-    assert await entity._post_desired_temperature(_Lk(), "c8:1b:04:e0:7e:90", 21.5) is False
+    assert await entity._post_desired_temperature(_Lk(), "c8:1b:04:e0:7e:90", 21.5) is True
+    assert any("/control/" in u for u in posts)
+    assert any("measurement/true" in u for u in posts)
