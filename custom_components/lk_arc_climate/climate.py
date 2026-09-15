@@ -39,9 +39,7 @@ def _iter_arc_sense(coordinator) -> list[dict]:
             return
         # Prefer the copy that already has measurement data.
         previous = found.get(mac)
-        if previous is None or (
-            "measurement" in device and "measurement" not in previous
-        ):
+        if previous is None or ("measurement" in device and "measurement" not in previous):
             found[mac] = device
 
     for device in data.get("devices") or []:
@@ -77,6 +75,17 @@ def _tenths_to_c(value: Any) -> float | None:
         return float(value) / 10.0
     except (TypeError, ValueError):
         return None
+
+
+def _mac_with_colons(value: str) -> str:
+    """LK measurement API requires a colon-separated MAC (aa:bb:…)."""
+    raw = (value or "").strip().replace("-", ":").replace("_", "").lower()
+    if ":" in (value or ""):
+        return value.replace("-", ":").lower()
+    hex_only = "".join(ch for ch in raw if ch.isalnum())
+    if len(hex_only) == 12:
+        return ":".join(hex_only[i : i + 2] for i in range(0, 12, 2))
+    return value
 
 
 async def async_setup_entry(
@@ -137,6 +146,7 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(LK_DOMAIN, identity)},
         )
+        self._optimistic_target: float | None = None
 
     def _live_device(self) -> dict:
         """Fresh device dict from the coordinator, falling back to setup copy."""
@@ -166,6 +176,8 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
 
     @property
     def target_temperature(self) -> float | None:
+        if self._optimistic_target is not None:
+            return self._optimistic_target
         measurement = self._live_device().get("measurement") or {}
         return _tenths_to_c(measurement.get("desiredTemperature"))
 
@@ -177,24 +189,121 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
             return None
         return HVACAction.HEATING if current < target - 0.1 else HVACAction.IDLE
 
+    async def _write_setpoint(self, device_id: str, celsius: float) -> bool:
+        """Write desired temperature the same way the LK app does.
+
+        Prefer ``set_device_temperature`` (POST link2.lk.nu
+        ``service/arc/sense/<mac>/measurement/true``). The Azure helper that
+        ``coordinator.set_thermostat_temperature`` uses can return OK without
+        the mobile app ever seeing the change.
+        """
+        mac = _mac_with_colons(device_id)
+        client_cm = getattr(self.coordinator, "_authenticated_client", None)
+        if client_cm is not None:
+            try:
+                async with client_cm() as lk:
+                    if hasattr(lk, "set_device_temperature") and ":" in mac:
+                        if await lk.set_device_temperature(mac, celsius):
+                            _LOGGER.info(
+                                "LK Arc Climate: skrev %.1f C till %s via measurement API",
+                                celsius,
+                                mac,
+                            )
+                            return True
+                        _LOGGER.warning(
+                            "LK Arc Climate: measurement API nekade %.1f C for %s",
+                            celsius,
+                            mac,
+                        )
+                    # Fall back to Azure helper on the same authenticated client.
+                    if hasattr(lk, "set_thermostat_temperature"):
+                        result = await lk.set_thermostat_temperature(mac, int(round(celsius * 10)))
+                        ok = (
+                            bool(result.get("success"))
+                            if isinstance(result, dict)
+                            else bool(result)
+                        )
+                        if ok:
+                            _LOGGER.info(
+                                "LK Arc Climate: skrev %.1f C till %s via Azure API",
+                                celsius,
+                                mac,
+                            )
+                            return True
+            except Exception:  # noqa: BLE001 - surface in log, try next path
+                _LOGGER.exception(
+                    "LK Arc Climate: fel vid skrivning till %s (%.1f C)", mac, celsius
+                )
+
+        # Last resort: public coordinator wrapper (Azure, tenths).
+        try:
+            return bool(
+                await self.coordinator.set_thermostat_temperature(mac, int(round(celsius * 10)))
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("LK Arc Climate: coordinator-skrivning misslyckades for %s", mac)
+            return False
+
+    def _apply_local_desired(self, celsius: float) -> None:
+        """Patch coordinator cache so the UI shows the new setpoint immediately."""
+        tenths = int(round(celsius * 10))
+        apply = getattr(self.coordinator, "_apply_device_measurement", None)
+        measurement = dict((self._live_device().get("measurement") or {}))
+        measurement["desiredTemperature"] = tenths
+        if callable(apply):
+            try:
+                apply(self._identity, measurement)
+                apply(self._mac, measurement)
+                return
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Kunde inte patcha coordinator-cache", exc_info=True)
+        device = self._live_device()
+        device.setdefault("measurement", {})["desiredTemperature"] = tenths
+
     async def async_set_temperature(self, **kwargs: Any) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
-        api_temp = int(round(float(temperature) * 10))
-        # Azure endpoint expects the MAC; identity is accepted by some paths.
-        ok = await self.coordinator.set_thermostat_temperature(self._mac, api_temp)
-        if not ok and self._identity != self._mac:
-            ok = await self.coordinator.set_thermostat_temperature(
-                self._identity, api_temp
-            )
+        celsius = float(temperature)
+
+        candidates = []
+        for value in (
+            _mac_with_colons(self._mac),
+            _mac_with_colons(self._identity),
+            self._mac,
+            self._identity,
+        ):
+            if value and value not in candidates:
+                candidates.append(value)
+
+        ok = False
+        for device_id in candidates:
+            if await self._write_setpoint(device_id, celsius):
+                ok = True
+                break
+
         if not ok:
             _LOGGER.error(
-                "Kunde inte satta %s till %.1f C via LK Systems", self._mac, temperature
+                "LK Arc Climate: kunde INTE satta %s (%s) till %.1f C — "
+                "kolla Settings → System → Logs for lk_arc_climate / lksystems",
+                self._zone,
+                self._mac,
+                celsius,
             )
+            self._optimistic_target = None
             return
+
+        self._optimistic_target = celsius
+        self._apply_local_desired(celsius)
+        self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
 
     @callback
     def _handle_coordinator_update(self) -> None:
+        # Drop optimistic value once the cloud measurement catches up.
+        if self._optimistic_target is not None:
+            measurement = self._live_device().get("measurement") or {}
+            live = _tenths_to_c(measurement.get("desiredTemperature"))
+            if live is not None and abs(live - self._optimistic_target) < 0.05:
+                self._optimistic_target = None
         self.async_write_ha_state()

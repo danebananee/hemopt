@@ -126,3 +126,9 @@ def test_tenths_to_c(climate_mod):
     assert climate_mod._tenths_to_c(200) == 20.0
     assert climate_mod._tenths_to_c(225) == 22.5
     assert climate_mod._tenths_to_c(None) is None
+
+
+def test_mac_with_colons(climate_mod):
+    assert climate_mod._mac_with_colons("c8:1b:04:e0:7e:90") == "c8:1b:04:e0:7e:90"
+    assert climate_mod._mac_with_colons("c8_1b_04_e0_7e_90") == "c8:1b:04:e0:7e:90"
+    assert climate_mod._mac_with_colons("C81B04E07E90") == "c8:1b:04:e0:7e:90"

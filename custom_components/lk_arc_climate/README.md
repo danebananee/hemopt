@@ -37,6 +37,15 @@ Exempel:
 climate.c8_1b_04_e0_7e_90_thermostat
 ```
 
+### Om HA ändras men LK-appen inte gör det
+
+Äldre byggen skrev till en Azure-endpoint som kunde se ut att lyckas utan att
+appen uppdaterades. Från **0.1.21** används samma `link2.lk.nu`-anrop som appen
+(`service/arc/sense/<mac>/measurement/true`).
+
+Uppdatera hemopt → Restart tillägg → **Restart Home Assistant** → testa igen.
+Kolla **Settings → System → Logs** efter `LK Arc Climate: skrev`.
+
 ### Snabbtest
 
 Ändra börvärdet i HA → öppna LK-appen → samma rum ska uppdateras inom några sekunder.
