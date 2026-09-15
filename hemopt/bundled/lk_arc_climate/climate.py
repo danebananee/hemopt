@@ -248,7 +248,7 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         """Patch coordinator cache so the UI shows the new setpoint immediately."""
         tenths = int(round(celsius * 10))
         apply = getattr(self.coordinator, "_apply_device_measurement", None)
-        measurement = dict((self._live_device().get("measurement") or {}))
+        measurement = dict(self._live_device().get("measurement") or {})
         measurement["desiredTemperature"] = tenths
         if callable(apply):
             try:
