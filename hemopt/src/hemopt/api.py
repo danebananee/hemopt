@@ -187,6 +187,14 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
             "hot_water_kwh_per_day": round(engine.hot_water_profile.daily_total_kwh(), 2),
         }
 
+    @app.get("/api/advice")
+    async def advice() -> dict[str, Any]:
+        return engine.advice.as_dict()
+
+    @app.post("/api/advice")
+    async def recompute_advice() -> dict[str, Any]:
+        return (await engine.refresh_advice()).as_dict()
+
     return app
 
 

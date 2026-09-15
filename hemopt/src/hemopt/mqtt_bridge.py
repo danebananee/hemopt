@@ -173,6 +173,16 @@ class MqttBridge:
             ),
             ("plan_status", "Planstatus", {"icon": "mdi:calendar-check"}),
             ("guard_reason", "Effektvaktens skal", {"icon": "mdi:shield-search"}),
+            (
+                "advice_saving",
+                "Mojlig besparing avtal",
+                {
+                    "unit_of_measurement": "SEK",
+                    "device_class": "monetary",
+                    "icon": "mdi:file-document-edit",
+                },
+            ),
+            ("advice_top", "Basta avtalsradet", {"icon": "mdi:lightbulb-on"}),
         ]
 
         for object_id, name, extra in sensors:

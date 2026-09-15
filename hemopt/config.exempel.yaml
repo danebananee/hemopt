@@ -11,7 +11,8 @@
 site:
   price_area: SE3
   timezone: Europe/Stockholm
-  main_fuse_amps: 20
+  # Fran fakturan: Enkeltariff E4, 25 A, elomrade 3, omrades-ID DRV.
+  main_fuse_amps: 25
   # KONTROLLERA. Utan vaderprognos antar planeraren att det ar lika varmt om
   # 36 timmar som just nu, vilket felbedomer all forvarmning.
   weather_entity: weather.forecast_home
@@ -32,12 +33,53 @@ mqtt:
 # Pris. Siffrorna nedan ar rimliga for SE3 men ar inte dina. Ta dem fran
 # elnatsfakturan respektive elhandelsavtalet.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Pris. Siffrorna nedan ar hamtade ur fakturan for augusti 2026 och ar
+# exklusive moms, precis som fakturan redovisar dem.
+# ---------------------------------------------------------------------------
 energy_price:
+  # "Rorligt Elpris" hos Vattenfall ar manadsmedelspot: varje kWh debiteras
+  # till manadens medelpris. Da ger lastflytt ingenting pa energidelen.
+  # Radgivningen papekar detta; byt till hourly nar avtalet ar bytt.
+  contract: monthly
   vat_rate: 0.25
-  supplier_markup_ore: 8.0
-  energy_tax_ore: 43.9
-  transfer_fee_high_ore: 31.12
-  transfer_fee_normal_ore: 12.4
+  supplier_markup_ore: 7.00      # Fast paslag spot
+  certificate_ore: 1.40          # Fast paslag elcertifikat
+  balancing_ore: 5.76            # Rorliga kostnader, varierar per manad
+  energy_tax_ore: 36.00          # Energiskatt 2026
+  # Enkeltariff: samma overforingsavgift dygnet runt, sa det finns inget att
+  # tjana pa natsidan genom att flytta last. Bada varden ar darfor lika.
+  transfer_fee_high_ore: 35.60
+  transfer_fee_normal_ore: 35.60
+  grid_subscription_sek_per_year: 8100.0   # Abonnemang, Enkeltariff E4 25 A
+  supplier_fee_sek_per_year: 432.0         # Arsavgift elhandel
+
+# ---------------------------------------------------------------------------
+# Radgivning om sjalva avtalen.
+#
+# Kontrollera abonnemangspriserna nedan mot natbolagets aktuella prislista
+# innan du agerar pa ett sakringsrad; bara 25 A-raden ar hamtad ur fakturan.
+# ---------------------------------------------------------------------------
+advice:
+  enabled: true
+  min_annual_saving_sek: 200
+  fuse_margin_kw: 2.0
+  min_history_days: 30
+  flexible_share: 0.5
+  grid_tariffs:
+    - name: Enkeltariff E4 (25 A)
+      fuse_amps: 25
+      subscription_sek_per_year: 8100.0
+      transfer_ore: 35.60
+    - name: Enkeltariff E3 (20 A)
+      fuse_amps: 20
+      subscription_sek_per_year: 5900.0   # KONTROLLERA mot prislistan
+      transfer_ore: 35.60
+    - name: Enkeltariff E2 (16 A)
+      fuse_amps: 16
+      subscription_sek_per_year: 4200.0   # KONTROLLERA mot prislistan
+      transfer_ore: 35.60
+  supplier_offers: []
 
 # ---------------------------------------------------------------------------
 # Effektavgift.

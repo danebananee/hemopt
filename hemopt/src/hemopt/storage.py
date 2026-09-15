@@ -149,6 +149,26 @@ class Store:
                 (hour_start.isoformat(), float(mean_kw), hour_start.strftime("%Y-%m")),
             )
 
+    def all_hourly_power(self, since: datetime | None = None) -> dict[datetime, float]:
+        """Every recorded hourly mean, across months.
+
+        The advice engine wants as long a span as exists rather than the
+        current month, because a fuse or contract decision made on three weeks
+        of autumn data is a decision made on the wrong season.
+        """
+        query = "SELECT hour_start, mean_kw FROM hourly_power"
+        params: tuple = ()
+        if since is not None:
+            query += " WHERE hour_start >= ?"
+            params = (since.isoformat(),)
+
+        with self._cursor() as cursor:
+            cursor.execute(query + " ORDER BY hour_start", params)
+            return {
+                datetime.fromisoformat(row["hour_start"]): row["mean_kw"]
+                for row in cursor.fetchall()
+            }
+
     def hourly_power(self, month: str) -> dict[datetime, float]:
         with self._cursor() as cursor:
             cursor.execute("SELECT hour_start, mean_kw FROM hourly_power WHERE month = ?", (month,))

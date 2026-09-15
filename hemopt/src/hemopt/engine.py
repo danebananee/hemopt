@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import baseload
+from .advice import AdviceReport, build_advice, samples_from_hourly
 from .config import Config
 from .guard import GuardDecision, PeakGuard
 from .ha import HomeAssistantClient, parse_numeric, resample_forecast
@@ -48,6 +49,7 @@ class EngineStatus:
     last_sample: datetime | None = None
     last_plan: datetime | None = None
     last_training: datetime | None = None
+    last_advice: datetime | None = None
     home_assistant_online: bool = False
     mqtt_online: bool = False
     prices_available: bool = False
@@ -75,6 +77,7 @@ class Engine:
         )
         self.guard = PeakGuard(config.ext_control)
         self.guard_decision = GuardDecision(False, "not evaluated")
+        self.advice = AdviceReport()
         self._ext_state: dict[str, bool] = {}
 
         self._mqtt: MqttBridge | None = None
@@ -430,6 +433,63 @@ class Engine:
         pump = self.config.heat_pump.max_electrical_kw
         return round(pump + self.config.base_load.default_kw * 2.0, 2)
 
+    async def refresh_advice(self) -> AdviceReport:
+        """Re-examine the contracts against everything measured so far.
+
+        Kept separate from planning and run rarely: the answer changes on the
+        timescale of seasons, and it needs historical spot prices, which means
+        a burst of requests to the price feed.
+        """
+        history = self.store.all_hourly_power()
+        if len(history) < 48:
+            self.advice = AdviceReport(
+                notes=["For lite matdata an; radgivningen behover minst tva dygn."]
+            )
+            return self.advice
+
+        load = samples_from_hourly(history)
+        spot = await self._historical_spot([sample.start for sample in load])
+        if spot is None:
+            self.advice = AdviceReport(notes=["Historiska spotpriser kunde inte hamtas."])
+            return self.advice
+
+        self.advice = build_advice(
+            self.config,
+            load,
+            spot,
+            peak_kw=max(history.values()) if history else None,
+        )
+        self.status.last_advice = self._now()
+        return self.advice
+
+    async def _historical_spot(self, times: list[datetime]) -> list[float] | None:
+        """Published spot price for each measured hour."""
+        async with PriceClient(
+            self.config.site.price_area,
+            self.config.energy_price,
+            self.config.peak_tariff.window,
+            self._http,
+        ) as client:
+            by_start: dict[datetime, float] = {}
+            for day in sorted({moment.date() for moment in times}):
+                points = await client.fetch_day(day)
+                if not points:
+                    continue
+                for point in points:
+                    by_start[point.start] = point.spot_sek_per_kwh
+
+        if not by_start:
+            return None
+
+        # An hour with no published price keeps the previous one rather than
+        # dropping the sample, so the load and price series stay aligned.
+        spot, last = [], 0.0
+        for moment in times:
+            hour = moment.replace(minute=0, second=0, microsecond=0)
+            last = by_start.get(hour, last)
+            spot.append(last)
+        return spot
+
     async def replan(self) -> Plan | None:
         async with self._lock:
             return await self._replan_locked()
@@ -649,6 +709,12 @@ class Engine:
             ),
             "peak_guard": _json_bool(self.guard_decision.block),
             "guard_reason": self.guard_decision.reason,
+            "advice_saving": round(self.advice.total_annual_saving_sek, 0),
+            "advice_top": (
+                self.advice.recommendations[0].title
+                if self.advice.recommendations
+                else "Inga forslag"
+            ),
             "in_peak_window": _json_bool(in_window),
             "control_enabled": _json_bool(self.status.control_enabled),
         }

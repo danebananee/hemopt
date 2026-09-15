@@ -38,10 +38,13 @@ def make_client(responses: dict[str, object], **overrides) -> PriceClient:
         return httpx.Response(200, json=payload)
 
     transport = httpx.MockTransport(handler)
+    # Every adder is zeroed so these tests measure the price plumbing rather
+    # than whatever the current tax and tariff defaults happen to be.
     defaults = {
         "vat_rate": 0.25,
         "supplier_markup_ore": 0.0,
         "certificate_ore": 0.0,
+        "balancing_ore": 0.0,
         "energy_tax_ore": 0.0,
         "transfer_fee_high_ore": 0.0,
         "transfer_fee_normal_ore": 0.0,

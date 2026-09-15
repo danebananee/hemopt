@@ -19,8 +19,21 @@ PriceArea = Literal["SE1", "SE2", "SE3", "SE4"]
 
 # How the spot price is settled. The grid fee and the tax are the same either
 # way; what differs is how finely the energy part is resolved, and therefore
-# how much there is to gain from shifting load within a day.
-Contract = Literal["fixed", "daily", "hourly", "quarterly"]
+# how much there is to gain from shifting load at all.
+#
+# "monthly" is what Vattenfall sells as "Rorligt Elpris": every kWh in the
+# month is billed at that month's mean spot. Under it, moving load from an
+# expensive hour to a cheap one saves exactly nothing, which is the first
+# thing the advice engine looks for.
+Contract = Literal["fixed", "monthly", "daily", "hourly", "quarterly"]
+
+CONTRACT_NAMES: dict[str, str] = {
+    "fixed": "Fastpris",
+    "monthly": "Rorligt, manadsmedel",
+    "daily": "Rorligt, dygnsmedel",
+    "hourly": "Rorligt, timpris",
+    "quarterly": "Rorligt, kvartspris",
+}
 
 
 def data_dir() -> Path:
@@ -61,21 +74,100 @@ class EnergyPriceConfig(BaseModel):
 
     contract: Contract = "hourly"
     vat_rate: float = 0.25
-    supplier_markup_ore: float = 8.0
-    certificate_ore: float = 0.0
-    energy_tax_ore: float = 43.9
-    transfer_fee_high_ore: float = 31.12
-    transfer_fee_normal_ore: float = 12.4
+    supplier_markup_ore: float = 7.0
+    certificate_ore: float = 1.4
+    # Pass-through balancing and profile costs. Billed per kWh but restated
+    # every month, so it is kept apart from the fixed markup you agreed to.
+    balancing_ore: float = 5.76
+    energy_tax_ore: float = 36.0
+    # Equal values mean a single-rate grid tariff (enkeltariff), where nothing
+    # is gained on the grid side by moving load off peak hours.
+    transfer_fee_high_ore: float = 35.6
+    transfer_fee_normal_ore: float = 35.6
     prices_include_vat: bool = False
     # What a fixed-price contract costs, used as the comparison baseline when
     # simulating what the other contract types would have cost.
     fixed_price_ore: float = 85.0
+    # Standing charges. They do not change with consumption, but they do change
+    # when you switch fuse size or supplier, which is what the advice engine
+    # exists to spot.
+    grid_subscription_sek_per_year: float = 0.0
+    supplier_fee_sek_per_year: float = 0.0
+
+    @property
+    def variable_adder_ore(self) -> float:
+        """Everything charged per kWh on top of spot, excluding VAT."""
+        return (
+            self.supplier_markup_ore
+            + self.certificate_ore
+            + self.balancing_ore
+            + self.energy_tax_ore
+        )
+
+    @property
+    def is_single_rate_grid(self) -> bool:
+        return self.transfer_fee_high_ore == self.transfer_fee_normal_ore
 
     def adder_sek_per_kwh(self, high_load: bool) -> float:
         transfer = self.transfer_fee_high_ore if high_load else self.transfer_fee_normal_ore
-        ore = self.supplier_markup_ore + self.certificate_ore + self.energy_tax_ore + transfer
-        sek = ore / 100.0
+        sek = (self.variable_adder_ore + transfer) / 100.0
         return sek if self.prices_include_vat else sek * (1.0 + self.vat_rate)
+
+    def fixed_sek_per_year(self) -> float:
+        total = self.grid_subscription_sek_per_year + self.supplier_fee_sek_per_year
+        return total if self.prices_include_vat else total * (1.0 + self.vat_rate)
+
+
+class GridTariffOption(BaseModel):
+    """One grid tariff you could be on, including the one you already have.
+
+    Grid tariffs are chosen, not negotiated: the operator publishes a table and
+    you pick a fuse size and a rate type. That makes them worth comparing
+    against measured load, because the only thing standing between you and a
+    cheaper row is whether your peaks actually fit under it.
+    """
+
+    name: str
+    fuse_amps: int
+    subscription_sek_per_year: float
+    transfer_ore: float
+    # Set both for a time-of-use tariff; leave them out for a single-rate one.
+    transfer_high_ore: float | None = None
+    transfer_normal_ore: float | None = None
+    peak_price_per_kw_sek: float = 0.0
+
+    def capacity_kw(self, voltage: float, phases: int) -> float:
+        return self.fuse_amps * voltage * phases / 1000.0
+
+
+class SupplierOffer(BaseModel):
+    """A retail offer to compare your current one against."""
+
+    name: str
+    contract: Contract = "hourly"
+    markup_ore: float = 0.0
+    certificate_ore: float = 0.0
+    yearly_fee_sek: float = 0.0
+
+
+class AdviceConfig(BaseModel):
+    """What the advice engine is allowed to suggest, and how boldly."""
+
+    enabled: bool = True
+    # Below this, a recommendation is noise rather than advice.
+    min_annual_saving_sek: float = 200.0
+    # How much headroom a smaller fuse must keep over the largest peak seen.
+    # A blown main fuse in January is worth more than the subscription saved.
+    fuse_margin_kw: float = 2.0
+    # Peaks are only trustworthy once there is enough measured history.
+    min_history_days: int = 30
+    # Roughly how much of a year's consumption the optimiser can move in time.
+    # In a heat-pumped house the pump and the hot water tank are most of it;
+    # cooking, lighting and laundry are not. Used only when estimating what a
+    # finer-grained contract would be worth.
+    flexible_share: float = 0.5
+    grid_tariffs: list[GridTariffOption] = Field(default_factory=list)
+    supplier_offers: list[SupplierOffer] = Field(default_factory=list)
 
 
 class PeakWindow(BaseModel):
@@ -291,6 +383,7 @@ class Config(BaseModel):
     hot_water: HotWaterConfig = Field(default_factory=HotWaterConfig)
     base_load: BaseLoadConfig = Field(default_factory=BaseLoadConfig)
     ext_control: ExtControlConfig = Field(default_factory=ExtControlConfig)
+    advice: AdviceConfig = Field(default_factory=AdviceConfig)
     rooms: list[RoomConfig] = Field(default_factory=list)
     home_assistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)
     mqtt: MqttConfig = Field(default_factory=MqttConfig)
