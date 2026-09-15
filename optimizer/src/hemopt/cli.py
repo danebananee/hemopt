@@ -61,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("train", help="refit the models from recorder history")
     subparsers.add_parser("peaks", help="show this month's peak status")
     subparsers.add_parser("example-config", help="print a starter config.yaml")
+    subparsers.add_parser("doctor", help="check every configured entity against Home Assistant")
 
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
@@ -68,6 +69,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "example-config":
         print(_EXAMPLE_CONFIG)
         return 0
+
+    if args.command == "doctor":
+        return _run_doctor(args)
 
     command = args.command or "serve"
     engine = _build_engine(args)
@@ -84,6 +88,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return asyncio.run(_run_once(engine, command))
+
+
+def _run_doctor(args: argparse.Namespace) -> int:
+    from .doctor import format_report, run_doctor
+
+    if not args.config:
+        print("doctor needs a config: hemopt -c config.yaml doctor", file=sys.stderr)
+        return 2
+
+    report = asyncio.run(run_doctor(Config.load(args.config)))
+    print(format_report(report))
+    return 1 if report.failures else 0
 
 
 async def _run_once(engine: Engine, command: str) -> int:
