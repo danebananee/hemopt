@@ -27,6 +27,8 @@ for file in "${files[@]}"; do
 done
 
 echo "Adressen ar nu ${url}"
-grep -rn "DITT-GITHUB-NAMN" "$root" --exclude-dir=.git >/dev/null 2>&1 &&
-  echo "Obs: platshallaren finns kvar pa fler stallen, sok efter DITT-GITHUB-NAMN." ||
-  true
+# Skriptet innehaller sjalvt sokmonstret, sa det raknas inte som en traff.
+if grep -rln "DITT-GITHUB-NAMN" "$root" --exclude-dir=.git |
+  grep -qv "^$root/scripts/set-repo-url.sh$"; then
+  echo "Obs: platshallaren finns kvar pa fler stallen, sok efter DITT-GITHUB-NAMN."
+fi

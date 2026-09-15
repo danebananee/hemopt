@@ -21,7 +21,7 @@ gengäld dyker nya versioner upp som en **Update**-knapp på tilläggets sida.
 
 1. **Settings → Add-ons → Add-on Store**
 2. Trepunktsmenyn uppe till höger → **Repositories**
-3. Klistra in `https://github.com/DITT-GITHUB-NAMN/hemopt`, **Add**, **Close**
+3. Klistra in `https://github.com/danebananee/hemopt`, **Add**, **Close**
 4. Ladda om sidan. Under rubriken med repots namn finns
    **Kostnadsoptimering (hemopt)**
 

@@ -54,7 +54,7 @@ Det här repot är samtidigt en add-on-databas. Gå till **Settings → Add-ons 
 Add-on Store**, trepunktsmenyn → **Repositories**, och lägg till
 
 ```
-https://github.com/DITT-GITHUB-NAMN/hemopt
+https://github.com/danebananee/hemopt
 ```
 
 Då dyker **Kostnadsoptimering (hemopt)** upp i butiken, och nya versioner
@@ -94,22 +94,27 @@ entitets-ID:n som genereras ur enhetsnamn.
 Se [`hemopt/README.md`](hemopt/README.md) för effektavgiftsmodellen,
 effektvakten som styr via EXT-kabeln, och hur tjänsten körs på en Raspberry Pi.
 
-### Publicera repot på GitHub
+### Spegling till GitHub
 
-Skapa ett tomt **publikt** repo som heter `hemopt` på GitHub, utan README eller
-licens, och kör sedan i den här mappen:
+Utvecklingen sker i Cursors Origin-repo, men Home Assistant klonar
+add-on-databaser anonymt och når varken Origin eller privata repon. Därför
+speglas `main` till det publika [`danebananee/hemopt`](https://github.com/danebananee/hemopt),
+som är adressen du lägger till i Add-on Store.
 
 ```bash
-./scripts/set-repo-url.sh <ditt-github-namn>
-git add -A && git commit -m "Peka manifesten mot GitHub-repot"
-git remote add github https://github.com/<ditt-github-namn>/hemopt.git
-git push -u github main
+git remote add github https://github.com/danebananee/hemopt.git   # en gang
+git push github main
 ```
 
-`set-repo-url.sh` skriver in adressen i `repository.json`, `hemopt/config.yaml`
-och dokumentationen. Home Assistant vägrar lägga till en databas vars
-`repository.json` pekar på något som inte går att nå, så steget måste göras
-innan repot läggs till i Add-on Store.
+Höj `version` i [`hemopt/config.yaml`](hemopt/config.yaml) innan du speglar, så
+ser Home Assistant att det finns en ny version och visar en **Update**-knapp.
+Utan versionshöjning märks pushen inte av.
+
+Byter repot namn eller ägare räcker det att köra
+`./scripts/set-repo-url.sh <github-namn> <repo-namn>`, som skriver in den nya
+adressen i `repository.json`, `hemopt/config.yaml` och dokumentationen. Home
+Assistant vägrar lägga till en databas vars `repository.json` pekar på något
+som inte går att nå.
 
 ## Installation
 
