@@ -102,9 +102,11 @@ speglas `main` till det publika [`danebananee/hemopt`](https://github.com/daneba
 som är adressen du lägger till i Add-on Store.
 
 ```bash
-git remote add github https://github.com/danebananee/hemopt.git   # en gang
-git push github main
+./scripts/spegla-till-github.sh
 ```
+
+Skriptet läser adressen ur `repository.json` och token ur `GITHUB_TOKEN`, så
+speglingen går att köra direkt från agenten utan att lägga upp någon remote.
 
 Höj `version` i [`hemopt/config.yaml`](hemopt/config.yaml) innan du speglar, så
 ser Home Assistant att det finns en ny version och visar en **Update**-knapp.
