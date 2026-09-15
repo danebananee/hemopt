@@ -25,6 +25,13 @@ _ADDON_ENV = (
     "HEMOPT_MQTT_PASSWORD",
     "HEMOPT_PRICE_AREA",
     "HEMOPT_CONTRACT",
+    "HEMOPT_PEAK_ENABLED",
+    "HEMOPT_PEAK_N",
+    "HEMOPT_PEAK_PRICE",
+    "HEMOPT_PEAK_HOUR_START",
+    "HEMOPT_PEAK_HOUR_END",
+    "HEMOPT_PEAK_WEEKDAYS",
+    "HEMOPT_TOTAL_POWER_ENTITY",
 )
 
 
@@ -129,3 +136,31 @@ def test_a_saved_profile_reloads_credentials_from_the_environment(monkeypatch):
     monkeypatch.setenv("HEMOPT_HA_TOKEN", "fresh-token")
 
     assert Config.resolve().home_assistant.token == "fresh-token"
+
+
+def test_peak_and_meter_options_come_from_the_environment(monkeypatch):
+    monkeypatch.setenv("HEMOPT_PEAK_ENABLED", "false")
+    monkeypatch.setenv("HEMOPT_PEAK_N", "3")
+    monkeypatch.setenv("HEMOPT_PEAK_PRICE", "80")
+    monkeypatch.setenv("HEMOPT_PEAK_HOUR_START", "6")
+    monkeypatch.setenv("HEMOPT_PEAK_HOUR_END", "22")
+    monkeypatch.setenv("HEMOPT_PEAK_WEEKDAYS", "false")
+    monkeypatch.setenv("HEMOPT_TOTAL_POWER_ENTITY", "sensor.p1_meter_active_power")
+
+    config = Config.resolve()
+
+    assert config.peak_tariff.enabled is False
+    assert config.peak_tariff.n_peaks == 3
+    assert config.peak_tariff.price_per_kw_sek == 80.0
+    assert config.peak_tariff.window.hour_start == 6
+    assert config.peak_tariff.window.hour_end == 22
+    assert config.peak_tariff.window.weekdays_only is False
+    assert config.base_load.total_power_entity == "sensor.p1_meter_active_power"
+
+
+def test_house_yaml_is_preferred_over_the_saved_profile(isolated_data):
+    Config.model_validate({"site": {"price_area": "SE4"}}).save_profile()
+    yaml_path = isolated_data / "hemopt.yaml"
+    yaml_path.write_text("site:\n  price_area: SE1\n", encoding="utf-8")
+
+    assert Config.resolve().site.price_area == "SE1"

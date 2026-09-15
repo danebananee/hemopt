@@ -10,6 +10,7 @@ const state = {
   peakSettings: null,
   history: null,
   advice: null,
+  prices: null,
 };
 
 
@@ -397,9 +398,10 @@ function renderPills() {
   const status = state.status || {};
   host.textContent = "";
 
+  const pricesOk = Boolean(status.prices_available || state.prices?.available);
   const pills = [
     ["Home Assistant", status.home_assistant_online],
-    ["Spotpris", status.prices_available],
+    ["Spotpris", pricesOk],
     ["Väderprognos", status.forecast_available],
     ["MQTT", status.mqtt_online],
   ];
@@ -412,14 +414,22 @@ function renderKpis() {
   const host = document.getElementById("kpis");
   const status = state.status || {};
   const peaks = state.peaks || {};
+  const prices = state.prices || {};
   host.textContent = "";
+
+  const priceNow =
+    prices.current_total_sek ?? status.current_price_sek ?? prices.current_spot_sek ?? null;
+  const spotNote =
+    prices.current_spot_sek != null
+      ? `Spot ${fmt(prices.current_spot_sek, 2)} · planerad effekt ${fmt(status.planned_power_kw, 2)} kW`
+      : `Planerad effekt ${fmt(status.planned_power_kw, 2)} kW`;
 
   const cards = [
     {
       label: "Elpris nu",
-      value: fmt(status.current_price_sek, 2),
+      value: fmt(priceNow, 2),
       unit: "SEK/kWh",
-      note: `Planerad effekt ${fmt(status.planned_power_kw, 2)} kW`,
+      note: spotNote,
       tone: "",
     },
     {
@@ -469,7 +479,7 @@ function renderPeaks() {
   const w = peaks.window || {};
   subtitle.textContent = peaks.enabled
     ? `Snitt av ${peaks.n_peaks} toppar på olika dygn, ${String(w.hour_start).padStart(2, "0")}–${String(w.hour_end).padStart(2, "0")} vardagar`
-    : "Effektavgift är avstängd — slå på den under Regler för effekttoppar";
+    : "Effektavgift är avstängd — aktivera under Configuration";
 
   const summary = html("div", "peak-summary");
   const figures = [
@@ -577,6 +587,118 @@ const MONTH_LABELS = [
   "dec",
 ];
 
+function renderPriceChart() {
+  const host = document.getElementById("price-chart");
+  const subtitle = document.getElementById("price-subtitle");
+  host.textContent = "";
+  const prices = state.prices;
+  if (!prices || !prices.points || !prices.points.length) {
+    subtitle.textContent = "Spotpris igår, idag och imorgon";
+    host.appendChild(
+      html(
+        "p",
+        "empty",
+        prices && prices.available === false
+          ? "Kunde inte hämta spotpris just nu."
+          : "Hämtar elpris…",
+      ),
+    );
+    return;
+  }
+
+  const current =
+    prices.current_total_sek != null
+      ? `${fmt(prices.current_total_sek, 2)} SEK/kWh (spot ${fmt(prices.current_spot_sek, 2)})`
+      : "—";
+  subtitle.textContent = `${prices.area} · nu ${current}`;
+
+  const points = prices.points;
+  const width = host.clientWidth || 900;
+  const height = host.clientHeight || 280;
+  const margin = { top: 14, right: 18, bottom: 28, left: 46 };
+  const innerW = Math.max(width - margin.left - margin.right, 10);
+  const innerH = Math.max(height - margin.top - margin.bottom, 10);
+  const times = points.map((p) => new Date(p.t).getTime());
+  const maxPrice = Math.max(...points.map((p) => Math.max(p.total, p.spot)), 0.05) * 1.12;
+  const x = scaleLinear([times[0], times[times.length - 1]], [0, innerW]);
+  const y = scaleLinear([0, maxPrice], [innerH, 0]);
+  const nowMs = prices.now ? new Date(prices.now).getTime() : Date.now();
+
+  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
+  const root = el("g", { transform: `translate(${margin.left},${margin.top})` });
+  svg.appendChild(root);
+
+  for (let i = 0; i <= 4; i += 1) {
+    const value = (maxPrice / 4) * i;
+    const yy = y(value);
+    root.appendChild(el("line", { class: "gridline", x1: 0, x2: innerW, y1: yy, y2: yy }));
+    root.appendChild(
+      el("text", { x: -8, y: yy + 3.5, "text-anchor": "end", class: "axis" }, [
+        document.createTextNode(fmt(value, 2)),
+      ]),
+    );
+  }
+
+  // Shade tomorrow (upcoming) lightly.
+  const tomorrow = points.find((p) => {
+    const day = p.day || p.t.slice(0, 10);
+    const today = (prices.now || "").slice(0, 10);
+    return day > today;
+  });
+  if (tomorrow) {
+    const x0 = x(new Date(tomorrow.t).getTime());
+    root.appendChild(
+      el("rect", {
+        class: "band-peak",
+        x: x0,
+        y: 0,
+        width: Math.max(innerW - x0, 0),
+        height: innerH,
+        opacity: "0.35",
+      }),
+    );
+  }
+
+  const spotPath = points.map((p, i) => [x(times[i]), y(p.spot)]);
+  const totalPath = points.map((p, i) => [x(times[i]), y(p.total)]);
+  root.appendChild(
+    el("path", {
+      d: `${linePath(totalPath)} L${innerW},${innerH} L0,${innerH} Z`,
+      fill: "#3d5a80",
+      opacity: 0.28,
+    }),
+  );
+  root.appendChild(
+    el("path", { d: linePath(totalPath), fill: "none", stroke: "#5b82b8", "stroke-width": 1.6 }),
+  );
+  root.appendChild(
+    el("path", {
+      d: linePath(spotPath),
+      fill: "none",
+      stroke: "#9ec1ff",
+      "stroke-width": 1.2,
+      "stroke-dasharray": "4 3",
+    }),
+  );
+
+  if (nowMs >= times[0] && nowMs <= times[times.length - 1]) {
+    const xn = x(nowMs);
+    root.appendChild(
+      el("line", {
+        x1: xn,
+        x2: xn,
+        y1: 0,
+        y2: innerH,
+        stroke: "#ff9f43",
+        "stroke-width": 1.2,
+        "stroke-dasharray": "3 3",
+      }),
+    );
+  }
+
+  host.appendChild(svg);
+}
+
 let peakSettingsFingerprint = "";
 
 function renderPeakSettings() {
@@ -593,106 +715,38 @@ function renderPeakSettings() {
   peakSettingsFingerprint = fingerprint;
   form.textContent = "";
 
-  const enabledRow = html("label", "setting-row toggle-row");
-  const enabled = document.createElement("input");
-  enabled.type = "checkbox";
-  enabled.checked = Boolean(settings.enabled);
-  enabled.id = "peak-enabled";
-  enabledRow.appendChild(enabled);
-  enabledRow.appendChild(document.createTextNode(" Minimera effekttoppar"));
-  form.appendChild(enabledRow);
+  form.appendChild(
+    html(
+      "p",
+      "muted",
+      "Ändra under Settings → Add-ons → Kostnadsoptimering → Configuration. " +
+        "Månader med effektavgift sätter du i /homeassistant/hemopt.yaml.",
+    ),
+  );
 
-  const grid = html("div", "settings-grid");
-  grid.appendChild(
-    fieldNumber("peak-n", "Antal toppar som snittas", settings.n_peaks, 1, 10, 1),
-  );
-  grid.appendChild(
-    fieldNumber("peak-price", "Pris per kW (kr)", settings.price_per_kw_sek, 0, 500, 0.5),
-  );
-  grid.appendChild(
-    fieldNumber("peak-start", "Fönster från (timme)", settings.hour_start, 0, 23, 1),
-  );
-  grid.appendChild(
-    fieldNumber("peak-end", "Fönster till (timme)", settings.hour_end, 1, 24, 1),
-  );
-  form.appendChild(grid);
-
-  const weekdays = html("label", "setting-row");
-  const weekdaysInput = document.createElement("input");
-  weekdaysInput.type = "checkbox";
-  weekdaysInput.checked = Boolean(settings.weekdays_only);
-  weekdaysInput.id = "peak-weekdays";
-  weekdays.appendChild(weekdaysInput);
-  weekdays.appendChild(document.createTextNode(" Bara vardagar"));
-  form.appendChild(weekdays);
-
-  form.appendChild(html("div", "setting-label", "Månader med effektavgift"));
-  const months = html("div", "month-grid");
-  const selected = new Set(settings.months || []);
-  for (let month = 1; month <= 12; month += 1) {
-    const label = html("label", "month-chip");
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.value = String(month);
-    box.checked = selected.has(month);
-    box.dataset.month = String(month);
-    label.appendChild(box);
-    label.appendChild(document.createTextNode(` ${MONTH_LABELS[month]}`));
-    months.appendChild(label);
+  const grid = html("div", "settings-grid readonly-grid");
+  const rows = [
+    ["Minimera toppar", settings.enabled ? "På" : "Av"],
+    ["Antal toppar", String(settings.n_peaks)],
+    ["Pris per kW", `${fmt(settings.price_per_kw_sek, 1)} kr`],
+    [
+      "Fönster",
+      `${String(settings.hour_start).padStart(2, "0")}–${String(settings.hour_end).padStart(2, "0")}`,
+    ],
+    ["Bara vardagar", settings.weekdays_only ? "Ja" : "Nej"],
+    [
+      "Månader",
+      (settings.months || []).map((m) => MONTH_LABELS[m] || m).join(", ") || "—",
+    ],
+    ["Marginalkostnad", `${fmt(settings.marginal_sek_per_kw, 0)} kr/kW`],
+  ];
+  for (const [label, value] of rows) {
+    const cell = html("div", "readonly-field");
+    cell.appendChild(html("span", "label", label));
+    cell.appendChild(html("span", "value", value));
+    grid.appendChild(cell);
   }
-  form.appendChild(months);
-
-  const note = html(
-    "p",
-    "muted",
-    `Marginalkostnad just nu: ${fmt(settings.marginal_sek_per_kw, 0)} kr per kW ` +
-      `(pris / antal toppar).`,
-  );
-  form.appendChild(note);
-
-  const actions = html("div", "setting-actions");
-  const save = html("button", "btn", "Spara regler");
-  save.type = "button";
-  save.addEventListener("click", async () => {
-    save.disabled = true;
-    save.textContent = "Sparar…";
-    try {
-      const monthsSelected = [...form.querySelectorAll(".month-grid input:checked")].map(
-        (node) => Number(node.value),
-      );
-      state.peakSettings = await putJSON("/api/settings/peaks", {
-        enabled: enabled.checked,
-        n_peaks: Number(document.getElementById("peak-n").value),
-        price_per_kw_sek: Number(document.getElementById("peak-price").value),
-        hour_start: Number(document.getElementById("peak-start").value),
-        hour_end: Number(document.getElementById("peak-end").value),
-        weekdays_only: weekdaysInput.checked,
-        months: monthsSelected,
-      });
-      await refresh();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      save.disabled = false;
-      save.textContent = "Spara regler";
-    }
-  });
-  actions.appendChild(save);
-  form.appendChild(actions);
-}
-
-function fieldNumber(id, label, value, min, max, step) {
-  const wrap = html("label", "setting-field");
-  wrap.appendChild(html("span", null, label));
-  const input = document.createElement("input");
-  input.type = "number";
-  input.id = id;
-  input.min = String(min);
-  input.max = String(max);
-  input.step = String(step);
-  input.value = String(value ?? "");
-  wrap.appendChild(input);
-  return wrap;
+  form.appendChild(grid);
 }
 
 function renderHistory() {
@@ -840,7 +894,17 @@ function renderRooms() {
   const host = document.getElementById("rooms");
   host.textContent = "";
   if (!state.rooms.length) {
-    host.appendChild(html("p", "empty", "Inga rum konfigurerade."));
+    const box = html("div", "empty-stack");
+    box.appendChild(html("p", "empty", "Inga rum konfigurerade."));
+    box.appendChild(
+      html(
+        "p",
+        "muted",
+        "Kopiera config.exempel.yaml till /homeassistant/hemopt.yaml (bredvid configuration.yaml), " +
+          "fyll i dina entiteter och starta om tillägget. Utan rum blir det ingen värmeplan.",
+      ),
+    );
+    host.appendChild(box);
     return;
   }
 
@@ -940,9 +1004,10 @@ function renderMeters() {
   if (current) {
     const match = (meters.candidates || []).find((row) => row.entity_id === current);
     const watts = match ? Number(match.value) : null;
-    subtitle.textContent = watts !== null && !Number.isNaN(watts)
-      ? `Nuvarande effekt ${fmt(watts, 0)} W`
-      : "Kopplad till husets elmätare";
+    subtitle.textContent =
+      watts !== null && !Number.isNaN(watts)
+        ? `Nuvarande effekt ${fmt(watts, 0)} W`
+        : "Kopplad till husets elmätare";
   } else {
     subtitle.textContent =
       "Ingen elmätare vald — effekttopparna ser bara värmepumpen tills du väljer en.";
@@ -988,7 +1053,13 @@ function renderMeters() {
   row.appendChild(select);
 
   if (!meters.online) {
-    row.appendChild(html("span", "muted", "Home Assistant offline"));
+    row.appendChild(
+      html(
+        "span",
+        "muted",
+        "Home Assistant offline — skriv entitets-id manuellt nedan, eller i Configuration.",
+      ),
+    );
   } else if (!candidates.length && !current) {
     row.appendChild(
       html(
@@ -999,6 +1070,38 @@ function renderMeters() {
     );
   }
   host.appendChild(row);
+
+  const manual = html("div", "meter-manual");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "meter-input";
+  input.placeholder = "sensor.p1_meter_active_power";
+  input.value = current || "";
+  const save = html("button", "btn", "Spara entitet");
+  save.type = "button";
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      const value = input.value.trim();
+      await putJSON("/api/meters/total", { entity_id: value || null });
+      await refresh();
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "Kunde inte spara elmätare");
+    } finally {
+      save.disabled = false;
+    }
+  });
+  manual.appendChild(input);
+  manual.appendChild(save);
+  host.appendChild(manual);
+  host.appendChild(
+    html(
+      "p",
+      "muted",
+      "Du kan också sätta total_power_entity under Configuration och spara där.",
+    ),
+  );
 }
 
 function renderNotes() {
@@ -1011,6 +1114,25 @@ function renderNotes() {
         "note",
         "Tillägget startar — laddar beräkningsmotor. Panelen svarar redan, " +
           "men planen kommer när uppstarten är klar.",
+      ),
+    );
+  } else if (!state.status?.home_assistant_online) {
+    host.appendChild(
+      html(
+        "div",
+        "note warn",
+        "Home Assistant är offline från tillägget. Öppna tilläggets Info-flik, " +
+          "tillåt Home Assistant API, spara och tryck Rebuild. Kolla Log efter " +
+          "«HA Core proxy HTTP». Vänta inte — utan HA blir det ingen plan.",
+      ),
+    );
+  } else if (!(state.status?.rooms_configured > 0) && !(state.rooms || []).length) {
+    host.appendChild(
+      html(
+        "div",
+        "note warn",
+        "Inga rum i konfigurationen. Lägg hemopt.yaml bredvid configuration.yaml " +
+          "(se config.exempel.yaml) och starta om. Spotpriset fungerar ändå.",
       ),
     );
   } else if (state.status?.starting) {
@@ -1063,6 +1185,7 @@ function renderAll() {
   renderPills();
   renderKpis();
   renderChrome();
+  renderPriceChart();
   renderPlanChart(document.getElementById("plan-chart"), state.plan, state.status?.now);
   renderHotWater(document.getElementById("dhw-chart"), state.plan);
   renderPeaks();
@@ -1078,15 +1201,17 @@ function renderAll() {
 /* ------------------------------------------------------------------ boot */
 
 async function refresh() {
-  const [status, peaks, rooms, meters, peakSettings, history, advice] = await Promise.all([
-    getJSON("/api/status").catch(() => null),
-    getJSON("/api/peaks").catch(() => null),
-    getJSON("/api/rooms").catch(() => []),
-    getJSON("/api/meters").catch(() => null),
-    getJSON("/api/settings/peaks").catch(() => null),
-    getJSON("/api/history?days=14").catch(() => null),
-    getJSON("/api/advice").catch(() => null),
-  ]);
+  const [status, peaks, rooms, meters, peakSettings, history, advice, prices] =
+    await Promise.all([
+      getJSON("/api/status").catch(() => null),
+      getJSON("/api/peaks").catch(() => null),
+      getJSON("/api/rooms").catch(() => []),
+      getJSON("/api/meters").catch(() => null),
+      getJSON("/api/settings/peaks").catch(() => null),
+      getJSON("/api/history?days=14").catch(() => null),
+      getJSON("/api/advice").catch(() => null),
+      getJSON("/api/prices").catch(() => null),
+    ]);
   state.status = status;
   state.peaks = peaks;
   state.rooms = rooms;
@@ -1094,6 +1219,7 @@ async function refresh() {
   state.peakSettings = peakSettings;
   state.history = history;
   state.advice = advice;
+  state.prices = prices;
   state.plan = await getJSON("/api/plan").catch(() => null);
   renderAll();
 }

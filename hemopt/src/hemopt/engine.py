@@ -113,11 +113,15 @@ class Engine:
         # used to turn every /api call into a relative path and look like an
         # outage.
         ha = self.config.home_assistant
+        from .ha import normalize_ha_base_url
+
+        base = normalize_ha_base_url(ha.base_url)
         self._ha_http = httpx.AsyncClient(
-            base_url=ha.base_url.rstrip("/"),
+            base_url=base,
             headers={"Authorization": f"Bearer {ha.token}"},
             verify=ha.verify_ssl,
             timeout=httpx.Timeout(30.0, read=120.0),
+            follow_redirects=True,
         )
         if self.config.mqtt.enabled:
             self._mqtt = MqttBridge(self.config, on_command=self._handle_command)

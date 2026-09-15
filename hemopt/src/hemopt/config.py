@@ -49,6 +49,20 @@ def profile_path() -> Path:
     return data_dir() / "profile.json"
 
 
+def house_config_candidates() -> list[Path]:
+    """YAML files a user can drop in for the household description.
+
+    Checked before the saved profile so a hand-edited file wins after an
+    update. `/homeassistant` is Home Assistant's config directory when the
+    add-on maps `homeassistant_config`; `/config` is the add-on's own folder.
+    """
+    return [
+        Path("/homeassistant/hemopt.yaml"),
+        Path("/config/hemopt.yaml"),
+        data_dir() / "hemopt.yaml",
+    ]
+
+
 class SiteConfig(BaseModel):
     price_area: PriceArea = "SE3"
     timezone: str = "Europe/Stockholm"
@@ -413,17 +427,23 @@ class Config(BaseModel):
     def resolve(cls, path: str | Path | None = None) -> Config:
         """Build the effective config from a file, a saved profile and the env.
 
-        Running as a Home Assistant add-on means nobody edits a YAML file: the
-        Supervisor hands over the API token and the broker credentials, and the
-        household profile is written by the setup UI. An explicit path still
-        wins so a hand-written config keeps working.
+        Running as a Home Assistant add-on, the Supervisor hands over the API
+        token and broker credentials. The household description (rooms, meter,
+        peak tariff details beyond the simple options) comes from a YAML file
+        next to ``configuration.yaml``, or from the saved profile.
         """
         if path is not None:
             config = cls.load(path)
-        elif (profile := profile_path()).exists():
-            config = cls.model_validate_json(profile.read_text(encoding="utf-8"))
         else:
-            config = cls()
+            config = None
+            for candidate in house_config_candidates():
+                if candidate.exists():
+                    config = cls.load(candidate)
+                    break
+            if config is None and (profile := profile_path()).exists():
+                config = cls.model_validate_json(profile.read_text(encoding="utf-8"))
+            if config is None:
+                config = cls()
 
         return config.with_environment()
 
@@ -453,8 +473,33 @@ class Config(BaseModel):
         if contract := os.environ.get("HEMOPT_CONTRACT"):
             data["energy_price"]["contract"] = contract
 
-        if data_dir := os.environ.get("HEMOPT_DATA"):
-            data["database_path"] = str(Path(data_dir) / "hemopt.db")
+        if "HEMOPT_PEAK_ENABLED" in os.environ:
+            data["peak_tariff"]["enabled"] = os.environ["HEMOPT_PEAK_ENABLED"].lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        if n_peaks := os.environ.get("HEMOPT_PEAK_N"):
+            data["peak_tariff"]["n_peaks"] = int(n_peaks)
+        if price := os.environ.get("HEMOPT_PEAK_PRICE"):
+            data["peak_tariff"]["price_per_kw_sek"] = float(price)
+        if hour_start := os.environ.get("HEMOPT_PEAK_HOUR_START"):
+            data["peak_tariff"]["window"]["hour_start"] = int(hour_start)
+        if hour_end := os.environ.get("HEMOPT_PEAK_HOUR_END"):
+            data["peak_tariff"]["window"]["hour_end"] = int(hour_end)
+        if "HEMOPT_PEAK_WEEKDAYS" in os.environ:
+            data["peak_tariff"]["window"]["weekdays_only"] = os.environ[
+                "HEMOPT_PEAK_WEEKDAYS"
+            ].lower() in {"1", "true", "yes", "on"}
+
+        if entity := os.environ.get("HEMOPT_TOTAL_POWER_ENTITY"):
+            entity = entity.strip()
+            if entity:
+                data["base_load"]["total_power_entity"] = entity
+
+        if data_dir_env := os.environ.get("HEMOPT_DATA"):
+            data["database_path"] = str(Path(data_dir_env) / "hemopt.db")
 
         return Config.model_validate(data)
 

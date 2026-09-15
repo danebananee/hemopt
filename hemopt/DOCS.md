@@ -45,14 +45,14 @@ görs genom att kopiera in mappen igen och trycka **Rebuild**.
 ### Sedan, oavsett väg
 
 5. **Install**
-6. Fliken **Configuration**: välj **Price area** och **Contract settlement**,
-   tryck **Save**
-7. Fliken **Info**: slå på **Start on boot**, **Watchdog** och
-   **Show in sidebar**, tryck **Start**
+6. Fliken **Configuration**: välj elområde, avräkning och effektregler, tryck
+   **Save**
+7. Fliken **Info**: slå på **Start on boot**, **Watchdog**,
+   **Show in sidebar** och **Home Assistant API**, tryck **Start**
+   (eller **Rebuild** om API-åtkomst nyss slogs på)
 8. Öppna **Kostnadsoptimering** i vänstermenyn
 
-Ingen token att skapa, inget MQTT-lösenord att skriva in, ingen YAML att
-redigera.
+Ingen token att skapa, inget MQTT-lösenord att skriva in.
 
 ## Vad tillägget redan vet
 
@@ -62,56 +62,58 @@ redigera.
 | MQTT-broker | Supervisorns tjänste-API, om Mosquitto är installerat |
 | Lagring | `/data`, överlever uppdateringar |
 
-Därför finns varken token eller lösenord bland inställningarna.
+## Inställningar (Configuration)
 
-## Inställningar
-
-Allt annat — rum, givare, komfortgränser, prioriteter, regler för effekttoppar
-— ställs in i tilläggets egen panel, inte under **Configuration**. Profilen
-sparas som data i `/data/profile.json`, och det är det som gör att samma
-tillägg kan installeras oförändrat i ett annat hushåll.
+Effektregler och elmätare sätts här — inte i dashboarden.
 
 | Val | Betyder |
 | --- | --- |
 | **Price area** | Ditt elområde, SE1–SE4 |
 | **Contract settlement** | Hur spotavtalet avräknas: dygn, timme eller kvart |
 | **Log level** | Höj till `debug` om något beter sig konstigt |
+| **Minimera effekttoppar** | Om optimeraren ska hålla nere debiterbara toppar |
+| **Antal toppar / pris / fönster** | Enligt ditt elnätsavtal |
+| **Elmätare (entitets-id)** | T.ex. `sensor.p1_meter_active_power` |
+
+Rum, värmepump och övrig husbeskrivning läggs i
+`/homeassistant/hemopt.yaml` (bredvid `configuration.yaml`). Börja från
+`config.exempel.yaml` i repot. Månader med effektavgift styrs också där under
+`peak_tariff.window.months`.
 
 ## Elmätare
 
-För att se och kapa **effekttoppar** behöver tillägget husets totala effekt,
-inte bara värmepumpen. Har du en HomeWizard P1 (eller liknande) väljer du den
-i panelen under **Elmätare**. Finns det bara en tydlig total-sensor tar
-tillägget den automatiskt första gången det startar.
+För att se och kapa **effekttoppar** behövs husets totala effekt. Ange den under
+**Configuration**, eller skriv entitets-id i panelen (fungerar även när listan
+är tom / HA tillfälligt offline). HomeWizard P1 heter oftast
+`sensor.p1_meter_active_power`.
 
-Entitets-id för HomeWizard P1 är oftast `sensor.p1_meter_active_power`.
-Kontrollera under **Developer tools → States** om namnet skiljer sig.
+## Elpris i panelen
+
+Panelen visar **aktuellt spotpris** och en graf för **igår / idag / imorgon**.
+Spotpriset hämtas från elprisetjustnu.se och kräver inte Home Assistant.
 
 ## Effekttoppar och elavtal
 
-Under **Regler för effekttoppar** slår du av/på minimeringen och skriver in vad
-elnätsavtalet kräver: antal toppar som snittas, pris per kW, vilka timmar och
-månader som räknas, och om bara vardagar gäller.
-
-**Effekttoppar denna månad** visar tröskeln, pågående timme, de räknade
-topparna och historik från tidigare månader. **Användning och besparing**
-ritar timförbrukningen och jämför planerad kostnad mot utan styrning.
-**Jämför elavtal** visar vad samma uppmätta last hade kostat under andra
-avräkningsformer (månad/dygn/timme/kvart).
+**Effektregler** i panelen är skrivskyddad status. Ändra under Configuration.
+**Effekttoppar denna månad** visar tröskel, pågående timme och historik.
+**Användning och besparing** ritars när elmätaren ger data. **Jämför elavtal**
+behöver minst ett par dygns mätdata.
 
 ## Innan du litar på styrningen
 
 Tillägget styr ingenting förrän du slår på **Styr värmen** i panelen. Låt det
-gå några dygn först och jämför den planerade kurvan mot verkligheten.
-Modellerna behöver historik, och tröghet per rum tar ungefär en vecka att lära
-in.
+gå några dygn först. Rummens tröghet lärs in från historik (ungefär en vecka).
+Du behöver normalt sett inte skriva om koden för att styrningen ska bli bättre
+— modellerna tränas om när det finns data.
 
 ## Felsök
 
-Panelens **Diagnos**-vy kontrollerar varje entitet tillägget är konfigurerat
-att använda och föreslår rättningar för dem som inte finns. Börja alltid där.
+| Symptom | Att göra |
+| --- | --- |
+| Home Assistant röd / «unreachable» | Info → tillåt **Home Assistant API** → **Rebuild**. Kolla Log efter `HA Core proxy HTTP 200`. |
+| Ingen elmätare i listan | Skriv entitets-id manuellt eller i Configuration. |
+| Ingen plan / inga rum | Skapa `/homeassistant/hemopt.yaml` från exemplet. |
+| Spotpris saknas | Nätverk utåt till elprisetjustnu.se; kolla Log. |
 
-Loggen ligger på tilläggets **Log**-flik. Systemloggen finns under
-**Settings → System → Logs**.
-
-Entitets-ID:n slår du upp under **Developer tools → States**.
+Loggen ligger på tilläggets **Log**-flik. Entitets-ID:n under
+**Developer tools → States**.

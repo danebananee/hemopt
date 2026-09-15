@@ -2,6 +2,11 @@
 
 Only three capabilities are needed: read current states, backfill history for
 model training, and call services to apply the plan.
+
+Under the Supervisor the Core API is reached at ``http://supervisor/core``
+with ``SUPERVISOR_TOKEN`` as a Bearer token. Paths always include the ``/api``
+prefix (``/api/states``), and ``_url`` builds absolute URLs so a shared client
+cannot drop the ``/core`` path segment.
 """
 
 from __future__ import annotations
@@ -53,6 +58,14 @@ def parse_numeric(state: str | None) -> float | None:
         return None
 
 
+def normalize_ha_base_url(url: str) -> str:
+    """Strip a trailing /api so paths can always start with /api/…."""
+    trimmed = url.strip().rstrip("/")
+    if trimmed.endswith("/api"):
+        return trimmed[: -len("/api")] or trimmed
+    return trimmed
+
+
 class HomeAssistantError(RuntimeError):
     pass
 
@@ -60,16 +73,18 @@ class HomeAssistantError(RuntimeError):
 class HomeAssistantClient:
     def __init__(self, config: HomeAssistantConfig, client: httpx.AsyncClient | None = None):
         self._config = config
+        self._base = normalize_ha_base_url(config.base_url)
         self._client = client
         self._owns_client = client is None
 
     async def __aenter__(self) -> HomeAssistantClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=self._config.base_url.rstrip("/"),
+                base_url=self._base,
                 headers=self._auth_headers(),
                 verify=self._config.verify_ssl,
                 timeout=httpx.Timeout(30.0, read=120.0),
+                follow_redirects=True,
             )
             self._owns_client = True
         return self
@@ -88,14 +103,14 @@ class HomeAssistantClient:
     def _url(self, path: str) -> str:
         """Absolute URL for an API path.
 
-        A caller may hand us a shared client so connections are reused across
-        the engine's loops, and such a client carries neither our base URL nor
-        our credentials. Putting both on every request keeps the two cases
-        identical instead of silently addressing the wrong host.
+        Always absolute: a leading ``/api/…`` relative path would replace the
+        ``/core`` prefix on ``http://supervisor/core``, and a shared client with
+        an empty ``base_url`` (``httpx.URL('')`` is truthy) would address the
+        wrong host. Absolute URLs keep both cases correct.
         """
-        if self._owns_client and self._client is not None and self._client.base_url:
-            return path
-        return f"{self._config.base_url.rstrip('/')}{path}"
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return f"{self._base}{path}"
 
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._config.token}"}
@@ -103,21 +118,50 @@ class HomeAssistantClient:
     def _json_headers(self) -> dict[str, str]:
         return {**self._auth_headers(), "Content-Type": "application/json"}
 
-    async def ping(self) -> bool:
+    async def diagnose(self) -> dict[str, object]:
+        """Probe the API and return a structured result for logs and the panel."""
+        result: dict[str, object] = {
+            "base_url": self._base,
+            "token_present": bool(self._config.token),
+            "token_length": len(self._config.token or ""),
+            "ok": False,
+            "status_code": None,
+            "error": None,
+            "message": None,
+        }
         try:
-            response = await self._http.get(self._url("/api/"), headers=self._auth_headers())
+            response = await self._http.get(self._url("/api/config"), headers=self._auth_headers())
         except httpx.HTTPError as exc:
-            _LOGGER.warning("Home Assistant unreachable at %s: %s", self._config.base_url, exc)
-            return False
+            result["error"] = f"{type(exc).__name__}: {exc}"
+            return result
+
+        result["status_code"] = response.status_code
         if response.status_code != 200:
-            _LOGGER.warning(
-                "Home Assistant at %s returned %s: %s",
-                self._config.base_url,
-                response.status_code,
-                response.text[:200],
-            )
-            return False
-        return True
+            result["error"] = response.text[:300]
+            return result
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        result["ok"] = True
+        result["message"] = body.get("location_name") or body.get("version") or "ok"
+        return result
+
+    async def ping(self) -> bool:
+        diagnosis = await self.diagnose()
+        if diagnosis["ok"]:
+            return True
+        _LOGGER.warning(
+            "Home Assistant unreachable at %s (token_len=%s): %s %s",
+            diagnosis["base_url"],
+            diagnosis["token_length"],
+            diagnosis.get("status_code") or "",
+            diagnosis.get("error") or "",
+        )
+        return False
 
     async def states(self) -> dict[str, str]:
         response = await self._http.get(self._url("/api/states"), headers=self._auth_headers())

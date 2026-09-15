@@ -661,6 +661,68 @@ footer {
   border-color: var(--accent);
 }
 
+.meter-manual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.meter-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  min-width: min(100%, 22rem);
+  padding: 0.65rem 0.85rem;
+}
+
+.meter-input:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.empty-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0 1rem;
+}
+
+.empty-stack .empty {
+  padding-bottom: 0;
+}
+
+.readonly-grid {
+  margin-top: 0.4rem;
+}
+
+.readonly-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.55rem 0.7rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.readonly-field .label {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.readonly-field .value {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.note.warn {
+  border-color: rgba(255, 159, 67, 0.45);
+  background: rgba(255, 159, 67, 0.1);
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;

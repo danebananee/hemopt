@@ -72,7 +72,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.4",
+        version="0.1.5",
         lifespan=lifespan,
     )
 
@@ -244,11 +244,17 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
         entity_id = (update.entity_id or "").strip() or None
         if entity_id is not None:
             async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
-                states = await ha.states()
-            if entity_id not in states:
-                raise HTTPException(
-                    status_code=404, detail=f"{entity_id} finns inte i Home Assistant"
-                )
+                if await ha.ping():
+                    states = await ha.states()
+                    if entity_id not in states:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"{entity_id} finns inte i Home Assistant",
+                        )
+                else:
+                    _LOGGER.warning(
+                        "saving meter %s while Home Assistant is offline", entity_id
+                    )
         engine.config.base_load.total_power_entity = entity_id
         engine.config.save_profile()
         _LOGGER.info("total power meter set to %s", entity_id or "(none)")
@@ -344,7 +350,21 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
         "fuse_limit_kw": round(engine.config.site.fuse_limit_kw, 2),
         "hot_water_kwh_per_day": round(engine.hot_water_profile.daily_total_kwh(), 2),
         "total_power_entity": engine.config.base_load.total_power_entity,
+        "rooms_configured": len(engine.config.rooms),
+        "ha_base_url": engine.config.home_assistant.base_url,
+        "ha_token_present": bool(engine.config.home_assistant.token),
     }
+
+    # Spot is independent of Home Assistant — surface it even before a plan.
+    if engine.prices is not None and engine.prices.times:
+        index = 0
+        for i, moment in enumerate(engine.prices.times):
+            if moment <= now:
+                index = i
+            else:
+                break
+        payload["current_spot_sek"] = round(engine.prices.spot[index], 4)
+        payload["current_price_sek"] = round(engine.prices.total[index], 4)
 
     if plan is not None:
         index = plan.step_at(now)

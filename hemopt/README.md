@@ -45,7 +45,7 @@ väderomslag.
 ## Snabbstart
 
 ```bash
-cd optimizer
+cd hemopt
 uv sync
 uv run hemopt --demo serve --port 47318
 ```

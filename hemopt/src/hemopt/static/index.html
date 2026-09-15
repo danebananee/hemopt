@@ -41,6 +41,20 @@
       <section class="card wide">
         <div class="card-head">
           <div>
+            <h2>Elpris</h2>
+            <p class="muted" id="price-subtitle">Spotpris igår, idag och imorgon</p>
+          </div>
+          <div class="legend">
+            <span class="key key-price">Spot (exkl. moms)</span>
+            <span class="key key-power">Totalt med påslag</span>
+          </div>
+        </div>
+        <div class="chart-host" id="price-chart"></div>
+      </section>
+
+      <section class="card wide">
+        <div class="card-head">
+          <div>
             <h2>Plan för kommande dygnet</h2>
             <p class="muted" id="plan-subtitle">Läser in…</p>
           </div>
@@ -70,11 +84,11 @@
         <section class="card">
           <div class="card-head">
             <div>
-              <h2>Regler för effekttoppar</h2>
-              <p class="muted">Enligt ditt elnätsavtal — vad som räknas och vad det kostar.</p>
+              <h2>Effektregler</h2>
+              <p class="muted">Sätts under tilläggets Configuration — inte här.</p>
             </div>
           </div>
-          <form id="peak-settings" class="settings-form"></form>
+          <div id="peak-settings" class="settings-form"></div>
         </section>
       </div>
 

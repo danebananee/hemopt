@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.4",
+        version="0.1.5",
         lifespan=lifespan,
     )
 
@@ -275,11 +275,17 @@ def create_app() -> FastAPI:
         entity_id = (update.entity_id or "").strip() or None
         if entity_id is not None:
             async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
-                states = await ha.states()
-            if entity_id not in states:
-                raise HTTPException(
-                    status_code=404, detail=f"{entity_id} finns inte i Home Assistant"
-                )
+                if await ha.ping():
+                    states = await ha.states()
+                    if entity_id not in states:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"{entity_id} finns inte i Home Assistant",
+                        )
+                else:
+                    _LOGGER.warning(
+                        "saving meter %s while Home Assistant is offline", entity_id
+                    )
         engine.config.base_load.total_power_entity = entity_id
         engine.config.save_profile()
         _LOGGER.info("total power meter set to %s", entity_id or "(none)")

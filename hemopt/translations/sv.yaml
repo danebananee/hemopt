@@ -11,3 +11,28 @@ configuration:
   log_level:
     name: Loggnivå
     description: Höj till debug när något ser fel ut, sänk sedan tillbaka.
+  peak_enabled:
+    name: Minimera effekttoppar
+    description: >-
+      Slå på för att låta optimeraren hålla nere debiterbara toppar enligt
+      elnätsavtalet.
+  peak_n_peaks:
+    name: Antal toppar som snittas
+    description: Vanligt är 5 (snitt av de högsta topparna på olika dygn).
+  peak_price_per_kw:
+    name: Pris per kW (kr)
+    description: Effektavgift enligt elnätsavtalet, kronor per kW och månad.
+  peak_hour_start:
+    name: Effektfönster från (timme)
+    description: Timme på dygnet då toppar börjar räknas (ofta 7).
+  peak_hour_end:
+    name: Effektfönster till (timme)
+    description: Timme då fönstret slutar (ofta 21).
+  peak_weekdays_only:
+    name: Bara vardagar
+    description: Om bara vardagar (inte helg) räknas för effektavgiften.
+  total_power_entity:
+    name: Elmätare (entitets-id)
+    description: >-
+      Sensor för husets totala effekt, t.ex. sensor.p1_meter_active_power.
+      Lämna tomt för att välja i panelen när Home Assistant är online.

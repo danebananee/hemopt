@@ -72,6 +72,17 @@ async def test_history_endpoint_returns_points(client):
     assert body["savings_sek"] is not None
 
 
+async def test_prices_endpoint_returns_current_and_series(client):
+    http, _engine = client
+    body = (await http.get("/api/prices")).json()
+    assert body["area"] == "SE3"
+    assert body["available"] is True
+    assert body["current_total_sek"] is not None or body["points"]
+    assert isinstance(body["points"], list)
+    if body["points"]:
+        assert {"t", "spot", "total"} <= set(body["points"][0])
+
+
 def test_apply_peak_settings_rejects_empty_months(tmp_path):
     config = demo_config(database_path=str(tmp_path / "x.db"))
     engine = DemoEngine(config)

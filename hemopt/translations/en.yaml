@@ -13,3 +13,27 @@ configuration:
   log_level:
     name: Log level
     description: Raise to debug when something looks wrong, then set it back.
+  peak_enabled:
+    name: Minimise power peaks
+    description: >-
+      Let the optimiser keep billed peaks down according to your grid tariff.
+  peak_n_peaks:
+    name: Peaks averaged
+    description: Usually 5 (average of the highest peaks on distinct days).
+  peak_price_per_kw:
+    name: Price per kW (SEK)
+    description: Peak power charge from your grid contract, SEK per kW and month.
+  peak_hour_start:
+    name: Peak window from (hour)
+    description: Hour of day when billed peaks start (often 7).
+  peak_hour_end:
+    name: Peak window to (hour)
+    description: Hour when the window ends (often 21).
+  peak_weekdays_only:
+    name: Weekdays only
+    description: Whether only weekdays (not weekends) count for the peak charge.
+  total_power_entity:
+    name: Electricity meter (entity id)
+    description: >-
+      Sensor for whole-house power, e.g. sensor.p1_meter_active_power.
+      Leave blank to pick one in the panel once Home Assistant is online.

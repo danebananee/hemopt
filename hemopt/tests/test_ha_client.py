@@ -14,8 +14,9 @@ def _recording_client() -> tuple[httpx.AsyncClient, list[httpx.Request]]:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        if request.url.path == "/api/":
-            return httpx.Response(200, json={"message": "API running."})
+        # Absolute supervisor URLs parse as host=supervisor, path=/core/api/…
+        if request.url.path.endswith("/api/config"):
+            return httpx.Response(200, json={"location_name": "Home", "version": "2024.1"})
         return httpx.Response(200, json=[{"entity_id": "sensor.inne", "state": "21.4"}])
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler)), seen
@@ -33,7 +34,7 @@ async def test_shared_client_still_reaches_the_configured_home_assistant():
         assert await client.states() == {"sensor.inne": "21.4"}
 
     assert [str(request.url) for request in seen] == [
-        "http://supervisor/core/api/",
+        "http://supervisor/core/api/config",
         "http://supervisor/core/api/states",
     ]
     assert {request.headers["Authorization"] for request in seen} == {"Bearer supervisor-token"}

@@ -1,5 +1,5 @@
 name: Kostnadsoptimering (hemopt)
-version: "0.1.4"
+version: "0.1.5"
 slug: hemopt
 description: >-
   Flyttar uppvarmning och varmvatten till billiga timmar, kapar effekttoppar och
@@ -35,15 +35,31 @@ services:
   - mqtt:want
 
 # /data survives add-on updates; the learned models and peak history live there.
+# homeassistant_config lets you drop hemopt.yaml next to configuration.yaml.
 map:
   - addon_config:rw
+  - homeassistant_config:rw
 
 options:
   price_area: SE3
   contract: hourly
   log_level: info
+  peak_enabled: true
+  peak_n_peaks: 5
+  peak_price_per_kw: 67.5
+  peak_hour_start: 7
+  peak_hour_end: 21
+  peak_weekdays_only: true
+  total_power_entity: ""
 
 schema:
   price_area: list(SE1|SE2|SE3|SE4)
   contract: list(daily|hourly|quarterly)
   log_level: list(debug|info|warning|error)
+  peak_enabled: bool
+  peak_n_peaks: int(1,10)
+  peak_price_per_kw: float(0,500)
+  peak_hour_start: int(0,23)
+  peak_hour_end: int(1,24)
+  peak_weekdays_only: bool
+  total_power_entity: str?
