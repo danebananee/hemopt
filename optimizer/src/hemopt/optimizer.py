@@ -43,7 +43,11 @@ class HotWaterInput:
     config: HotWaterConfig
     initial_temperature: float
     draw_kwh: list[float]
-    force_legionella_by: int | None = None
+    # Step at which the tank must reach the legionella temperature. The caller
+    # picks it, normally the cheapest quarter of the scheduled night, which
+    # keeps the requirement a single linear constraint instead of an
+    # "at least one step in this window" disjunction.
+    legionella_step: int | None = None
 
 
 @dataclass(slots=True)
@@ -245,7 +249,12 @@ def solve(problem: OptimisationInput) -> Plan:
     dhw_charge: list = []
     if dhw is not None and dhw.config.enabled:
         kwh_per_degree = dhw.config.kwh_per_degree
-        capacity = (dhw.config.max_temperature - dhw.config.min_temperature) * kwh_per_degree
+        # The weekly legionella cycle deliberately runs hotter than the normal
+        # ceiling, so the tank's modelled capacity has to reach that far.
+        ceiling_c = dhw.config.max_temperature
+        if dhw.legionella_step is not None:
+            ceiling_c = max(ceiling_c, dhw.config.legionella_temperature)
+        capacity = (ceiling_c - dhw.config.min_temperature) * kwh_per_degree
         target_energy = (
             dhw.config.target_temperature - dhw.config.min_temperature
         ) * kwh_per_degree
@@ -277,15 +286,13 @@ def solve(problem: OptimisationInput) -> Plan:
             objective.append(dhw.config.comfort_weight * shortfall)
             objective.append(0.05 * dhw.config.comfort_weight * below_target)
 
-        if dhw.force_legionella_by is not None:
-            deadline = min(dhw.force_legionella_by, steps)
+        if dhw.legionella_step is not None:
+            index = min(max(dhw.legionella_step, 0), steps - 1)
             required = (
                 dhw.config.legionella_temperature - dhw.config.min_temperature
             ) * kwh_per_degree
             miss = solver.addVariable(lb=0.0)
-            solver.addConstr(
-                sum(tank_energy[1 : deadline + 1]) >= min(required, capacity) - miss * steps
-            )
+            solver.addConstr(tank_energy[index + 1] >= required - miss)
             objective.append(5.0 * dhw.config.comfort_weight * miss)
 
     # --- Heat pump power ------------------------------------------------
@@ -301,8 +308,7 @@ def solve(problem: OptimisationInput) -> Plan:
         # Heating and the tank share one compressor, so they share its output.
         if dhw_charge:
             solver.addConstr(
-                thermal + dhw_charge[index] * dhw.config.reheat_power_kw
-                <= heat_pump.max_thermal_kw
+                thermal + dhw_charge[index] * dhw.config.reheat_power_kw <= heat_pump.max_thermal_kw
             )
         else:
             solver.addConstr(thermal <= heat_pump.max_thermal_kw)

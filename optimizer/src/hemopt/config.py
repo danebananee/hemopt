@@ -22,6 +22,10 @@ class SiteConfig(BaseModel):
     main_fuse_amps: float = 20.0
     voltage: float = 230.0
     phases: int = 3
+    # Weather entity supplying the hourly outdoor forecast. Without one the
+    # planner has to assume the current temperature holds for 36 hours, which
+    # systematically mis-sizes pre-heating ahead of a cold snap.
+    weather_entity: str | None = None
 
     @property
     def fuse_limit_kw(self) -> float:
@@ -189,6 +193,24 @@ class BaseLoadConfig(BaseModel):
     learn_profile: bool = True
 
 
+class ExtControlConfig(BaseModel):
+    """Hardware block via the heat pump's external input.
+
+    Setpoints are advisory: a thermostat can always decide to call for heat
+    anyway. An EXT input is not, which makes it the only reliable way to hold
+    a peak-hour ceiling. What each port blocks is set in the heat pump, so
+    nothing here is enabled by default.
+    """
+
+    enabled: bool = False
+    block_heating_entity: str | None = None
+    block_hot_water_entity: str | None = None
+    # Guard rails, because an EXT block stops the compressor outright.
+    max_block_minutes: int = 120
+    min_release_minutes: int = 15
+    min_room_temperature: float = 18.0
+
+
 class HomeAssistantConfig(BaseModel):
     base_url: str = "http://homeassistant.local:8123"
     token: str = ""
@@ -242,6 +264,7 @@ class Config(BaseModel):
     heat_pump: HeatPumpConfig = Field(default_factory=HeatPumpConfig)
     hot_water: HotWaterConfig = Field(default_factory=HotWaterConfig)
     base_load: BaseLoadConfig = Field(default_factory=BaseLoadConfig)
+    ext_control: ExtControlConfig = Field(default_factory=ExtControlConfig)
     rooms: list[RoomConfig] = Field(default_factory=list)
     home_assistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)
     mqtt: MqttConfig = Field(default_factory=MqttConfig)

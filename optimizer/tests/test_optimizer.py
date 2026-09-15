@@ -247,8 +247,7 @@ def test_move_penalty_keeps_the_savings():
 
     dt = problem.step_hours
     cost = lambda plan: sum(  # noqa: E731
-        p * dt * kw
-        for p, kw in zip(problem.price_sek_per_kwh, plan.heat_pump_kw, strict=True)
+        p * dt * kw for p, kw in zip(problem.price_sek_per_kwh, plan.heat_pump_kw, strict=True)
     )
     assert cost(smooth) <= cost(unconstrained) * 1.05
 

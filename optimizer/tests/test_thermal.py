@@ -31,9 +31,7 @@ def simulate(
         outdoor_now = outdoor + 5.0 * math.sin(index / 96.0 * 2 * math.pi)
         demand = 1.0 if indoor < setpoint else 0.0
         samples.append(
-            ThermalSample(
-                moment=moment, indoor=indoor, outdoor=outdoor_now, heat_fraction=demand
-            )
+            ThermalSample(moment=moment, indoor=indoor, outdoor=outdoor_now, heat_fraction=demand)
         )
         indoor = model.step(indoor, outdoor_now, demand, dt)
         moment += timedelta(minutes=step_minutes)
@@ -97,8 +95,12 @@ def test_identify_falls_back_without_enough_data():
 
 def test_identify_refuses_to_fit_a_room_that_never_heated():
     truth = ThermalModel(
-        tau_hours=70.0, k_heat_per_hour=0.5, k_gain_per_hour=0.0, r_squared=1.0,
-        samples=0, fitted=True,
+        tau_hours=70.0,
+        k_heat_per_hour=0.5,
+        k_gain_per_hour=0.0,
+        r_squared=1.0,
+        samples=0,
+        fitted=True,
     )
     samples = simulate(truth)
     for sample in samples:
@@ -110,8 +112,12 @@ def test_identify_refuses_to_fit_a_room_that_never_heated():
 def test_identified_coefficients_are_never_negative():
     """Noise must not produce a room that cools when heated."""
     truth = ThermalModel(
-        tau_hours=90.0, k_heat_per_hour=0.4, k_gain_per_hour=0.0, r_squared=1.0,
-        samples=0, fitted=True,
+        tau_hours=90.0,
+        k_heat_per_hour=0.4,
+        k_gain_per_hour=0.0,
+        r_squared=1.0,
+        samples=0,
+        fitted=True,
     )
     fitted = identify(simulate(truth))
 
@@ -144,9 +150,7 @@ def test_step_matches_the_discrete_coefficients_used_by_the_solver():
 
 def test_resample_splits_on_logging_gaps():
     start = datetime(2026, 1, 1, tzinfo=TZ)
-    samples = [
-        ThermalSample(start + timedelta(minutes=15 * i), 21.0, -5.0, 0.0) for i in range(8)
-    ]
+    samples = [ThermalSample(start + timedelta(minutes=15 * i), 21.0, -5.0, 0.0) for i in range(8)]
     samples += [
         ThermalSample(start + timedelta(hours=6) + timedelta(minutes=15 * i), 21.0, -5.0, 0.0)
         for i in range(8)

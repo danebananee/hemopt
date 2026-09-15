@@ -47,9 +47,7 @@ def make_client(responses: dict[str, object], **overrides) -> PriceClient:
         "transfer_fee_normal_ore": 0.0,
     }
     energy = EnergyPriceConfig(**(defaults | overrides))
-    return PriceClient(
-        "SE3", energy, PeakWindow(), client=httpx.AsyncClient(transport=transport)
-    )
+    return PriceClient("SE3", energy, PeakWindow(), client=httpx.AsyncClient(transport=transport))
 
 
 def path_for(day: date) -> str:

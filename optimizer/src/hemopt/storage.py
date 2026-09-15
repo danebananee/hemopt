@@ -177,21 +177,27 @@ class Store:
             return [dict(row) for row in cursor.fetchall()]
 
     def expected_peak_kw(self, month: str, fallback: float) -> float:
-        """Best guess at where this month's Nth highest peak will land.
+        """Best guess at where `month`'s Nth highest peak will land.
 
-        The same month last year is the closest analogue because the tariff
-        window is seasonal; otherwise the most recent measured month is used.
+        The same calendar month in an earlier year is the closest analogue
+        because the tariff window is seasonal; otherwise the most recent
+        completed month is used. The month being asked about is always
+        excluded, since its own running threshold is exactly the number this
+        estimate exists to replace.
         """
         with self._cursor() as cursor:
             cursor.execute(
-                "SELECT threshold_kw FROM peak_months WHERE month LIKE ? ORDER BY month DESC"
-                " LIMIT 1",
-                (f"%-{month.split('-')[1]}",),
+                "SELECT threshold_kw FROM peak_months WHERE month LIKE ? AND month <> ?"
+                " ORDER BY month DESC LIMIT 1",
+                (f"%-{month.split('-')[1]}", month),
             )
             row = cursor.fetchone()
             if row:
                 return float(row["threshold_kw"])
-            cursor.execute("SELECT threshold_kw FROM peak_months ORDER BY month DESC LIMIT 1")
+            cursor.execute(
+                "SELECT threshold_kw FROM peak_months WHERE month <> ? ORDER BY month DESC LIMIT 1",
+                (month,),
+            )
             row = cursor.fetchone()
         return float(row["threshold_kw"]) if row else fallback
 

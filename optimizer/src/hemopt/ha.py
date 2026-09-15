@@ -26,6 +26,12 @@ class StatePoint:
     value: float
 
 
+@dataclass(frozen=True, slots=True)
+class ForecastPoint:
+    moment: datetime
+    temperature: float
+
+
 def parse_numeric(state: str | None) -> float | None:
     """Coerce a Home Assistant state string to a number.
 
@@ -169,6 +175,41 @@ class HomeAssistantClient:
                 f"{domain}.{service} failed with {response.status_code}: {response.text[:200]}"
             )
 
+    async def weather_forecast(self, entity_id: str) -> list[ForecastPoint]:
+        """Hourly outdoor temperature forecast from a weather entity.
+
+        Uses the `weather.get_forecasts` service response rather than the
+        long-deprecated forecast attribute, and returns an empty list when the
+        integration cannot supply an hourly forecast so the caller can fall
+        back to holding the current reading.
+        """
+        try:
+            response = await self._http.post(
+                "/api/services/weather/get_forecasts",
+                params={"return_response": "true"},
+                json={"entity_id": entity_id, "type": "hourly"},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            _LOGGER.warning("weather forecast unavailable from %s: %s", entity_id, exc)
+            return []
+
+        body = response.json()
+        payload = body.get("service_response", body)
+        rows = (payload.get(entity_id) or {}).get("forecast", [])
+
+        points: list[ForecastPoint] = []
+        for row in rows:
+            temperature = row.get("temperature")
+            stamp = row.get("datetime")
+            if temperature is None or stamp is None:
+                continue
+            points.append(
+                ForecastPoint(moment=datetime.fromisoformat(stamp), temperature=float(temperature))
+            )
+        points.sort(key=lambda point: point.moment)
+        return points
+
     async def set_climate_temperature(self, entity_id: str, temperature: float) -> None:
         await self.call_service(
             "climate",
@@ -180,6 +221,65 @@ class HomeAssistantClient:
         await self.call_service(
             "number", "set_value", {"entity_id": entity_id, "value": round(value, 1)}
         )
+
+    async def set_ext_port(self, entity_id: str, active: bool) -> None:
+        """Drive a Husdata EXT control port.
+
+        The gateway exposes the ports as climate entities whose target
+        temperature carries the register value, 1 for an asserted signal and 0
+        for released. Plain switches are supported too, for gateways or
+        templates that present them that way.
+        """
+        domain = entity_id.split(".", 1)[0]
+        if domain == "climate":
+            await self.set_climate_temperature(entity_id, 1.0 if active else 0.0)
+        elif domain == "number":
+            await self.set_number(entity_id, 1.0 if active else 0.0)
+        elif domain in {"switch", "input_boolean"}:
+            await self.call_service(
+                domain, "turn_on" if active else "turn_off", {"entity_id": entity_id}
+            )
+        else:
+            raise HomeAssistantError(f"cannot drive EXT port through {entity_id}")
+
+
+def resample_forecast(
+    points: list[ForecastPoint], times: list[datetime], fallback: float
+) -> list[float]:
+    """Interpolate an hourly forecast onto the optimiser's step grid.
+
+    Linear interpolation matters here: a step change every hour would make the
+    planner see phantom load spikes on the hour boundary.
+    """
+    if not points:
+        return [fallback] * len(times)
+
+    ordered = sorted(points, key=lambda point: point.moment)
+    result: list[float] = []
+
+    for moment in times:
+        if moment <= ordered[0].moment:
+            result.append(ordered[0].temperature)
+            continue
+        if moment >= ordered[-1].moment:
+            result.append(ordered[-1].temperature)
+            continue
+
+        for earlier, later in zip(ordered, ordered[1:], strict=False):
+            if earlier.moment <= moment <= later.moment:
+                span = (later.moment - earlier.moment).total_seconds()
+                if span <= 0:
+                    result.append(earlier.temperature)
+                else:
+                    ratio = (moment - earlier.moment).total_seconds() / span
+                    result.append(
+                        earlier.temperature + ratio * (later.temperature - earlier.temperature)
+                    )
+                break
+        else:
+            result.append(fallback)
+
+    return result
 
 
 def resample_history(

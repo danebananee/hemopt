@@ -18,7 +18,8 @@ import httpx
 
 from . import baseload
 from .config import Config
-from .ha import HomeAssistantClient, parse_numeric
+from .guard import GuardDecision, PeakGuard
+from .ha import HomeAssistantClient, parse_numeric, resample_forecast
 from .hotwater import TankSample, UsageProfile, build_profile, estimate_draws
 from .mqtt_bridge import MqttBridge
 from .optimizer import (
@@ -50,6 +51,7 @@ class EngineStatus:
     home_assistant_online: bool = False
     mqtt_online: bool = False
     prices_available: bool = False
+    forecast_available: bool = False
     control_enabled: bool = False
     errors: list[str] = field(default_factory=list)
 
@@ -71,6 +73,9 @@ class Engine:
         self.accumulator = HourAccumulator(
             hour_start=self._now().replace(minute=0, second=0, microsecond=0)
         )
+        self.guard = PeakGuard(config.ext_control)
+        self.guard_decision = GuardDecision(False, "not evaluated")
+        self._ext_state: dict[str, bool] = {}
 
         self._mqtt: MqttBridge | None = None
         self._http: httpx.AsyncClient | None = None
@@ -208,6 +213,56 @@ class Engine:
             self.accumulator.projected_hour_kw(now, total_kw),
         )
 
+        await self._run_guard(now, states)
+
+    async def _run_guard(self, now: datetime, states: dict[str, str]) -> None:
+        """Re-evaluate the live peak guard and drive the EXT input."""
+        pump_kw = 0.0
+        if self.config.heat_pump.power_entity:
+            value = parse_numeric(states.get(self.config.heat_pump.power_entity))
+            if value is not None:
+                pump_kw = value / 1000.0 if value > 100 else value
+
+        temperatures = [
+            parse_numeric(states.get(room.temperature_entity)) for room in self.config.rooms
+        ]
+        measured = [value for value in temperatures if value is not None]
+
+        self.guard_decision = self.guard.evaluate(
+            now=now,
+            accumulator=self.accumulator,
+            threshold_kw=self.peaks.threshold_kw if self.peaks else 0.0,
+            in_peak_window=is_peak_window(now, self.config.peak_tariff.window),
+            heat_pump_kw=pump_kw,
+            coldest_room_c=min(measured) if measured else None,
+        )
+
+        if self.status.control_enabled:
+            await self._apply_ext_block(self.guard_decision.block)
+
+    async def _apply_ext_block(self, block: bool) -> None:
+        """Set the EXT input, but only when the desired state actually changes.
+
+        Writing every minute would flood the heat pump's register bus and fill
+        the Home Assistant logbook for no benefit.
+        """
+        ext = self.config.ext_control
+        entity = ext.block_heating_entity
+        if not ext.enabled or not entity:
+            return
+        if self._ext_state.get(entity) == block:
+            return
+
+        try:
+            async with HomeAssistantClient(self.config.home_assistant, self._http) as ha:
+                await ha.set_ext_port(entity, block)
+        except Exception as exc:  # noqa: BLE001 - never let actuation kill the loop
+            self._record_error(f"EXT block: {exc}")
+            return
+
+        self._ext_state[entity] = block
+        _LOGGER.info("EXT heating block %s", "engaged" if block else "released")
+
     # --- learning ---------------------------------------------------------
     async def train(self) -> None:
         """Refit the thermal models, hot water profile and base load."""
@@ -303,14 +358,38 @@ class Engine:
         self.status.last_training = self._now()
 
     # --- planning ---------------------------------------------------------
-    async def outdoor_forecast(self, states: dict[str, str], steps: int) -> list[float]:
-        """Outdoor temperature per step, held flat if no forecast is available."""
-        current = 0.0
+    async def outdoor_forecast(self, states: dict[str, str], times: list[datetime]) -> list[float]:
+        """Outdoor temperature per step over the whole horizon.
+
+        A 36-hour plan built on a frozen current reading mis-sizes every
+        pre-heat decision, so a weather entity is used when one is configured.
+        Its first hour is nudged onto the heat pump's own outdoor sensor, which
+        is the measurement the thermal models were trained against.
+        """
+        measured = None
         if self.config.heat_pump.outdoor_entity:
-            value = parse_numeric(states.get(self.config.heat_pump.outdoor_entity))
-            if value is not None:
-                current = value
-        return [current] * steps
+            measured = parse_numeric(states.get(self.config.heat_pump.outdoor_entity))
+
+        entity = self.config.site.weather_entity
+        if entity:
+            async with HomeAssistantClient(self.config.home_assistant, self._http) as ha:
+                points = await ha.weather_forecast(entity)
+            if points:
+                series = resample_forecast(points, times, fallback=measured or 0.0)
+                if measured is not None:
+                    bias = measured - series[0]
+                    # The forecast's own trend is trusted; only its offset from
+                    # the sensor on the wall is corrected, decaying over 6 h.
+                    decay = max(int(6 * 60 / self.config.optimiser.step_minutes), 1)
+                    series = [
+                        value + bias * max(0.0, 1.0 - index / decay)
+                        for index, value in enumerate(series)
+                    ]
+                self.status.forecast_available = True
+                return series
+
+        self.status.forecast_available = False
+        return [measured if measured is not None else 0.0] * len(times)
 
     def _peak_input(self, times: list[datetime], now: datetime) -> PeakInput:
         tariff = self.config.peak_tariff
@@ -319,6 +398,15 @@ class Engine:
         expected = self.store.expected_peak_kw(month, fallback=self._default_expected_peak())
         state = peak_state(hourly, tariff, expected_peak_kw=expected)
         self.peaks = state
+
+        # Persisting the running result is what lets next year's January start
+        # with a realistic threshold instead of a guess.
+        self.store.record_month_result(
+            month=month,
+            average_kw=state.average_kw,
+            threshold_kw=state.threshold_kw,
+            cost_sek=state.projected_cost_sek,
+        )
 
         in_window = [is_peak_window(t, tariff.window) for t in times]
         marginal = tariff.marginal_price_per_kw if tariff.enabled else 0.0
@@ -372,7 +460,7 @@ class Engine:
         if states is None:
             self._record_error("Home Assistant unreachable, keeping previous plan")
             return None
-        outdoor = await self.outdoor_forecast(states, steps)
+        outdoor = await self.outdoor_forecast(states, prices.times)
 
         rooms: list[RoomInput] = []
         for room in self.config.rooms:
@@ -393,7 +481,7 @@ class Engine:
             self._record_error("no room temperatures available")
             return None
 
-        hot_water = self._hot_water_input(states, prices.times)
+        hot_water = self._hot_water_input(states, prices.times, prices.total)
         peak = self._peak_input(prices.times, now)
 
         problem = OptimisationInput(
@@ -443,7 +531,7 @@ class Engine:
         return self.config.heat_pump.max_thermal_kw * share / total
 
     def _hot_water_input(
-        self, states: dict[str, str], times: list[datetime]
+        self, states: dict[str, str], times: list[datetime], prices: list[float]
     ) -> HotWaterInput | None:
         settings = self.config.hot_water
         if not settings.enabled or not settings.top_temperature_entity:
@@ -455,19 +543,32 @@ class Engine:
         step_hours = self.config.optimiser.step_minutes / 60.0
         draws = [self.hot_water_profile.expected_kwh(t, step_hours) for t in times]
 
-        legionella_index = None
-        if settings.legionella_weekday is not None:
-            for index, moment in enumerate(times):
-                if moment.weekday() == settings.legionella_weekday and moment.hour >= 2:
-                    legionella_index = index
-                    break
-
         return HotWaterInput(
             config=settings,
             initial_temperature=current,
             draw_kwh=draws,
-            force_legionella_by=legionella_index,
+            legionella_step=self._legionella_step(times, prices),
         )
+
+    def _legionella_step(self, times: list[datetime], prices: list[float]) -> int | None:
+        """Cheapest quarter on the scheduled legionella night, if it is in range.
+
+        Picking the moment here rather than in the solver keeps the weekly
+        pasteurisation a single linear constraint, and picking the cheapest
+        one means the hygiene cycle costs as little as it can.
+        """
+        weekday = self.config.hot_water.legionella_weekday
+        if weekday is None:
+            return None
+
+        candidates = [
+            index
+            for index, moment in enumerate(times)
+            if moment.weekday() == weekday and 0 <= moment.hour < 6
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda index: prices[index])
 
     # --- actuation ---------------------------------------------------------
     async def apply(self) -> int:
@@ -546,9 +647,8 @@ class Engine:
             "preheating": _json_bool(
                 any(room.temperature[index] > room.comfort_max + 0.05 for room in plan.rooms)
             ),
-            "peak_guard": _json_bool(
-                in_window and plan.total_power_kw[index] >= threshold - 0.2 and threshold > 0
-            ),
+            "peak_guard": _json_bool(self.guard_decision.block),
+            "guard_reason": self.guard_decision.reason,
             "in_peak_window": _json_bool(in_window),
             "control_enabled": _json_bool(self.status.control_enabled),
         }

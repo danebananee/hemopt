@@ -194,6 +194,10 @@ class DemoEngine(Engine):
         self.status.home_assistant_online = True
         return self._simulate(self._now())
 
+    async def outdoor_forecast(self, states: dict[str, str], times: list[datetime]) -> list[float]:
+        self.status.forecast_available = True
+        return [self._outdoor_at(moment) for moment in times]
+
     async def fetch_history(self, start: datetime) -> dict[str, list[StatePoint]]:
         """Synthesise recorder history so training has something to chew on."""
         history: dict[str, list[StatePoint]] = {}
