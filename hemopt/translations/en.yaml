@@ -54,3 +54,17 @@ configuration:
       Weather entity for the hourly forecast, e.g. weather.forecast_home.
       Without it the weather pill stays unset and the plan assumes outdoor
       temperature holds steady.
+  mqtt_host:
+    name: MQTT host
+    description: >-
+      Mosquitto host inside HA, usually core-mosquitto. Needed so hemopt can
+      publish plan/status (the heat pump is steered via Home Assistant entities).
+  mqtt_port:
+    name: MQTT port
+    description: Usually 1883.
+  mqtt_username:
+    name: MQTT username
+    description: Leave blank if Mosquitto allows anonymous local clients.
+  mqtt_password:
+    name: MQTT password
+    description: The password you set under Mosquitto broker → Configuration.

@@ -418,6 +418,73 @@ function renderPills() {
   }
 }
 
+function renderSystems() {
+  const host = document.getElementById("systems-body");
+  if (!host) return;
+  host.textContent = "";
+  const status = state.status || {};
+  const plan = state.plan;
+  const index = currentIndex();
+
+  const pumpKw = plan ? plan.heat_pump_kw?.[index] : null;
+  const dhw = plan?.hot_water;
+  const charging =
+    dhw && dhw.charge_fraction ? dhw.charge_fraction[index] > 0.05 : null;
+  const draw =
+    dhw && dhw.expected_draw_kwh ? dhw.expected_draw_kwh[index] : null;
+
+  const rows = [
+    [
+      "Värmepump",
+      status.heat_pump_power_entity
+        ? `Planerad effekt nu ${fmt(pumpKw, 2)} kW · ${status.heat_pump_power_entity}`
+        : "Ingen power-entitet — läggs in via husconfig (H66)",
+    ],
+    [
+      "Varmvatten",
+      status.hot_water_enabled
+        ? `Mönster ${fmt(status.hot_water_kwh_per_day, 1)} kWh/dygn` +
+          (charging == null
+            ? ""
+            : charging
+              ? " · laddar tanken nu"
+              : " · håller temp nu") +
+          (draw != null && draw > 0.01 ? ` · förväntat uttag ${fmt(draw, 2)} kWh` : "") +
+          (status.hot_water_setpoint_entity
+            ? ` · styr ${status.hot_water_setpoint_entity}`
+            : " · saknar setpoint_entity (planeras men skrivs inte till VP)")
+        : "Inte konfigurerat",
+    ],
+    [
+      "Rum",
+      status.rooms_configured
+        ? `${status.rooms_configured} rum · börvärden via climate-entiteter`
+        : "Inga rum",
+    ],
+    [
+      "MQTT",
+      status.mqtt_online
+        ? "Ansluten — publicerar plan/status till Home Assistant"
+        : status.mqtt_configured
+          ? "Konfigurerad men offline — kolla användare/lösenord i Configuration"
+          : "Sätt mqtt_host=core-mosquitto (+ user/lösen) under Configuration",
+    ],
+    [
+      "Aktiv styrning",
+      status.control_enabled
+        ? "På — skriver börvärden till HA"
+        : "Av — planen syns men inget skrivs (slå på Styr värmen)",
+    ],
+  ];
+
+  for (const [label, value] of rows) {
+    const cell = html("div", "readonly-field");
+    cell.appendChild(html("span", "label", label));
+    cell.appendChild(html("span", "value", value));
+    host.appendChild(cell);
+  }
+}
+
 function renderKpis() {
   const host = document.getElementById("kpis");
   const status = state.status || {};
@@ -1288,6 +1355,7 @@ function renderChrome() {
 function renderAll() {
   renderPills();
   renderKpis();
+  renderSystems();
   renderChrome();
   renderPriceChart();
   renderPlanChart(document.getElementById("plan-chart"), state.plan, state.status?.now);

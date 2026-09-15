@@ -1,5 +1,5 @@
 name: Kostnadsoptimering (hemopt)
-version: "0.1.11"
+version: "0.1.12"
 slug: hemopt
 description: >-
   Flyttar uppvarmning och varmvatten till billiga timmar, kapar effekttoppar och
@@ -38,6 +38,10 @@ options:
   weather_entity: weather.forecast_home
   ha_url: http://homeassistant:8123
   ha_token: ""
+  mqtt_host: core-mosquitto
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
 
 schema:
   price_area: list(SE1|SE2|SE3|SE4)
@@ -53,3 +57,7 @@ schema:
   weather_entity: str?
   ha_url: str?
   ha_token: password?
+  mqtt_host: str?
+  mqtt_port: int(1,65535)?
+  mqtt_username: str?
+  mqtt_password: password?

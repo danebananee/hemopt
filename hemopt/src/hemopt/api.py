@@ -72,7 +72,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.11",
+        version="0.1.12",
         lifespan=lifespan,
     )
 
@@ -355,6 +355,12 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
         "mqtt_configured": bool(engine.config.mqtt.enabled and engine.config.mqtt.host),
         "weather_entity": engine.config.site.weather_entity,
         "peak_enabled": engine.config.peak_tariff.enabled,
+        "hot_water_enabled": bool(
+            engine.config.hot_water.enabled and engine.config.hot_water.top_temperature_entity
+        ),
+        "hot_water_setpoint_entity": engine.config.hot_water.setpoint_entity,
+        "heat_pump_power_entity": engine.config.heat_pump.power_entity,
+        "heat_pump_outdoor_entity": engine.config.heat_pump.outdoor_entity,
     }
 
     # Spot is independent of Home Assistant — surface it even before a plan.

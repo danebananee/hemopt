@@ -52,3 +52,17 @@ configuration:
     description: >-
       Weather-entitet för timprognos, t.ex. weather.forecast_home. Utan den
       blir väderprognosen grå och planen antar att utetemperaturen håller i sig.
+  mqtt_host:
+    name: MQTT-host
+    description: >-
+      Mosquitto-host inne i HA, normalt core-mosquitto. Behövs för att hemopt
+      ska publicera plan/status (värmepumpen styrs via Home Assistant-entiteter).
+  mqtt_port:
+    name: MQTT-port
+    description: Vanligtvis 1883.
+  mqtt_username:
+    name: MQTT-användare
+    description: Lämna tom om Mosquitto tillåter anonyma lokala klienter.
+  mqtt_password:
+    name: MQTT-lösenord
+    description: Lösenordet du satte i Mosquitto broker → Configuration.

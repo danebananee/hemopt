@@ -114,6 +114,9 @@ heat_pump:
 hot_water:
   enabled: true
   top_temperature_entity: sensor.h66_hpwarm_water_1_top
+  # Borvarde for tanken — utan den planeras varmvatten men skrivs inte till VP.
+  # Kolla Developer tools → States efter number.h66_…warm_water…
+  setpoint_entity: number.h66_hpwarm_water_1  # KONTROLLERA
   tank_litres: 180
   min_temperature: 42
   target_temperature: 52

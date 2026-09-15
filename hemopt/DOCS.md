@@ -45,27 +45,37 @@ görs genom att kopiera in mappen igen och trycka **Rebuild**.
 ### Sedan, oavsett väg
 
 5. **Install**
-6. Fliken **Configuration**: välj elområde, avräkning, effektregler och elmätare,
-   tryck **Save**
+6. Fliken **Configuration**: välj elområde, avräkning, effektregler, elmätare
+   och MQTT (`core-mosquitto` + eventuellt user/lösen), tryck **Save**
 7. Fliken **Info**: slå på **Start on boot**, **Watchdog** och
    **Show in sidebar**, tryck **Start**
    (eller **Rebuild** efter uppdatering)
 8. Öppna **Kostnadsoptimering** i vänstermenyn
 
-Ingen token att skapa, ingen Info-toggle för API — `homeassistant_api` ges
-automatiskt. Inget MQTT-lösenord att skriva in.
+Ingen Info-toggle för API — `homeassistant_api` ges automatiskt. Om Loggen
+visar `SUPERVISOR_TOKEN length=0` behövs en long-lived **HA-token** under
+Configuration. MQTT-lösen behövs bara om Mosquitto kräver inloggning och
+Supervisorn inte lämnat över broker-uppgifter.
 
 ## Vad tillägget redan vet
 
 | Sak | Varifrån |
 | --- | --- |
-| Home Assistant-API | `SUPERVISOR_TOKEN`, ges av Supervisorn |
-| MQTT-broker | Supervisorns tjänste-API, om Mosquitto är installerat |
+| Home Assistant-API | `SUPERVISOR_TOKEN`, ges av Supervisorn (annars HA-token) |
+| MQTT-broker | Supervisorns tjänste-API, annars Configuration (`mqtt_host` …) |
 | Lagring | `/data`, överlever uppdateringar |
+
+## Vad som styrs (inte bara rum)
+
+Optimeraren planerar **värmepumpens effekt**, **varmvattenladdning** efter
+inlärt användningsmönster, och **rummens börvärden**. Styrningen går via
+Home Assistant-entiteter (climate / number) — ofta MQTT→H66 under huven.
+Slå på **Styr värmen** i panelen för att skriva börvärden; annars syns bara
+planen. Under **Vad som styrs** syns vilka entiteter som är kopplade.
 
 ## Inställningar (Configuration)
 
-Effektregler, elmätare och elområde sätts här — inte i dashboarden.
+Effektregler, elmätare, elområde och MQTT sätts här — inte i dashboarden.
 Rumsprioritet kan justeras i panelen.
 
 | Val | Betyder |
@@ -75,13 +85,14 @@ Rumsprioritet kan justeras i panelen.
 | **Log level** | Höj till `debug` om något beter sig konstigt |
 | **Minimera effekttoppar** | Om optimeraren ska hålla nere debiterbara toppar |
 | **Antal toppar / pris / fönster** | Enligt ditt elnätsavtal |
-| **Elmätare (entitets-id)** | T.ex. `sensor.p1_meter_active_power` |
+| **Elmätare (entitets-id)** | T.ex. `sensor.p1_meter_power` |
+| **MQTT-host / port / user / lösen** | Normalt `core-mosquitto`. Används om Supervisorn inte ger broker |
 | **HA-token / HA-URL** | Bara om Loggen visar `SUPERVISOR_TOKEN length=0` |
 
-Rum, värmepump och övrig husbeskrivning läggs i
-`/homeassistant/hemopt.yaml` (bredvid `configuration.yaml`). Börja från
-`config.exempel.yaml` i repot. Månader med effektavgift styrs också där under
-`peak_tariff.window.months`.
+Rum, värmepump (`heat_pump`) och varmvatten (`hot_water`, inkl.
+`setpoint_entity` för tankbörvärde) läggs i `/homeassistant/hemopt.yaml`
+(bredvid `configuration.yaml`). Börja från `config.exempel.yaml` i repot.
+Månader med effektavgift styrs också där under `peak_tariff.window.months`.
 
 Efter ändring i Configuration: **Save**, sedan **Restart** (eller Rebuild).
 
@@ -135,7 +146,7 @@ Det finns **ingen** Info-toggle «Allow Home Assistant API». Tillägget har
 | Home Assistant / väder / MQTT röda | Öppna **Log**. Om `SUPERVISOR_TOKEN length=0`: sätt **HA-token** under Configuration (se ovan) eller installera om tillägget. Behöver `HA API ping HTTP 200`. |
 | Token length 0 | Supervisorn gav ingen token. Använd long-lived token-fallback eller reinstallera. |
 | Minimera toppar av i Configuration men På i panelen | Bug i äldre version: `false` ignorerades. Uppdatera till **0.1.6+**, spara om Configuration, **Restart**. |
-| MQTT «Not authorized» i loop | Saknad Supervisor-token + placeholder-lösen i yaml. Från 0.1.8 stängs yaml-MQTT av i add-on tills Mosquitto upptäcks. |
+| MQTT «Not authorized» / röd | Sätt **MQTT-host** `core-mosquitto` + user/lösen under Configuration (0.1.12+). Från 0.1.8 stängs yaml-MQTT av i add-on tills broker finns. |
 | Ingen elmätare | Sätt entitets-id under Configuration. |
 | Ingen plan / inga rum | Skapa `/homeassistant/hemopt.yaml` från exemplet. |
 | Spotpris saknas | Nätverk utåt till elprisetjustnu.se; kolla Log. |

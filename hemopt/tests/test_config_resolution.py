@@ -187,14 +187,28 @@ def test_addon_mode_disables_yaml_mqtt_without_supervisor_broker(monkeypatch, tm
     assert Config.resolve(path).mqtt.enabled is False
 
 
+def test_mqtt_options_from_configuration_enable_broker(monkeypatch):
+    monkeypatch.setenv("HEMOPT_ADDON", "1")
+    monkeypatch.setenv("HEMOPT_MQTT_HOST", "core-mosquitto")
+    monkeypatch.setenv("HEMOPT_MQTT_PORT", "1883")
+    monkeypatch.setenv("HEMOPT_MQTT_USERNAME", "homeassistant")
+    monkeypatch.setenv("HEMOPT_MQTT_PASSWORD", "secret")
+
+    config = Config.resolve()
+
+    assert config.mqtt.enabled is True
+    assert config.mqtt.host == "core-mosquitto"
+    assert config.mqtt.username == "homeassistant"
+    assert config.mqtt.password == "secret"
+
+
 def test_priority_one_holds_temperature_hardest():
     from hemopt.config import RoomConfig
 
-    assert RoomConfig(
-        key="a", name="A", priority=1, temperature_entity="s.a"
-    ).comfort_weight > RoomConfig(
-        key="b", name="B", priority=3, temperature_entity="s.b"
-    ).comfort_weight
+    assert (
+        RoomConfig(key="a", name="A", priority=1, temperature_entity="s.a").comfort_weight
+        > RoomConfig(key="b", name="B", priority=3, temperature_entity="s.b").comfort_weight
+    )
 
 
 def test_addon_seeds_bundled_rooms_when_empty(monkeypatch, isolated_data):

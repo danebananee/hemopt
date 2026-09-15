@@ -207,6 +207,12 @@ h2 {
   touch-action: none;
 }
 
+.systems-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
 .setup-steps {
   margin: 0.4rem 0 0.6rem 1.1rem;
   padding: 0;

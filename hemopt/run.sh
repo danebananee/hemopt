@@ -110,7 +110,20 @@ if [[ -n $_supervisor_token ]]; then
         echo "[hemopt] No MQTT broker from Supervisor; MQTT disabled in add-on mode."
     fi
 else
-    echo "[hemopt] No SUPERVISOR_TOKEN — MQTT from Supervisor skipped (yaml-MQTT avstangs i add-on)."
+    echo "[hemopt] No SUPERVISOR_TOKEN — MQTT from Supervisor skipped."
+fi
+
+# Configuration fallback when Supervisor did not hand over Mosquitto credentials
+# (common when SUPERVISOR_TOKEN is missing but Mosquitto is installed).
+if [[ -z ${HEMOPT_MQTT_HOST:-} ]]; then
+    MQTT_HOST="$(read_option mqtt_host "")"
+    if [[ -n $MQTT_HOST ]]; then
+        export HEMOPT_MQTT_HOST="$MQTT_HOST"
+        export HEMOPT_MQTT_PORT="$(read_option mqtt_port 1883)"
+        export HEMOPT_MQTT_USERNAME="$(read_option mqtt_username "")"
+        export HEMOPT_MQTT_PASSWORD="$(read_option mqtt_password "")"
+        echo "[hemopt] Using MQTT from Configuration: ${HEMOPT_MQTT_HOST}:${HEMOPT_MQTT_PORT}"
+    fi
 fi
 
 echo "[hemopt] Starting on 0.0.0.0:8099 (healthz answers before the planner is ready)"
