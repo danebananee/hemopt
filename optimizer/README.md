@@ -163,10 +163,14 @@ ext_control:
   min_room_temperature: 18.0
 ```
 
-Avstängd som default. Vad EXT-portarna faktiskt gör bestäms i Rego 1000 under
-**Extern ingång 1** respektive **2**, och en aktiverad signal stoppar
-funktionen direkt. Kontrollera vad porten är inställd på innan du slår på
-detta.
+`enabled` styr bara om vakten får röra kabeln, inte om den räknar.
+`binary_sensor.hemopt_peak_guard` och `sensor.hemopt_guard_reason` uppdateras
+även med EXT avstängt, så du kan följa vad vakten *skulle* ha gjort i några
+dygn innan du släpper in den.
+
+Vad EXT-portarna faktiskt gör bestäms i Rego 1000 under **Extern ingång 1**
+respektive **2**, och en aktiverad signal stoppar funktionen direkt.
+Kontrollera vad porten är inställd på innan du slår på detta.
 
 ## Home Assistant-entiteter
 

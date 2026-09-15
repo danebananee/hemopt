@@ -45,9 +45,10 @@ def evaluate(
     )
 
 
-def test_disabled_guard_never_blocks():
+def test_the_guard_still_advises_when_ext_actuation_is_off():
+    """Turning EXT off must not blind the sensor you watch before enabling it."""
     decision = evaluate(guard(enabled=False), minutes=30, average_kw=20.0)
-    assert decision.block is False
+    assert decision.block is True
 
 
 def test_no_block_outside_the_billed_window():

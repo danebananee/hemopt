@@ -47,10 +47,13 @@ class PeakGuard:
         heat_pump_kw: float,
         coldest_room_c: float | None,
     ) -> GuardDecision:
-        """Decide whether the heat pump should be held off right now."""
-        if not self.config.enabled:
-            return self._release(now, "guard disabled")
+        """Decide whether the heat pump should be held off right now.
 
+        Always evaluated, even when EXT actuation is off, so the decision can
+        be watched in Home Assistant for a few days before the cable is
+        allowed to act on it. `ExtControlConfig.enabled` gates the actuation,
+        not the reasoning.
+        """
         if not in_peak_window or threshold_kw <= 0:
             return self._release(now, "outside the billed window")
 
