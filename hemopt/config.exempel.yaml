@@ -1,12 +1,7 @@
-# hemopt - konfiguration for huset med IVT Rego 1000, Husdata H66 och LK Arc
+# hemopt - exempel / samma innehold som hemopt.init.yaml
 #
-# Kopiera till config.yaml och fyll i token. Kor sedan
-#
-#     uv run hemopt -c config.yaml doctor
-#
-# som kontrollerar att varenda entitet nedan finns i Home Assistant och
-# foreslar rattningar for dem som inte gor det. Gissade entiteter ar markta
-# med KONTROLLERA.
+# Kopiera till /homeassistant/hemopt.yaml (bredvid configuration.yaml).
+# Se hemopt.init.yaml for fullstandig snabbstartsguide.
 
 site:
   price_area: SE3
