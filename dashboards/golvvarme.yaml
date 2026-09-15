@@ -1,0 +1,174 @@
+# Golvvärme — temperatur + reglage per rum (LK Arc)
+#
+# Sensorerna visar temperatur/fukt/batteri. Börvärdet ställs på climate.*
+# (samma MAC-suffix som givaren). Kontrollera under Developer tools → States
+# att climate.xxx finns; vissa installationer heter climate.xxx_thermostat.
+#
+# Klistra in views:-delen i din dashboard, eller importera hela filen.
+#
+# Obs: när hemopt har «Styr värmen» på skrivs börvärden om enligt planen.
+# Manuala reglage gäller tills nästa styrcykel — eller stäng av styrningen.
+
+title: Golvvärme
+
+views:
+  - title: Golvvärme
+    path: golvvarme
+    icon: mdi:heating-coil
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Bottenvåning
+            icon: mdi:home-floor-0
+          - type: history-graph
+            title: Temperatur senaste dygnet
+            hours_to_show: 24
+            entities:
+              - entity: sensor.e0_ec_2c_c8_5e_2c_temperature
+                name: Tvättstuga
+              - entity: sensor.e9_bd_23_4a_e9_a8_temperature
+                name: Salong
+              - entity: sensor.ce_9f_90_cd_bf_74_temperature
+                name: Lekrum
+              - entity: sensor.ca_97_f7_ba_7d_23_temperature
+                name: Entré
+
+          - type: tile
+            entity: climate.e0_ec_2c_c8_5e_2c
+            name: Tvättstuga
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.e9_bd_23_4a_e9_a8
+            name: Salong
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.ce_9f_90_cd_bf_74
+            name: Lekrum
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.ca_97_f7_ba_7d_23
+            name: Entré
+            features:
+              - type: target-temperature
+
+          - type: markdown
+            content: >
+              | Rum | Temperatur | Fukt | Batteri |
+
+              |---|---:|---:|---:|
+
+              | Tvättstuga | {{ states('sensor.e0_ec_2c_c8_5e_2c_temperature')
+              }} °C | {{ states('sensor.e0_ec_2c_c8_5e_2c_humidity') }} % | {{
+              states('sensor.e0_ec_2c_c8_5e_2c_battery') }} % |
+
+              | Salong | {{ states('sensor.e9_bd_23_4a_e9_a8_temperature') }} °C
+              | {{ states('sensor.e9_bd_23_4a_e9_a8_humidity') }} % | {{
+              states('sensor.e9_bd_23_4a_e9_a8_battery') }} % |
+
+              | Lekrum | {{ states('sensor.ce_9f_90_cd_bf_74_temperature') }} °C
+              | {{ states('sensor.ce_9f_90_cd_bf_74_humidity') }} % | {{
+              states('sensor.ce_9f_90_cd_bf_74_battery') }} % |
+
+              | Entré | {{ states('sensor.ca_97_f7_ba_7d_23_temperature') }} °C
+              | {{ states('sensor.ca_97_f7_ba_7d_23_humidity') }} % | {{
+              states('sensor.ca_97_f7_ba_7d_23_battery') }} % |
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Övervåning
+            icon: mdi:home-floor-1
+          - type: history-graph
+            title: Temperatur senaste dygnet
+            hours_to_show: 24
+            entities:
+              - entity: sensor.d5_ba_fd_c1_0c_c1_temperature
+                name: Garderob
+              - entity: sensor.c8_1b_04_e0_7e_90_temperature
+                name: Sovrum
+              - entity: sensor.fa_6a_ee_c8_9a_63_temperature
+                name: Vardagsrum
+              - entity: sensor.f7_d4_23_14_49_da_temperature
+                name: Badrum
+              - entity: sensor.e3_09_14_3f_f0_f0_temperature
+                name: Pysselrum
+              - entity: sensor.e6_5e_d9_54_a8_e7_temperature
+                name: Rios rum
+              - entity: sensor.d0_f5_31_05_49_9d_temperature
+                name: Kontor
+
+          - type: tile
+            entity: climate.d5_ba_fd_c1_0c_c1
+            name: Garderob
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.c8_1b_04_e0_7e_90
+            name: Sovrum
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.fa_6a_ee_c8_9a_63
+            name: Vardagsrum
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.f7_d4_23_14_49_da
+            name: Badrum
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.e3_09_14_3f_f0_f0
+            name: Pysselrum
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.e6_5e_d9_54_a8_e7
+            name: Rios rum
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.d0_f5_31_05_49_9d
+            name: Kontor
+            features:
+              - type: target-temperature
+
+          - type: markdown
+            content: >
+              | Rum | Temperatur | Fukt | Batteri |
+
+              |---|---:|---:|---:|
+
+              | Garderob | {{ states('sensor.d5_ba_fd_c1_0c_c1_temperature') }}
+              °C | {{ states('sensor.d5_ba_fd_c1_0c_c1_humidity') }} % | {{
+              states('sensor.d5_ba_fd_c1_0c_c1_battery') }} % |
+
+              | Sovrum | {{ states('sensor.c8_1b_04_e0_7e_90_temperature') }} °C
+              | {{ states('sensor.c8_1b_04_e0_7e_90_humidity') }} % | {{
+              states('sensor.c8_1b_04_e0_7e_90_battery') }} % |
+
+              | Vardagsrum | {{ states('sensor.fa_6a_ee_c8_9a_63_temperature')
+              }} °C | {{ states('sensor.fa_6a_ee_c8_9a_63_humidity') }} % | {{
+              states('sensor.fa_6a_ee_c8_9a_63_battery') }} % |
+
+              | Badrum | {{ states('sensor.f7_d4_23_14_49_da_temperature') }} °C
+              | {{ states('sensor.f7_d4_23_14_49_da_humidity') }} % | {{
+              states('sensor.f7_d4_23_14_49_da_battery') }} % |
+
+              | Pysselrum | {{ states('sensor.e3_09_14_3f_f0_f0_temperature') }}
+              °C | {{ states('sensor.e3_09_14_3f_f0_f0_humidity') }} % | {{
+              states('sensor.e3_09_14_3f_f0_f0_battery') }} % |
+
+              | Rios rum | {{ states('sensor.e6_5e_d9_54_a8_e7_temperature') }}
+              °C | {{ states('sensor.e6_5e_d9_54_a8_e7_humidity') }} % | {{
+              states('sensor.e6_5e_d9_54_a8_e7_battery') }} % |
+
+              | Kontor | {{ states('sensor.d0_f5_31_05_49_9d_temperature') }} °C
+              | {{ states('sensor.d0_f5_31_05_49_9d_humidity') }} % | {{
+              states('sensor.d0_f5_31_05_49_9d_battery') }} % |
