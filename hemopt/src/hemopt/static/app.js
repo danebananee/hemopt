@@ -1,7 +1,7 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const REFRESH_MS = 20000;
 
-const state = { plan: null, status: null, peaks: null, rooms: [] };
+const state = { plan: null, status: null, peaks: null, rooms: [], meters: null };
 
 /* ------------------------------------------------------------------ utils */
 
@@ -51,6 +51,16 @@ async function postJSON(url, body) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`${url} -> ${response.status}`);
+  return response.json();
+}
+
+async function putJSON(url, body) {
+  const response = await fetch(apiUrl(url), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`${url} -> ${response.status}`);
   return response.json();
@@ -578,10 +588,103 @@ function currentIndex() {
   return 0;
 }
 
+function renderMeters() {
+  const host = document.getElementById("meter-body");
+  const subtitle = document.getElementById("meter-subtitle");
+  host.textContent = "";
+
+  const meters = state.meters;
+  const current = meters?.current || state.status?.total_power_entity || null;
+
+  if (state.status?.booting) {
+    subtitle.textContent = "Startar upp…";
+    host.appendChild(html("p", "empty", "Väntar på att tillägget ska bli klart."));
+    return;
+  }
+
+  if (!meters) {
+    subtitle.textContent = "Husets totala effekt — behövs för att se och kapa effekttoppar.";
+    host.appendChild(html("p", "empty", "Kunde inte läsa elmätare just nu."));
+    return;
+  }
+
+  if (current) {
+    const match = (meters.candidates || []).find((row) => row.entity_id === current);
+    const watts = match ? Number(match.value) : null;
+    subtitle.textContent = watts !== null && !Number.isNaN(watts)
+      ? `Nuvarande effekt ${fmt(watts, 0)} W`
+      : "Kopplad till husets elmätare";
+  } else {
+    subtitle.textContent =
+      "Ingen elmätare vald — effekttopparna ser bara värmepumpen tills du väljer en.";
+  }
+
+  const row = html("div", "meter-row");
+  const select = document.createElement("select");
+  select.className = "meter-select";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Ingen elmätare";
+  select.appendChild(none);
+
+  const candidates = meters.candidates || [];
+  const ids = new Set(candidates.map((row) => row.entity_id));
+  if (current && !ids.has(current)) {
+    const option = document.createElement("option");
+    option.value = current;
+    option.textContent = current;
+    select.appendChild(option);
+  }
+  for (const candidate of candidates) {
+    const option = document.createElement("option");
+    option.value = candidate.entity_id;
+    const watts = Number(candidate.value);
+    option.textContent = Number.isNaN(watts)
+      ? candidate.entity_id
+      : `${candidate.entity_id} · ${fmt(watts, 0)} W`;
+    select.appendChild(option);
+  }
+  select.value = current || "";
+  select.addEventListener("change", async () => {
+    select.disabled = true;
+    try {
+      await putJSON("/api/meters/total", { entity_id: select.value || null });
+      await refresh();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      select.disabled = false;
+    }
+  });
+  row.appendChild(select);
+
+  if (!meters.online) {
+    row.appendChild(html("span", "muted", "Home Assistant offline"));
+  } else if (!candidates.length && !current) {
+    row.appendChild(
+      html(
+        "span",
+        "muted",
+        "Ingen total-effekt-sensor hittades. HomeWizard P1 heter oftast sensor.p1_meter_active_power.",
+      ),
+    );
+  }
+  host.appendChild(row);
+}
+
 function renderNotes() {
   const host = document.getElementById("plan-notes");
   host.textContent = "";
-  if (state.status?.starting) {
+  if (state.status?.booting) {
+    host.appendChild(
+      html(
+        "div",
+        "note",
+        "Tillägget startar — laddar beräkningsmotor. Panelen svarar redan, " +
+          "men planen kommer när uppstarten är klar.",
+      ),
+    );
+  } else if (state.status?.starting) {
     host.appendChild(
       html(
         "div",
@@ -634,6 +737,7 @@ function renderAll() {
   renderPlanChart(document.getElementById("plan-chart"), state.plan, state.status?.now);
   renderHotWater(document.getElementById("dhw-chart"), state.plan);
   renderPeaks();
+  renderMeters();
   renderRooms();
   renderNotes();
   renderErrors();
@@ -642,14 +746,16 @@ function renderAll() {
 /* ------------------------------------------------------------------ boot */
 
 async function refresh() {
-  const [status, peaks, rooms] = await Promise.all([
+  const [status, peaks, rooms, meters] = await Promise.all([
     getJSON("/api/status").catch(() => null),
     getJSON("/api/peaks").catch(() => null),
     getJSON("/api/rooms").catch(() => []),
+    getJSON("/api/meters").catch(() => null),
   ]);
   state.status = status;
   state.peaks = peaks;
   state.rooms = rooms;
+  state.meters = meters;
   state.plan = await getJSON("/api/plan").catch(() => null);
   renderAll();
 }

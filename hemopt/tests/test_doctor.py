@@ -8,6 +8,7 @@ from hemopt.doctor import FAIL, OK, WARN, format_report, run_doctor
 
 STATES = {
     "weather.forecast_home": "cloudy",
+    "sensor.p1_meter_active_power": "914",
     "sensor.house_total_power": "2400",
     "sensor.h66_hpoutdoor": "-4.2",
     "sensor.h66_hppower_consumption": "1840",

@@ -1,4 +1,9 @@
-"""FastAPI application: JSON API plus the built-in control panel."""
+"""Thin add-on entry: bind the port before the optimiser is imported.
+
+`hemopt.engine` pulls in numpy and HiGHS. On a Raspberry Pi that import can
+take long enough for Home Assistant's ingress to report 502 / "not ready".
+This module stays free of those imports so uvicorn can open :8099 first.
+"""
 
 from __future__ import annotations
 
@@ -13,15 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .config import Config
-from .engine import Engine, plan_to_dict
-from .ha import HomeAssistantClient
-from .meters import pick_default_total_power, suggest_total_power_entities
-from .storage import Store
-from .thermal import ThermalModel
-
 _LOGGER = logging.getLogger(__name__)
-
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -42,31 +39,30 @@ class MeterUpdate(BaseModel):
     entity_id: str | None = None
 
 
-def create_addon_app() -> FastAPI:
-    """Thin entry used by the add-on — see ``hemopt.addon``."""
-    from .addon import create_app as create_thin_app
+def create_app() -> FastAPI:
+    holder: dict[str, Any] = {"engine": None, "error": None, "booting": True}
 
-    return create_thin_app()
+    def get_engine():
+        return holder["engine"]
 
+    def require_engine():
+        engine = get_engine()
+        if engine is None:
+            detail = holder.get("error") or "add-on is still starting"
+            raise HTTPException(status_code=503, detail=detail)
+        return engine
 
-def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        await engine.start()
-        tasks: list[asyncio.Task] = []
-        if run_loops:
-            # Sampling history and solving the first plan takes minutes on a
-            # Raspberry Pi. Awaiting it here would hold the port closed for
-            # that long, and Home Assistant's ingress reports an add-on that
-            # refuses connections as "not ready". So bind first, plan after.
-            tasks.append(asyncio.create_task(_bootstrap_then_run(engine)))
+        task = asyncio.create_task(_boot(holder))
         try:
             yield
         finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            await engine.stop()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            engine = holder.get("engine")
+            if engine is not None:
+                await engine.stop()
 
     app = FastAPI(
         title="hemopt",
@@ -80,10 +76,6 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
-        # Home Assistant's ingress serves the panel under a per-session prefix
-        # and passes it in X-Ingress-Path. Without a matching <base>, the
-        # page's own relative requests for assets and the API would resolve
-        # against Home Assistant itself instead of the add-on.
         prefix = request.headers.get("X-Ingress-Path", "").rstrip("/")
         markup = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         markup = markup.replace('<base href="./" />', f'<base href="{prefix}/" />')
@@ -91,16 +83,38 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
-        return {"status": "ok", "ready": True, "error": None}
+        return {
+            "status": "ok",
+            "ready": get_engine() is not None,
+            "error": holder.get("error"),
+        }
 
     @app.get("/api/status")
     async def status() -> dict[str, Any]:
+        engine = get_engine()
+        if engine is None:
+            return {
+                "starting": True,
+                "booting": True,
+                "home_assistant_online": False,
+                "mqtt_online": False,
+                "prices_available": False,
+                "forecast_available": False,
+                "control_enabled": False,
+                "errors": [holder["error"]] if holder.get("error") else [],
+                "total_power_entity": None,
+            }
+        from .api import _status_payload
+
         payload = _status_payload(engine)
         payload["booting"] = False
         return payload
 
     @app.get("/api/plan")
     async def plan() -> JSONResponse:
+        engine = require_engine()
+        from .engine import plan_to_dict
+
         if engine.plan is None:
             stored = engine.store.latest_plan()
             if stored is None:
@@ -110,9 +124,12 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.get("/api/peaks")
     async def peaks() -> dict[str, Any]:
+        engine = require_engine()
+        from .api import _finite
+
         tariff = engine.config.peak_tariff
         state = engine.peaks
-        now = engine._now()  # noqa: SLF001 - same package, intentional
+        now = engine._now()  # noqa: SLF001
         return {
             "enabled": tariff.enabled,
             "n_peaks": tariff.n_peaks,
@@ -143,6 +160,9 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.get("/api/rooms")
     async def rooms() -> list[dict[str, Any]]:
+        engine = require_engine()
+        from .thermal import ThermalModel
+
         result = []
         for room in engine.config.rooms:
             model = engine.models.get(room.key, ThermalModel.default())
@@ -170,6 +190,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.post("/api/rooms/{key}/priority")
     async def set_priority(key: str, update: PriorityUpdate) -> dict[str, Any]:
+        engine = require_engine()
         try:
             room = engine.config.room(key)
         except KeyError as exc:
@@ -181,6 +202,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.post("/api/rooms/{key}/comfort")
     async def set_comfort(key: str, update: ComfortUpdate) -> dict[str, Any]:
+        engine = require_engine()
         try:
             room = engine.config.room(key)
         except KeyError as exc:
@@ -194,12 +216,14 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.post("/api/control")
     async def set_control(update: ControlUpdate) -> dict[str, bool]:
+        engine = require_engine()
         engine.status.control_enabled = update.enabled
         engine.store.set_setting("control_enabled", update.enabled)
         return {"enabled": update.enabled}
 
     @app.post("/api/replan")
     async def replan() -> dict[str, Any]:
+        engine = require_engine()
         plan = await engine.replan()
         if plan is None:
             raise HTTPException(status_code=503, detail="planning failed, see status for details")
@@ -208,6 +232,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.post("/api/train")
     async def train() -> dict[str, Any]:
+        engine = require_engine()
         await engine.train()
         return {
             "models": {key: round(model.tau_hours, 1) for key, model in engine.models.items()},
@@ -216,14 +241,18 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.get("/api/advice")
     async def advice() -> dict[str, Any]:
-        return engine.advice.as_dict()
+        return require_engine().advice.as_dict()
 
     @app.post("/api/advice")
     async def recompute_advice() -> dict[str, Any]:
-        return (await engine.refresh_advice()).as_dict()
+        return (await require_engine().refresh_advice()).as_dict()
 
     @app.get("/api/meters")
     async def meters() -> dict[str, Any]:
+        engine = require_engine()
+        from .ha import HomeAssistantClient
+        from .meters import suggest_total_power_entities
+
         async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
             if not await ha.ping():
                 return {
@@ -240,6 +269,9 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.put("/api/meters/total")
     async def set_total_meter(update: MeterUpdate) -> dict[str, Any]:
+        engine = require_engine()
+        from .ha import HomeAssistantClient
+
         entity_id = (update.entity_id or "").strip() or None
         if entity_id is not None:
             async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
@@ -256,106 +288,20 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     return app
 
 
-def _build_addon_engine() -> Engine:
-    """Construct the engine off the event loop so imports can finish slowly."""
-    config = Config.resolve(None)
-    if not config.home_assistant.token:
-        # Still start: the panel and healthz must answer so ingress stops
-        # showing 502. Status will report Home Assistant as offline.
-        _LOGGER.error("SUPERVISOR_TOKEN saknas; panelen startar men Home Assistant ar offline")
-    return Engine(config, store=Store(config.database_path))
-
-
-async def _adopt_meter_if_missing(engine: Engine) -> None:
-    if engine.config.base_load.total_power_entity:
-        return
+async def _boot(holder: dict[str, Any]) -> None:
     try:
-        async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
-            if not await ha.ping():
-                return
-            states = await ha.states()
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("could not scan for electricity meters")
-        return
+        # Heavy imports happen here — after uvicorn has already bound the port.
+        from .api import _adopt_meter_if_missing, _bootstrap_then_run, _build_addon_engine
 
-    chosen = pick_default_total_power(states)
-    if chosen is None:
-        candidates = suggest_total_power_entities(states)
-        if candidates:
-            _LOGGER.info(
-                "found %d power meter candidates; pick one in the panel",
-                len(candidates),
-            )
-        return
-
-    engine.config.base_load.total_power_entity = chosen
-    engine.config.save_profile()
-    _LOGGER.info("adopted electricity meter %s", chosen)
-
-
-async def _bootstrap(engine: Engine) -> None:
-    """Get a plan on screen before the periodic loops take over."""
-    try:
-        await engine.collect()
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("initial sampling failed")
-    try:
-        await engine.replan()
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("initial planning failed")
-
-
-async def _bootstrap_then_run(engine: Engine) -> None:
-    await _bootstrap(engine)
-    await engine.run_forever()
-
-
-def _finite(value: float) -> float | None:
-    return None if value == float("inf") else round(value, 3)
-
-
-def _status_payload(engine: Engine) -> dict[str, Any]:
-    status = engine.status
-    plan = engine.plan
-    now = engine._now()  # noqa: SLF001 - same package, intentional
-
-    payload: dict[str, Any] = {
-        "now": now.isoformat(),
-        "timezone": engine.config.site.timezone,
-        "price_area": engine.config.site.price_area,
-        "home_assistant_online": status.home_assistant_online,
-        "mqtt_online": status.mqtt_online,
-        "prices_available": status.prices_available,
-        "forecast_available": status.forecast_available,
-        "control_enabled": status.control_enabled,
-        "last_sample": status.last_sample.isoformat() if status.last_sample else None,
-        "last_plan": status.last_plan.isoformat() if status.last_plan else None,
-        "last_training": status.last_training.isoformat() if status.last_training else None,
-        "errors": list(status.errors[-5:]),
-        # The panel is reachable before the first plan exists, so the UI needs
-        # to tell "still warming up" apart from "planning failed".
-        "starting": plan is None and status.last_plan is None,
-        "fuse_limit_kw": round(engine.config.site.fuse_limit_kw, 2),
-        "hot_water_kwh_per_day": round(engine.hot_water_profile.daily_total_kwh(), 2),
-        "total_power_entity": engine.config.base_load.total_power_entity,
-    }
-
-    if plan is not None:
-        index = plan.step_at(now)
-        payload |= {
-            "current_price_sek": round(plan.price_sek_per_kwh[index], 4),
-            "planned_power_kw": plan.heat_pump_kw[index],
-            "energy_cost_sek": plan.energy_cost_sek,
-            "peak_cost_sek": plan.peak_cost_sek,
-            "total_cost_sek": round(plan.total_cost_sek, 2),
-            "savings_sek": round(plan.savings_sek, 2),
-            "baseline_cost_sek": round(
-                plan.baseline_energy_cost_sek + plan.baseline_peak_cost_sek, 2
-            ),
-            "comfort_penalty_sek": plan.comfort_penalty_sek,
-            "solve_seconds": plan.solve_seconds,
-            "plan_status": plan.status,
-            "horizon_hours": round(len(plan.times) * plan.step_minutes / 60.0, 1),
-            "notes": plan.notes,
-        }
-    return payload
+        engine = await asyncio.to_thread(_build_addon_engine)
+        holder["engine"] = engine
+        holder["booting"] = False
+        await engine.start()
+        await _adopt_meter_if_missing(engine)
+        await _bootstrap_then_run(engine)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        holder["booting"] = False
+        holder["error"] = str(exc)
+        _LOGGER.exception("add-on failed to start")

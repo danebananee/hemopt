@@ -147,11 +147,26 @@ async def run_doctor(config: Config) -> Report:
         check(room.climate_entity, f"{room.name}, termostat", numeric=False, required=False)
 
     if config.peak_tariff.enabled and not config.base_load.total_power_entity:
+        from .meters import suggest_total_power_entities
+
+        suggestions = [row["entity_id"] for row in suggest_total_power_entities(states)]
         report.add(
             WARN,
             "Effektavgift",
             "paslagen utan matare pa hela huset, sa toppvakten ser bara varmepumpen",
+            suggestions[:5],
         )
+    elif not config.base_load.total_power_entity:
+        from .meters import suggest_total_power_entities
+
+        suggestions = [row["entity_id"] for row in suggest_total_power_entities(states)]
+        if suggestions:
+            report.add(
+                WARN,
+                "Husets totala effekt",
+                "inte konfigurerad, men det finns kandidater",
+                suggestions[:5],
+            )
 
     return report
 

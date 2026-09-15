@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
 import uvicorn
 
 from .config import Config
-from .engine import Engine
 from .storage import Store
 
 DEFAULT_PORT = 8723
@@ -26,7 +26,9 @@ def _configure_logging(verbose: bool) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def _build_engine(args: argparse.Namespace) -> Engine:
+def _build_engine(args: argparse.Namespace):
+    from .engine import Engine
+
     if args.demo:
         from .demo import DemoEngine, demo_config
 
@@ -36,7 +38,9 @@ def _build_engine(args: argparse.Namespace) -> Engine:
     config = Config.resolve(args.config)
     if args.database:
         config.database_path = args.database
-    if not config.home_assistant.token:
+    if not config.home_assistant.token and not (
+        os.environ.get("HEMOPT_HA_URL") or os.environ.get("HEMOPT_DATA")
+    ):
         raise SystemExit(
             "no Home Assistant credentials: pass --config, or run as the add-on "
             "so the Supervisor can provide them"
@@ -77,19 +81,35 @@ def main(argv: list[str] | None = None) -> int:
         return _run_doctor(args)
 
     command = args.command or "serve"
-    engine = _build_engine(args)
 
     if command == "serve":
-        from .api import create_app
+        host = getattr(args, "host", "127.0.0.1")
+        port = getattr(args, "port", DEFAULT_PORT)
+        log_level = "debug" if args.verbose else "info"
 
-        uvicorn.run(
-            create_app(engine),
-            host=getattr(args, "host", "127.0.0.1"),
-            port=getattr(args, "port", DEFAULT_PORT),
-            log_level="debug" if args.verbose else "info",
-        )
+        if args.demo or args.config:
+            # Local / demo runs already have everything imported; keep the
+            # simple path so tests and `hemopt --demo serve` stay predictable.
+            from .api import create_app
+
+            uvicorn.run(
+                create_app(_build_engine(args)),
+                host=host,
+                port=port,
+                log_level=log_level,
+            )
+        else:
+            # Add-on path: bind healthz before numpy/HiGHS finish loading.
+            uvicorn.run(
+                "hemopt.addon:create_app",
+                factory=True,
+                host=host,
+                port=port,
+                log_level=log_level,
+            )
         return 0
 
+    engine = _build_engine(args)
     return asyncio.run(_run_once(engine, command))
 
 
@@ -110,7 +130,7 @@ def _run_doctor(args: argparse.Namespace) -> int:
     return 1 if report.failures else 0
 
 
-async def _run_once(engine: Engine, command: str) -> int:
+async def _run_once(engine, command: str) -> int:
     await engine.start()
     try:
         if command == "train":
@@ -205,7 +225,7 @@ hot_water:
   target_temperature: 52
 
 base_load:
-  total_power_entity: sensor.house_total_power
+  total_power_entity: sensor.p1_meter_active_power
   default_kw: 0.7
 
 optimiser:

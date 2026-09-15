@@ -44,4 +44,5 @@ if [[ -n "${SUPERVISOR_TOKEN:-}" ]]; then
     fi
 fi
 
+echo "[hemopt] Starting on 0.0.0.0:8099 (healthz answers before the planner is ready)"
 exec hemopt serve --host 0.0.0.0 --port 8099

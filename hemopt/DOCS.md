@@ -77,6 +77,16 @@ tillägg kan installeras oförändrat i ett annat hushåll.
 | **Contract settlement** | Hur spotavtalet avräknas: dygn, timme eller kvart |
 | **Log level** | Höj till `debug` om något beter sig konstigt |
 
+## Elmätare
+
+För att se och kapa **effekttoppar** behöver tillägget husets totala effekt,
+inte bara värmepumpen. Har du en HomeWizard P1 (eller liknande) väljer du den
+i panelen under **Elmätare**. Finns det bara en tydlig total-sensor tar
+tillägget den automatiskt första gången det startar.
+
+Entitets-id för HomeWizard P1 är oftast `sensor.p1_meter_active_power`.
+Kontrollera under **Developer tools → States** om namnet skiljer sig.
+
 ## Innan du litar på styrningen
 
 Tillägget styr ingenting förrän du slår på **Styr värmen** i panelen. Låt det

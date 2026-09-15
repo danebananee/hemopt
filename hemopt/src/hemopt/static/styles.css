@@ -631,3 +631,32 @@ footer {
   padding: 26px 0;
   text-align: center;
 }
+
+.meter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.meter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.meter-select {
+  appearance: none;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  min-width: min(100%, 28rem);
+  padding: 0.65rem 0.85rem;
+}
+
+.meter-select:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}

@@ -123,10 +123,11 @@ hot_water:
   legionella_temperature: 62
 
 base_load:
-  # KONTROLLERA. Utan en matare pa hela huset ser planeraren bara
-  # varmepumpen, och da ar effekttoppsdelen blind for spis, tvatt och bil.
+  # HomeWizard P1: entitets-id ar oftast sensor.p1_meter_active_power
+  # (summan av alla faser). Kolla under Utvecklarverktyg → Tillstand om
+  # namnet skiljer sig, eller valj mataren i tillaggets panel.
   # Lamna tom om du inte har nagon, sa anvands default_kw i stallet.
-  total_power_entity: sensor.house_total_power
+  total_power_entity: sensor.p1_meter_active_power
   default_kw: 0.7
   learn_profile: true
 
