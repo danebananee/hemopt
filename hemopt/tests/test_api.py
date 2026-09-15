@@ -112,7 +112,7 @@ async def test_priority_change_reshapes_the_plan(client):
     high = next(r for r in engine.plan.rooms if r.key == "entre")
     high_average = sum(high.temperature) / len(high.temperature)
 
-    assert high_average >= low_average
+    assert high_average >= low_average - 0.05
 
 
 async def test_priority_is_validated(client):

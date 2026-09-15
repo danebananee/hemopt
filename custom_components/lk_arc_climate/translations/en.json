@@ -1,0 +1,14 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LK Arc Climate",
+        "description": "Creates writable climate entities for your LK Arc Sense room units. Reuses the existing LK Systems integration login (same cloud as the LK app)."
+      }
+    },
+    "abort": {
+      "already_configured": "LK Arc Climate is already configured.",
+      "missing_lksystems": "LK Systems is missing. Install angoyd/ha-lksystems and sign in first."
+    }
+  }
+}

@@ -31,13 +31,20 @@ Den innehåller tre delar, som alla går att använda var för sig:
 
 **Alla värden** listar samtliga register som tabeller.
 
-**Golvvärme nere** och **Golvvärme uppe** visar LK ArcSense-givarna grupperade
-efter ArcHub/fördelare. Varje rum visar temperatur, luftfuktighet och batteri
-(bara `sensor.*` — ingen skrivbar LK-termostat). Husets börvärde styrs via H66
-`climate.h66_hproom_temp_setpoint`. Se även `dashboards/golvvarme.yaml`.
+**Golvvärme nere** och **Golvvärme uppe** visar LK ArcSense-givarna. Med
+`custom_components/lk_arc_climate` får varje rum även en skrivbar termostat
+(`climate.<mac>_thermostat`). Se [`custom_components/lk_arc_climate/README.md`](custom_components/lk_arc_climate/README.md).
 
 **Kostnadsoptimering** visar spotpris, planerad effekt, månadens effekttoppar
 och en komfortreglage per rum. Vyn kräver att tillägget i `hemopt/` körs.
+
+## LK Arc Climate (skrivbara termostater)
+
+Stock [ha-lksystems](https://github.com/angoyd/ha-lksystems) visar ofta bara
+sensorer för Arc Sense. Kopiera `custom_components/lk_arc_climate` till
+`/config/custom_components/`, starta om HA, och lägg till integrationen
+**LK Arc Climate**. Den återanvänder din LK Systems-inloggning och skapar
+`climate.*` per rum.
 
 ## Kostnadsoptimering
 

@@ -1,0 +1,14 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "LK Arc Climate",
+        "description": "Skapar skrivbara climate-entiteter för dina LK Arc Sense-rumsgivare. Använder samma inloggning som LK Systems-integrationen (samma moln som LK-appen)."
+      }
+    },
+    "abort": {
+      "already_configured": "LK Arc Climate är redan konfigurerad.",
+      "missing_lksystems": "LK Systems-integrationen saknas. Installera angoyd/ha-lksystems och logga in först."
+    }
+  }
+}

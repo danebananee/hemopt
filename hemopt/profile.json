@@ -8,7 +8,7 @@
     "weather_entity": null
   },
   "energy_price": {
-    "contract": "hourly",
+    "contract": "daily",
     "vat_rate": 0.25,
     "supplier_markup_ore": 7.0,
     "certificate_ore": 1.4,
@@ -51,6 +51,7 @@
     "aux_heater_kw": 6.0,
     "power_entity": "sensor.demo_heat_pump_power",
     "outdoor_entity": "sensor.demo_outdoor",
+    "room_setpoint_entity": null,
     "strict_dhw_interlock": false
   },
   "hot_water": {
@@ -79,6 +80,15 @@
     "max_block_minutes": 120,
     "min_release_minutes": 15,
     "min_room_temperature": 18.0
+  },
+  "wood_stove": {
+    "enabled": false,
+    "name": "Braskamin",
+    "temperature_entity": null,
+    "binary_entity": null,
+    "lit_above_c": 40.0,
+    "lit_below_c": 30.0,
+    "room_keys": []
   },
   "advice": {
     "enabled": true,
@@ -259,5 +269,5 @@
     "apply_controls": true,
     "move_penalty_sek": 0.08
   },
-  "database_path": "/tmp/pytest-of-ubuntu/pytest-19/test_peak_settings_round_trip0/test.db"
+  "database_path": "/tmp/pytest-of-ubuntu/pytest-30/test_peak_settings_round_trip0/test.db"
 }
