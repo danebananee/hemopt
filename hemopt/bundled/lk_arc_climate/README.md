@@ -113,6 +113,7 @@ Om loggen säger att `/homeassistant` saknas:
 | Bara Sensors, ingen Thermostat | **LK Arc Climate → ⋮ → Reload**. Kolla Logs för `lk_arc_climate` |
 | MQTT `deprecated option object_id` for sensor.hemopt_* | Du kör &lt; 0.1.22 — **Update** till 0.1.23+, Restart tillägget |
 | Ändring syns inte i LK-appen | Styra `climate.*_thermostat`, inte `sensor.hemopt_setpoint_*`. Logs: `LK Arc Climate:` |
+| Log: unit … cannot be converted … (None → °C/dBm) | **LK Systems**-sensorer fick enhet senare. **Developer tools → Statistics** → sök sensoren → **Fix issue** (uppdatera statistikmetadata). Påverkar inte termostater/styrning. |
 
 ## Kort checklista
 
