@@ -127,6 +127,45 @@ async def test_a_missing_thermostat_is_only_a_warning():
     assert levels(report, "Badrum, termostat") == [WARN]
 
 
+async def test_sensor_only_rooms_warn_without_house_setpoint():
+    config = make_config(
+        rooms=[
+            {
+                "key": "badrum",
+                "name": "Badrum",
+                "temperature_entity": "sensor.f7_d4_23_14_49_da_temperature",
+            }
+        ]
+    )
+    report = await run_doctor(config)
+
+    assert report.failures == 0
+    assert levels(report, "Rumstyrning") == [WARN]
+
+
+async def test_sensor_only_rooms_ok_with_house_setpoint(fake_home_assistant):
+    fake_home_assistant.states["climate.h66_hproom_temp_setpoint"] = "heat"
+    config = make_config(
+        heat_pump={
+            "outdoor_entity": "sensor.h66_hpoutdoor",
+            "power_entity": "sensor.h66_hppower_consumption",
+            "room_setpoint_entity": "climate.h66_hproom_temp_setpoint",
+        },
+        rooms=[
+            {
+                "key": "badrum",
+                "name": "Badrum",
+                "temperature_entity": "sensor.f7_d4_23_14_49_da_temperature",
+            }
+        ],
+    )
+    report = await run_doctor(config)
+
+    assert report.failures == 0
+    assert levels(report, "Rumstyrning") == [OK]
+    assert levels(report, "Husets rumsborvarde") == [OK]
+
+
 async def test_an_unavailable_entity_is_a_warning(fake_home_assistant):
     fake_home_assistant.states["sensor.h66_hpoutdoor"] = "unavailable"
     report = await run_doctor(make_config())

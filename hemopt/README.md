@@ -70,8 +70,9 @@ och MQTT-lösenordet. Vill du börja från tomt i stället ger
 
 | Fält | Vad det är |
 | --- | --- |
-| `rooms[].temperature_entity` | Rummets temperaturgivare |
-| `rooms[].climate_entity` | Termostaten vars börvärde ska styras |
+| `rooms[].temperature_entity` | Rummets temperaturgivare (LK Arc = `sensor.*`) |
+| `rooms[].climate_entity` | Valfri skrivbar termostat per rum — oftast tom för LK |
+| `heat_pump.room_setpoint_entity` | Husets inomhusbörvärde (t.ex. `climate.h66_hproom_temp_setpoint`) |
 | `heat_pump.outdoor_entity` | Utetemperatur |
 | `heat_pump.power_entity` | Värmepumpens effekt |
 | `base_load.total_power_entity` | Husets totala effekt, för effekttoppar |
@@ -93,8 +94,9 @@ uv run hemopt -c config.yaml doctor
               menade du climate.f7_d4_23_14_49_da_thermostat ?
 ```
 
-Rätta tills inga **FEL** återstår. Varningar går att leva med: ett rum utan
-termostat kan fortfarande läsas och planeras, det kan bara inte styras.
+Rätta tills inga **FEL** återstår. Varningar går att leva med: LK Arc-givare är
+bara `sensor.*` — utan `climate` per rum styr hemopt husbörvärdet via
+`heat_pump.room_setpoint_entity` i stället.
 
 ### 3. Kontrollera modellerna innan du släpper in styrningen
 

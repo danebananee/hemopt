@@ -1,11 +1,12 @@
-# Golvvärme — temperatur + reglage per rum (LK Arc)
+# Golvvärme — LK-sensorer + husbörvärde via H66
 #
-# Sensorerna visar temperatur/fukt/batteri. Börvärdet ställs på
-# climate.<mac>_thermostat (LK). Om kortet visar «Entity not found»:
-# Developer tools → States → sök climate. och byt entitets-id.
+# LK Arc-rumsgivarna syns bara som sensor.* (temperatur/fukt/batteri).
+# Det finns ingen climate.<mac>_thermostat att styra per rum.
 #
-# När hemopt har «Styr värmen» på skrivs LK-börvärdet enligt planen.
-# Önskad komforttemp ställer du i hemopt-panelen (Rum) — dit styr planen.
+# När hemopt har «Styr värmen» på skrivs husets inomhusbörvärde till
+# climate.h66_hproom_temp_setpoint (kräver ofta ROOM_CTRL=1 på H66).
+# Önskad komforttemp per rum ställer du i hemopt-panelen — medel av
+# prio-1-rum blir husbörvärdet.
 
 title: Golvvärme
 
@@ -16,6 +17,23 @@ views:
     type: sections
     max_columns: 2
     sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Husets rumsbörvärde (H66)
+            icon: mdi:thermostat
+          - type: tile
+            entity: climate.h66_hproom_temp_setpoint
+            name: Önskad rumstemperatur
+            features:
+              - type: target-temperature
+          - type: markdown
+            content: >
+              LK-givarna är **bara sensorer**. hemopt läser dem för planen och
+              skriver ett gemensamt börvärde hit när «Styr värmen» är på.
+              Saknas entiteten: kolla H66 (`ROOM_CTRL`) och Developer tools →
+              States efter `hproom`.
+
       - type: grid
         cards:
           - type: heading
@@ -35,25 +53,17 @@ views:
                 name: Entré
 
           - type: tile
-            entity: climate.e0_ec_2c_c8_5e_2c_thermostat
+            entity: sensor.e0_ec_2c_c8_5e_2c_temperature
             name: Tvättstuga
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.e9_bd_23_4a_e9_a8_thermostat
+            entity: sensor.e9_bd_23_4a_e9_a8_temperature
             name: Salong
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.ce_9f_90_cd_bf_74_thermostat
+            entity: sensor.ce_9f_90_cd_bf_74_temperature
             name: Lekrum
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.ca_97_f7_ba_7d_23_thermostat
+            entity: sensor.ca_97_f7_ba_7d_23_temperature
             name: Entré
-            features:
-              - type: target-temperature
 
           - type: markdown
             content: >
@@ -102,40 +112,26 @@ views:
                 name: Kontor
 
           - type: tile
-            entity: climate.d5_ba_fd_c1_0c_c1_thermostat
+            entity: sensor.d5_ba_fd_c1_0c_c1_temperature
             name: Garderob
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.c8_1b_04_e0_7e_90_thermostat
+            entity: sensor.c8_1b_04_e0_7e_90_temperature
             name: Sovrum
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.fa_6a_ee_c8_9a_63_thermostat
+            entity: sensor.fa_6a_ee_c8_9a_63_temperature
             name: Vardagsrum
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.f7_d4_23_14_49_da_thermostat
+            entity: sensor.f7_d4_23_14_49_da_temperature
             name: Badrum
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.e3_09_14_3f_f0_f0_thermostat
+            entity: sensor.e3_09_14_3f_f0_f0_temperature
             name: Pysselrum
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.e6_5e_d9_54_a8_e7_thermostat
+            entity: sensor.e6_5e_d9_54_a8_e7_temperature
             name: Rios rum
-            features:
-              - type: target-temperature
           - type: tile
-            entity: climate.d0_f5_31_05_49_9d_thermostat
+            entity: sensor.d0_f5_31_05_49_9d_temperature
             name: Kontor
-            features:
-              - type: target-temperature
 
           - type: markdown
             content: >

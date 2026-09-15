@@ -299,6 +299,16 @@ class HomeAssistantClient:
             "number", "set_value", {"entity_id": entity_id, "value": round(value, 1)}
         )
 
+    async def set_temperature_entity(self, entity_id: str, temperature: float) -> None:
+        """Write a setpoint through climate.* or number.* (H66 uses both)."""
+        domain = entity_id.split(".", 1)[0]
+        if domain == "climate":
+            await self.set_climate_temperature(entity_id, temperature)
+        elif domain == "number":
+            await self.set_number(entity_id, temperature)
+        else:
+            raise HomeAssistantError(f"cannot set temperature through {entity_id}")
+
     async def set_ext_port(self, entity_id: str, active: bool) -> None:
         """Drive a Husdata EXT control port.
 

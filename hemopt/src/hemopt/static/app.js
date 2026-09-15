@@ -499,7 +499,11 @@ function renderSystems() {
     [
       "Rum",
       status.rooms_configured
-        ? `${status.rooms_configured} rum · börvärden via climate-entiteter`
+        ? status.rooms_with_climate > 0
+          ? `${status.rooms_configured} rum · börvärden via climate per rum`
+          : status.room_setpoint_entity
+            ? `${status.rooms_configured} rum (sensorer) · husbörvärde ${status.room_setpoint_entity}`
+            : `${status.rooms_configured} rum · saknar room_setpoint_entity (läses men styrs inte)`
         : "Inga rum",
     ],
     [
@@ -1436,7 +1440,8 @@ function renderRooms() {
       "Settings → Add-ons → File editor (eller Studio Code Server) → Install/Start",
       "Öppna /config/ (roten där configuration.yaml ligger)",
       "Skapa ny fil: hemopt.yaml",
-      "Kopiera rum-delen från config.exempel.yaml i GitHub-repot danebananee/hemopt och byt till dina temperature_entity / climate_entity",
+      "Kopiera rum-delen från config.exempel.yaml i GitHub-repot danebananee/hemopt och byt till dina temperature_entity (LK = sensor.*, ingen climate)",
+      "Sätt heat_pump.room_setpoint_entity till climate.h66_hproom_temp_setpoint om du saknar termostat per rum",
       "Settings → Add-ons → Kostnadsoptimering → Restart",
     ]) {
       steps.appendChild(html("li", null, text));
@@ -1485,7 +1490,15 @@ function renderRooms() {
     );
     meta.appendChild(badge);
     if (!room.climate_entity) {
-      meta.appendChild(html("span", "badge", "Ingen termostat — kan inte styras"));
+      meta.appendChild(
+        html(
+          "span",
+          "badge",
+          state.status?.room_setpoint_entity
+            ? "Sensor — styrs via husbörvärde"
+            : "Sensor — saknar husbörvärde",
+        ),
+      );
     }
     card.appendChild(meta);
 

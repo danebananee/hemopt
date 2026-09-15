@@ -57,3 +57,24 @@ async def test_service_calls_carry_the_token_on_a_shared_client():
 
     assert str(seen[0].url) == "http://supervisor/core/api/services/climate/set_temperature"
     assert seen[0].headers["Authorization"] == "Bearer supervisor-token"
+
+
+async def test_set_temperature_entity_routes_climate_and_number():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://ha", token="t"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    async with client:
+        await client.set_temperature_entity("climate.h66_hproom_temp_setpoint", 21.0)
+        await client.set_temperature_entity("number.h66_hpwarm_water_1", 52.0)
+
+    assert seen[0].url.path.endswith("/climate/set_temperature")
+    assert seen[1].url.path.endswith("/number/set_value")
+

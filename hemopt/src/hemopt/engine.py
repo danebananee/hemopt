@@ -810,15 +810,29 @@ class Engine:
         applied = 0
 
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            room_writes = 0
             for room_plan in self.plan.rooms:
                 room = self.config.room(room_plan.key)
                 if not room.climate_entity:
                     continue
                 try:
-                    await ha.set_climate_temperature(room.climate_entity, room_plan.setpoint[index])
+                    await ha.set_temperature_entity(room.climate_entity, room_plan.setpoint[index])
                     applied += 1
+                    room_writes += 1
                 except Exception as exc:  # noqa: BLE001 - one room must not stop the rest
                     self._record_error(f"{room.name}: {exc}")
+
+            # No per-room actuators (common with LK sensors that are read-only):
+            # write one house indoor target via H66 / Rego room controller.
+            house_entity = self.config.heat_pump.room_setpoint_entity
+            if house_entity and room_writes == 0:
+                target = self._house_room_setpoint(index)
+                if target is not None:
+                    try:
+                        await ha.set_temperature_entity(house_entity, target)
+                        applied += 1
+                    except Exception as exc:  # noqa: BLE001
+                        self._record_error(f"house room setpoint: {exc}")
 
             if self.config.hot_water.setpoint_entity and self.plan.hot_water is not None:
                 charging = self.plan.hot_water.charge_fraction[index] > 0.05
@@ -828,12 +842,27 @@ class Engine:
                     else self.config.hot_water.min_temperature
                 )
                 try:
-                    await ha.set_number(self.config.hot_water.setpoint_entity, target)
+                    await ha.set_temperature_entity(
+                        self.config.hot_water.setpoint_entity, target
+                    )
                     applied += 1
                 except Exception as exc:  # noqa: BLE001
                     self._record_error(f"hot water setpoint: {exc}")
 
         return applied
+
+    def _house_room_setpoint(self, index: int) -> float | None:
+        """Single-circuit indoor target from the plan's priority-1 rooms."""
+        if self.plan is None:
+            return None
+        preferred = [
+            room_plan
+            for room_plan in self.plan.rooms
+            if self.config.room(room_plan.key).priority == 1
+        ] or list(self.plan.rooms)
+        if not preferred:
+            return None
+        return sum(room.setpoint[index] for room in preferred) / len(preferred)
 
     # --- publishing ---------------------------------------------------------
     def _publish(self, plan: Plan, now: datetime) -> None:

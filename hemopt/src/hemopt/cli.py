@@ -240,7 +240,6 @@ rooms:
     floor: Övervåning
     priority: 5
     temperature_entity: sensor.fa_6a_ee_c8_9a_63_temperature
-    climate_entity: climate.fa_6a_ee_c8_9a_63_thermostat
     comfort_min: 21.0
     comfort_max: 22.5
     heat_share: 2.2

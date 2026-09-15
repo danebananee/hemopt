@@ -32,19 +32,20 @@ Den innehåller tre delar, som alla går att använda var för sig:
 **Alla värden** listar samtliga register som tabeller.
 
 **Golvvärme nere** och **Golvvärme uppe** visar LK ArcSense-givarna grupperade
-efter ArcHub/fördelare. Varje rum visar temperatur, luftfuktighet och batteri,
-plus en gemensam temperaturgraf för våningen. Vyerna använder entitets-ID:n som
-skapats av community-integrationen `angoyd/ha-lksystems`.
+efter ArcHub/fördelare. Varje rum visar temperatur, luftfuktighet och batteri
+(bara `sensor.*` — ingen skrivbar LK-termostat). Husets börvärde styrs via H66
+`climate.h66_hproom_temp_setpoint`. Se även `dashboards/golvvarme.yaml`.
 
 **Kostnadsoptimering** visar spotpris, planerad effekt, månadens effekttoppar
-och en prioritetsreglage per rum. Vyn kräver att tillägget i `hemopt/` körs.
+och en komfortreglage per rum. Vyn kräver att tillägget i `hemopt/` körs.
 
 ## Kostnadsoptimering
 
 `hemopt/` är ett Home Assistant-tillägg som flyttar uppvärmning och varmvatten
 till billiga timmar och håller nere effektavgiften. Det läser rumstemperaturerna
 från Home Assistant, hämtar Nordpools kvartspriser, lär sig husets tröghet och
-varmvattenvanor, och skriver tillbaka börvärden till termostaterna.
+varmvattenvanor, och skriver tillbaka börvärden — per rum om `climate` finns,
+annars husnivå via H66 (`room_setpoint_entity`).
 
 ![Vad körs var](docs/system-overview.png)
 

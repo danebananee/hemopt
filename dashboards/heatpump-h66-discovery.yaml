@@ -309,6 +309,35 @@ views:
         column_span: 3
         cards:
           - type: heading
+            heading: Rumsregulator (H66)
+            heading_style: title
+            icon: mdi:thermostat
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              LK Arc-givarna är bara sensorer. hemopt skriver husets
+              inomhusbörvärde hit (`heat_pump.room_setpoint_entity`). Kräver
+              ofta `ROOM_CTRL=1` på H66 om ingen fysisk CAN-rumsgivare finns.
+          - type: tile
+            entity: climate.h66_hproom_temp_setpoint
+            name: Rumsbörvärde
+            grid_options:
+              columns: 12
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.h66_hproom_controller
+            name: Emulerad rumstemperatur
+            grid_options:
+              columns: 12
+            features:
+              - type: target-temperature
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
             heading: Varmeinstallningar
             heading_style: title
             icon: mdi:tune
@@ -393,8 +422,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.e0_ec_2c_c8_5e_2c_thermostat
-                name: Borvarde
               - entity: sensor.e0_ec_2c_c8_5e_2c_temperature
                 name: Temperatur
               - entity: sensor.e0_ec_2c_c8_5e_2c_humidity
@@ -407,8 +434,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.e9_bd_23_4a_e9_a8_thermostat
-                name: Borvarde
               - entity: sensor.e9_bd_23_4a_e9_a8_temperature
                 name: Temperatur
               - entity: sensor.e9_bd_23_4a_e9_a8_humidity
@@ -421,8 +446,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.ce_9f_90_cd_bf_74_thermostat
-                name: Borvarde
               - entity: sensor.ce_9f_90_cd_bf_74_temperature
                 name: Temperatur
               - entity: sensor.ce_9f_90_cd_bf_74_humidity
@@ -435,8 +458,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.ca_97_f7_ba_7d_23_thermostat
-                name: Borvarde
               - entity: sensor.ca_97_f7_ba_7d_23_temperature
                 name: Temperatur
               - entity: sensor.ca_97_f7_ba_7d_23_humidity
@@ -484,8 +505,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.d5_ba_fd_c1_0c_c1_thermostat
-                name: Borvarde
               - entity: sensor.d5_ba_fd_c1_0c_c1_temperature
                 name: Temperatur
               - entity: sensor.d5_ba_fd_c1_0c_c1_humidity
@@ -498,8 +517,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.c8_1b_04_e0_7e_90_thermostat
-                name: Borvarde
               - entity: sensor.c8_1b_04_e0_7e_90_temperature
                 name: Temperatur
               - entity: sensor.c8_1b_04_e0_7e_90_humidity
@@ -512,8 +529,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.fa_6a_ee_c8_9a_63_thermostat
-                name: Borvarde
               - entity: sensor.fa_6a_ee_c8_9a_63_temperature
                 name: Temperatur
               - entity: sensor.fa_6a_ee_c8_9a_63_humidity
@@ -526,8 +541,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.f7_d4_23_14_49_da_thermostat
-                name: Borvarde
               - entity: sensor.f7_d4_23_14_49_da_temperature
                 name: Temperatur
               - entity: sensor.f7_d4_23_14_49_da_humidity
@@ -540,8 +553,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.e3_09_14_3f_f0_f0_thermostat
-                name: Borvarde
               - entity: sensor.e3_09_14_3f_f0_f0_temperature
                 name: Temperatur
               - entity: sensor.e3_09_14_3f_f0_f0_humidity
@@ -554,8 +565,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.e6_5e_d9_54_a8_e7_thermostat
-                name: Borvarde
               - entity: sensor.e6_5e_d9_54_a8_e7_temperature
                 name: Temperatur
               - entity: sensor.e6_5e_d9_54_a8_e7_humidity
@@ -568,8 +577,6 @@ views:
             grid_options:
               columns: 12
             entities:
-              - entity: climate.d0_f5_31_05_49_9d_thermostat
-                name: Borvarde
               - entity: sensor.d0_f5_31_05_49_9d_temperature
                 name: Temperatur
               - entity: sensor.d0_f5_31_05_49_9d_humidity

@@ -373,6 +373,10 @@ class HeatPumpConfig(BaseModel):
     aux_heater_kw: float = 6.0
     power_entity: str | None = None
     outdoor_entity: str | None = None
+    # House-level indoor target when per-room climate entities do not exist
+    # (typical with H66: climate.h66_hproom_temp_setpoint). Per-room sensors
+    # still drive the plan; this is what gets written when Styr varmen is on.
+    room_setpoint_entity: str | None = None
     # The three-way valve serves either heating or the tank, but over a
     # 15-minute step it can split between them, so a shared capacity limit is
     # the accurate model. Forcing a hard per-step choice adds one binary per

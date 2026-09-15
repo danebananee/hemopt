@@ -162,9 +162,36 @@ async def run_doctor(config: Config) -> Report:
     if not config.rooms:
         report.add(FAIL, "Rum", "inga rum konfigurerade")
 
+    rooms_with_climate = 0
     for room in config.rooms:
         check(room.temperature_entity, f"{room.name}, temperatur", numeric=True, required=True)
-        check(room.climate_entity, f"{room.name}, termostat", numeric=False, required=False)
+        if room.climate_entity:
+            rooms_with_climate += 1
+            check(room.climate_entity, f"{room.name}, termostat", numeric=False, required=False)
+
+    if config.heat_pump.room_setpoint_entity:
+        check(
+            config.heat_pump.room_setpoint_entity,
+            "Husets rumsborvarde",
+            numeric=False,
+            required=False,
+        )
+        if rooms_with_climate == 0:
+            report.add(
+                OK,
+                "Rumstyrning",
+                "ingen climate per rum — hemopt skriver husborvarde via "
+                f"{config.heat_pump.room_setpoint_entity}",
+            )
+    elif rooms_with_climate == 0 and config.rooms:
+        report.add(
+            WARN,
+            "Rumstyrning",
+            "inga climate per rum och ingen heat_pump.room_setpoint_entity — "
+            "planen laser sensorer men skriver inget inomhusborvarde. "
+            "Med LK Arc: sat room_setpoint_entity till climate.h66_hproom_temp_setpoint "
+            "(kraver ofta ROOM_CTRL=1 pa H66)",
+        )
 
     if config.peak_tariff.enabled and not config.base_load.total_power_entity:
         from .meters import suggest_total_power_entities
