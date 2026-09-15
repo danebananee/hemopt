@@ -45,14 +45,15 @@ görs genom att kopiera in mappen igen och trycka **Rebuild**.
 ### Sedan, oavsett väg
 
 5. **Install**
-6. Fliken **Configuration**: välj elområde, avräkning och effektregler, tryck
-   **Save**
-7. Fliken **Info**: slå på **Start on boot**, **Watchdog**,
-   **Show in sidebar** och **Home Assistant API**, tryck **Start**
-   (eller **Rebuild** om API-åtkomst nyss slogs på)
+6. Fliken **Configuration**: välj elområde, avräkning, effektregler och elmätare,
+   tryck **Save**
+7. Fliken **Info**: slå på **Start on boot**, **Watchdog** och
+   **Show in sidebar**, tryck **Start**
+   (eller **Rebuild** efter uppdatering)
 8. Öppna **Kostnadsoptimering** i vänstermenyn
 
-Ingen token att skapa, inget MQTT-lösenord att skriva in.
+Ingen token att skapa, ingen Info-toggle för API — `homeassistant_api` ges
+automatiskt. Inget MQTT-lösenord att skriva in.
 
 ## Vad tillägget redan vet
 
@@ -64,7 +65,8 @@ Ingen token att skapa, inget MQTT-lösenord att skriva in.
 
 ## Inställningar (Configuration)
 
-Effektregler och elmätare sätts här — inte i dashboarden.
+Effektregler, elmätare och elområde sätts här — inte i dashboarden.
+Rumsprioritet kan justeras i panelen.
 
 | Val | Betyder |
 | --- | --- |
@@ -80,12 +82,12 @@ Rum, värmepump och övrig husbeskrivning läggs i
 `config.exempel.yaml` i repot. Månader med effektavgift styrs också där under
 `peak_tariff.window.months`.
 
+Efter ändring i Configuration: **Save**, sedan **Restart** (eller Rebuild).
+
 ## Elmätare
 
-För att se och kapa **effekttoppar** behövs husets totala effekt. Ange den under
-**Configuration**, eller skriv entitets-id i panelen (fungerar även när listan
-är tom / HA tillfälligt offline). HomeWizard P1 heter oftast
-`sensor.p1_meter_active_power`.
+Ange under **Configuration → Elmätare**. HomeWizard P1 heter oftast
+`sensor.p1_meter_active_power`. Panelen visar bara vilken entitet som gäller.
 
 ## Elpris i panelen
 
@@ -108,10 +110,16 @@ Du behöver normalt sett inte skriva om koden för att styrningen ska bli bättr
 
 ## Felsök
 
+Det finns **ingen** Info-toggle «Allow Home Assistant API». Tillägget har
+`homeassistant_api: true` i manifestet, så Supervisorn ska ge
+`SUPERVISOR_TOKEN` automatiskt.
+
 | Symptom | Att göra |
 | --- | --- |
-| Home Assistant röd / «unreachable» | Info → tillåt **Home Assistant API** → **Rebuild**. Kolla Log efter `HA Core proxy HTTP 200`. |
-| Ingen elmätare i listan | Skriv entitets-id manuellt eller i Configuration. |
+| Home Assistant / väder / MQTT röda | Öppna **Log**. Leta `SUPERVISOR_TOKEN length` och `HA Core proxy HTTP`. Behöver vara HTTP **200**. Annars: **Update** till senaste, **Rebuild**, starta om. |
+| Token length 0 | Supervisorn gav ingen token — reinstallera tillägget från GitHub-repot. |
+| Minimera toppar av i Configuration men På i panelen | Bug i äldre version: `false` ignorerades. Uppdatera till **0.1.6+**, spara om Configuration, **Restart**. |
+| Ingen elmätare | Sätt entitets-id under Configuration. |
 | Ingen plan / inga rum | Skapa `/homeassistant/hemopt.yaml` från exemplet. |
 | Spotpris saknas | Nätverk utåt till elprisetjustnu.se; kolla Log. |
 

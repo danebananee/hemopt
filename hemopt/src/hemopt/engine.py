@@ -56,6 +56,7 @@ class EngineStatus:
     forecast_available: bool = False
     control_enabled: bool = False
     errors: list[str] = field(default_factory=list)
+    ha_diagnosis: dict | None = None
 
 
 class Engine:
@@ -186,7 +187,9 @@ class Engine:
     async def current_states(self) -> dict[str, str] | None:
         """Read every tracked entity. Overridden by the demo engine."""
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
-            online = await ha.ping()
+            diagnosis = await ha.diagnose()
+            self.status.ha_diagnosis = diagnosis
+            online = bool(diagnosis.get("ok"))
             self.status.home_assistant_online = online
             if not online:
                 return None

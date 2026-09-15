@@ -995,113 +995,40 @@ function renderMeters() {
     return;
   }
 
-  if (!meters) {
-    subtitle.textContent = "Husets totala effekt — behövs för att se och kapa effekttoppar.";
-    host.appendChild(html("p", "empty", "Kunde inte läsa elmätare just nu."));
-    return;
+  subtitle.textContent = "Sätts under Configuration (total_power_entity) — inte här.";
+
+  const grid = html("div", "settings-grid readonly-grid");
+  const cell = html("div", "readonly-field");
+  cell.appendChild(html("span", "label", "Elmätare"));
+  cell.appendChild(html("span", "value", current || "Ingen vald"));
+  grid.appendChild(cell);
+  host.appendChild(grid);
+
+  if (!current) {
+    host.appendChild(
+      html(
+        "p",
+        "muted",
+        "Skriv t.ex. sensor.p1_meter_active_power under Configuration → Elmätare, spara och starta om.",
+      ),
+    );
   }
 
-  if (current) {
-    const match = (meters.candidates || []).find((row) => row.entity_id === current);
+  if (meters && !meters.online) {
+    host.appendChild(
+      html(
+        "p",
+        "muted",
+        "Home Assistant-API otillgängligt just nu — entitetsvärden syns när tillägget får kontakt.",
+      ),
+    );
+  } else if (meters?.candidates?.length && current) {
+    const match = meters.candidates.find((row) => row.entity_id === current);
     const watts = match ? Number(match.value) : null;
-    subtitle.textContent =
-      watts !== null && !Number.isNaN(watts)
-        ? `Nuvarande effekt ${fmt(watts, 0)} W`
-        : "Kopplad till husets elmätare";
-  } else {
-    subtitle.textContent =
-      "Ingen elmätare vald — effekttopparna ser bara värmepumpen tills du väljer en.";
-  }
-
-  const row = html("div", "meter-row");
-  const select = document.createElement("select");
-  select.className = "meter-select";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "Ingen elmätare";
-  select.appendChild(none);
-
-  const candidates = meters.candidates || [];
-  const ids = new Set(candidates.map((row) => row.entity_id));
-  if (current && !ids.has(current)) {
-    const option = document.createElement("option");
-    option.value = current;
-    option.textContent = current;
-    select.appendChild(option);
-  }
-  for (const candidate of candidates) {
-    const option = document.createElement("option");
-    option.value = candidate.entity_id;
-    const watts = Number(candidate.value);
-    option.textContent = Number.isNaN(watts)
-      ? candidate.entity_id
-      : `${candidate.entity_id} · ${fmt(watts, 0)} W`;
-    select.appendChild(option);
-  }
-  select.value = current || "";
-  select.addEventListener("change", async () => {
-    select.disabled = true;
-    try {
-      await putJSON("/api/meters/total", { entity_id: select.value || null });
-      await refresh();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      select.disabled = false;
+    if (watts !== null && !Number.isNaN(watts)) {
+      host.appendChild(html("p", "muted", `Nuvarande effekt ${fmt(watts, 0)} W`));
     }
-  });
-  row.appendChild(select);
-
-  if (!meters.online) {
-    row.appendChild(
-      html(
-        "span",
-        "muted",
-        "Home Assistant offline — skriv entitets-id manuellt nedan, eller i Configuration.",
-      ),
-    );
-  } else if (!candidates.length && !current) {
-    row.appendChild(
-      html(
-        "span",
-        "muted",
-        "Ingen total-effekt-sensor hittades. HomeWizard P1 heter oftast sensor.p1_meter_active_power.",
-      ),
-    );
   }
-  host.appendChild(row);
-
-  const manual = html("div", "meter-manual");
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "meter-input";
-  input.placeholder = "sensor.p1_meter_active_power";
-  input.value = current || "";
-  const save = html("button", "btn", "Spara entitet");
-  save.type = "button";
-  save.addEventListener("click", async () => {
-    save.disabled = true;
-    try {
-      const value = input.value.trim();
-      await putJSON("/api/meters/total", { entity_id: value || null });
-      await refresh();
-    } catch (error) {
-      console.error(error);
-      alert(error.message || "Kunde inte spara elmätare");
-    } finally {
-      save.disabled = false;
-    }
-  });
-  manual.appendChild(input);
-  manual.appendChild(save);
-  host.appendChild(manual);
-  host.appendChild(
-    html(
-      "p",
-      "muted",
-      "Du kan också sätta total_power_entity under Configuration och spara där.",
-    ),
-  );
 }
 
 function renderNotes() {
@@ -1117,13 +1044,23 @@ function renderNotes() {
       ),
     );
   } else if (!state.status?.home_assistant_online) {
+    const diag = state.status?.ha_diagnosis || {};
+    const detail = [
+      diag.status_code != null ? `HTTP ${diag.status_code}` : null,
+      diag.token_present === false ? "ingen SUPERVISOR_TOKEN" : null,
+      diag.error ? String(diag.error).slice(0, 120) : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
     host.appendChild(
       html(
         "div",
         "note warn",
-        "Home Assistant är offline från tillägget. Öppna tilläggets Info-flik, " +
-          "tillåt Home Assistant API, spara och tryck Rebuild. Kolla Log efter " +
-          "«HA Core proxy HTTP». Vänta inte — utan HA blir det ingen plan.",
+        "Tillägget når inte Home Assistant Core-API (det är därför HA/väder/MQTT är röda). " +
+          "Det finns ingen Info-toggle — homeassistant_api ges automatiskt. " +
+          "Uppdatera till 0.1.6, tryck Rebuild, öppna Log och leta efter " +
+          "«HA Core proxy HTTP 200» och «SUPERVISOR_TOKEN length». " +
+          (detail ? `Senaste probesvar: ${detail}.` : ""),
       ),
     );
   } else if (!(state.status?.rooms_configured > 0) && !(state.rooms || []).length) {
@@ -1154,9 +1091,21 @@ function renderErrors() {
   const card = document.getElementById("error-card");
   const list = document.getElementById("errors");
   const errors = state.status?.errors || [];
+  const diag = state.status?.ha_diagnosis;
   list.textContent = "";
-  card.hidden = errors.length === 0;
+
+  if (diag && !state.status?.home_assistant_online) {
+    const parts = [
+      `HA-diagnos: ${diag.base_url || "—"}`,
+      diag.token_present ? `token ${diag.token_length} tecken` : "token saknas",
+      diag.status_code != null ? `HTTP ${diag.status_code}` : null,
+      diag.error || diag.message || null,
+    ].filter(Boolean);
+    list.appendChild(html("li", null, parts.join(" · ")));
+  }
+
   for (const message of errors) list.appendChild(html("li", null, message));
+  card.hidden = list.childElementCount === 0;
 }
 
 function renderChrome() {

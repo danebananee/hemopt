@@ -72,7 +72,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.5",
+        version="0.1.6",
         lifespan=lifespan,
     )
 
@@ -353,6 +353,10 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
         "rooms_configured": len(engine.config.rooms),
         "ha_base_url": engine.config.home_assistant.base_url,
         "ha_token_present": bool(engine.config.home_assistant.token),
+        "ha_diagnosis": status.ha_diagnosis,
+        "mqtt_configured": bool(engine.config.mqtt.enabled and engine.config.mqtt.host),
+        "weather_entity": engine.config.site.weather_entity,
+        "peak_enabled": engine.config.peak_tariff.enabled,
     }
 
     # Spot is independent of Home Assistant — surface it even before a plan.
