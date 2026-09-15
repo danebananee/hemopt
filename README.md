@@ -41,12 +41,14 @@ och en komfortreglage per rum. Vyn kräver att tillägget i `hemopt/` körs.
 ## LK Arc Climate (skrivbara termostater)
 
 Stock [ha-lksystems](https://github.com/angoyd/ha-lksystems) ger dig ofta bara
-sensorer. **Utförlig guide** (HA-menyer på engelska):
-[`custom_components/lk_arc_climate/README.md`](custom_components/lk_arc_climate/README.md).
+sensorer. Från hemopt **0.1.20** läggs **LK Arc Climate** in automatiskt när
+tillägget startar — ingen manuell kopiering.
 
-Kortversion: kopiera `custom_components/lk_arc_climate` till
-`/config/custom_components/`, **Restart Home Assistant**,
+Sedan: **Restart Home Assistant** en gång →
 **Settings → Devices & services → Add integration → LK Arc Climate**.
+
+**Utförlig guide:**
+[`custom_components/lk_arc_climate/README.md`](custom_components/lk_arc_climate/README.md).
 
 ## Kostnadsoptimering
 

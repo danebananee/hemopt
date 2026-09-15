@@ -75,20 +75,18 @@ planen. Under **Vad som styrs** syns vilka entiteter som är kopplade.
 
 ### LK Arc-rum (golvvärme)
 
-LK Systems-integrationen ger oftast bara **Sensors** (Temperature, Humidity,
-Battery). För skrivbara termostater: installera companion-integrationen
-**LK Arc Climate** och fyll `climate_entity` per rum i `hemopt.yaml`.
+LK Systems ger oftast bara **Sensors**. Från hemopt **0.1.20** installeras
+**LK Arc Climate** automatiskt i `/config/custom_components/` när tillägget
+startar.
 
-Steg-för-steg (menyer på engelska):
-[../custom_components/lk_arc_climate/README.md](../custom_components/lk_arc_climate/README.md).
-
-Kort:
-
-1. Kopiera `custom_components/lk_arc_climate` → `/config/custom_components/`
-2. **Settings → System** → ⋮ → **Restart Home Assistant**
+1. **Update** / **Restart** hemopt → kolla **Log** (`LK Arc Climate installerad`)
+2. **Settings → System → ⋮ → Restart Home Assistant** (en gång)
 3. **Settings → Devices & services → Add integration → LK Arc Climate**
-4. **Developer tools → States**: sök `climate.` och `_thermostat`
-5. Sätt samma id som `climate_entity` i `/config/hemopt.yaml`, restart hemopt
+4. **Developer tools → States**: sök `climate.` / `_thermostat`
+5. Matcha `climate_entity` i `/config/hemopt.yaml`, restart hemopt
+
+Utförlig guide:
+[../custom_components/lk_arc_climate/README.md](../custom_components/lk_arc_climate/README.md).
 
 ## Inställningar (Configuration)
 

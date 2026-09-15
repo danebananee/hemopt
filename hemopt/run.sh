@@ -32,6 +32,34 @@ read_option() {
     printf '%s' "$value"
 }
 
+# Install / refresh the LK Arc Climate custom component into HA's config so
+# the user does not have to copy files by hand. Requires homeassistant_config:rw.
+install_lk_arc_climate() {
+    local src="/opt/hemopt/bundled/lk_arc_climate"
+    local dest="/homeassistant/custom_components/lk_arc_climate"
+    local marker="$dest/.installed_by_hemopt"
+
+    if [[ ! -d /homeassistant ]]; then
+        echo "[hemopt] /homeassistant saknas (homeassistant_config ej monterad) — hoppar over LK Arc Climate"
+        return
+    fi
+    if [[ ! -f $src/manifest.json ]]; then
+        echo "[hemopt] Bundlad LK Arc Climate saknas i imagen ($src)"
+        return
+    fi
+
+    mkdir -p /homeassistant/custom_components
+    # Refresh on every start so add-on updates ship component fixes.
+    rm -rf "$dest"
+    cp -a "$src" "$dest"
+    printf 'hemopt\n' >"$marker"
+    echo "[hemopt] LK Arc Climate installerad i $dest"
+    echo "[hemopt] Nasta steg (en gang): Restart Home Assistant, sedan"
+    echo "[hemopt]   Settings → Devices & services → Add integration → LK Arc Climate"
+}
+
+install_lk_arc_climate
+
 export HEMOPT_ADDON=1
 export HEMOPT_DATA=/data
 export HEMOPT_LOG_LEVEL="$(read_option log_level info)"
