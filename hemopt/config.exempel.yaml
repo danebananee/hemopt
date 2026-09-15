@@ -106,8 +106,10 @@ heat_pump:
   cop_at_plus_10: 4.6
   outdoor_entity: sensor.h66_hpoutdoor
   power_entity: sensor.h66_hppower_consumption
-  # LK Arc-givarna ar bara sensor.* (ingen climate per rum).
-  # Styrenheten blir husets rumsborvarde via H66/Rego.
+  # LK Arc syns ofta bara som sensor.* (BLE) i HA — det ar lasning.
+  # Termostaterna i LK-appen styrs via LK:s moln. For skrivbara climate.*
+  # per rum: installera HACS-integrationen angoyd/ha-lksystems och logga in
+  # med samma konto som appen. Annars styrs huset via H66 nedan.
   # Kraver ofta ROOM_CTRL=1 pa H66 om ingen fysisk CAN-rumsgivare finns.
   # Kolla Developer tools → States efter climate.h66_hproom_temp_setpoint.
   room_setpoint_entity: climate.h66_hproom_temp_setpoint  # KONTROLLERA
@@ -179,9 +181,9 @@ optimiser:
 # golvytan. Bara forhallandet mellan rummen spelar roll.
 #
 # temperature_entity = LK Arc (eller annan) rumsensor — bara lasning.
-# climate_entity = valfritt, bara om du faktiskt har en skrivbar termostat
-#   per rum. Finns den inte (vanligt med LK BLE) styrs huset i stallet via
-#   heat_pump.room_setpoint_entity (H66 climate.h66_hproom_temp_setpoint).
+# climate_entity = skrivbar termostat per rum. Kommer fran LK Systems-
+#   integrationen i HA (inte fran BLE-sensorerna med MAC i namnet).
+#   Utan den styrs huset via heat_pump.room_setpoint_entity i stallet.
 # ---------------------------------------------------------------------------
 rooms:
   # --- Overvaning ---
