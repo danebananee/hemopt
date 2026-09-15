@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -40,8 +40,11 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
         await engine.start()
         tasks: list[asyncio.Task] = []
         if run_loops:
-            await _bootstrap(engine)
-            tasks.append(asyncio.create_task(engine.run_forever()))
+            # Sampling history and solving the first plan takes minutes on a
+            # Raspberry Pi. Awaiting it here would hold the port closed for
+            # that long, and Home Assistant's ingress reports an add-on that
+            # refuses connections as "not ready". So bind first, plan after.
+            tasks.append(asyncio.create_task(_bootstrap_then_run(engine)))
         try:
             yield
         finally:
@@ -61,8 +64,15 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/", response_class=HTMLResponse)
-    async def index() -> HTMLResponse:
-        return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    async def index(request: Request) -> HTMLResponse:
+        # Home Assistant's ingress serves the panel under a per-session prefix
+        # and passes it in X-Ingress-Path. Without a matching <base>, the
+        # page's own relative requests for assets and the API would resolve
+        # against Home Assistant itself instead of the add-on.
+        prefix = request.headers.get("X-Ingress-Path", "").rstrip("/")
+        markup = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        markup = markup.replace('<base href="./" />', f'<base href="{prefix}/" />')
+        return HTMLResponse(markup)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -210,6 +220,11 @@ async def _bootstrap(engine: Engine) -> None:
         _LOGGER.exception("initial planning failed")
 
 
+async def _bootstrap_then_run(engine: Engine) -> None:
+    await _bootstrap(engine)
+    await engine.run_forever()
+
+
 def _finite(value: float) -> float | None:
     return None if value == float("inf") else round(value, 3)
 
@@ -232,6 +247,9 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
         "last_plan": status.last_plan.isoformat() if status.last_plan else None,
         "last_training": status.last_training.isoformat() if status.last_training else None,
         "errors": list(status.errors[-5:]),
+        # The panel is reachable before the first plan exists, so the UI needs
+        # to tell "still warming up" apart from "planning failed".
+        "starting": plan is None and status.last_plan is None,
         "fuse_limit_kw": round(engine.config.site.fuse_limit_kw, 2),
         "hot_water_kwh_per_day": round(engine.hot_water_profile.daily_total_kwh(), 2),
     }

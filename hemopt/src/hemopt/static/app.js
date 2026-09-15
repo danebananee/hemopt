@@ -33,14 +33,21 @@ function clockLabel(iso) {
   return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Behind Home Assistant's ingress the panel lives under a per-session prefix,
+// carried by the <base> tag the server writes into the page. Resolving against
+// it keeps the same paths working both there and on a plain localhost port.
+function apiUrl(path) {
+  return new URL(path.replace(/^\//, ""), document.baseURI).toString();
+}
+
 async function getJSON(url) {
-  const response = await fetch(url);
+  const response = await fetch(apiUrl(url));
   if (!response.ok) throw new Error(`${url} -> ${response.status}`);
   return response.json();
 }
 
 async function postJSON(url, body) {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -574,6 +581,16 @@ function currentIndex() {
 function renderNotes() {
   const host = document.getElementById("plan-notes");
   host.textContent = "";
+  if (state.status?.starting) {
+    host.appendChild(
+      html(
+        "div",
+        "note",
+        "Samlar in historik och räknar fram den första planen. " +
+          "På en Raspberry Pi tar det några minuter första gången.",
+      ),
+    );
+  }
   for (const note of state.plan?.notes || []) {
     host.appendChild(html("div", "note", note));
   }

@@ -38,6 +38,20 @@ async def test_index_serves_the_control_panel(client):
     assert "Kostnadsoptimering" in response.text
 
 
+async def test_ingress_prefix_becomes_the_document_base(client):
+    """Assets and API calls must resolve under Home Assistant's ingress path.
+
+    The panel is reached through a per-session prefix, so a page that asked
+    for /api/status would hit Home Assistant's own API rather than the add-on.
+    """
+    http, _ = client
+    response = await http.get("/", headers={"X-Ingress-Path": "/api/hassio_ingress/tok3n"})
+    assert '<base href="/api/hassio_ingress/tok3n/" />' in response.text
+
+    direct = await http.get("/")
+    assert '<base href="/" />' in direct.text
+
+
 async def test_status_reports_a_solved_plan(client):
     http, _ = client
     body = (await http.get("/api/status")).json()
