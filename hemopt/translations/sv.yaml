@@ -47,3 +47,8 @@ configuration:
       Long-lived access token från din HA-profil. Behövs bara om Loggen visar
       SUPERVISOR_TOKEN length=0. Skapa under Profil → Säkerhet → Long-lived
       access tokens.
+  weather_entity:
+    name: Väderentitet
+    description: >-
+      Weather-entitet för timprognos, t.ex. weather.forecast_home. Utan den
+      blir väderprognosen grå och planen antar att utetemperaturen håller i sig.

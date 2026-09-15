@@ -1,37 +1,25 @@
 name: Kostnadsoptimering (hemopt)
-version: "0.1.9"
+version: "0.1.10"
 slug: hemopt
 description: >-
   Flyttar uppvarmning och varmvatten till billiga timmar, kapar effekttoppar och
   jamfor vad de olika elavtalen skulle ha kostat.
-# Kors av scripts/set-repo-url.sh nar repot har fatt sin riktiga adress.
 url: https://github.com/danebananee/hemopt
-# 32-bit ARM is left out on purpose: numpy publishes armv7 wheels but HiGHS
-# does not, so an armv7 install would try to compile the solver on the device.
 arch:
   - aarch64
   - amd64
 init: false
 
-# Ingress puts the control panel inside Home Assistant's own sidebar, so there
-# is no extra port to open and no separate login.
 ingress: true
 panel_icon: mdi:cash-clock
 panel_title: Kostnadsoptimering
 
-# Supplies SUPERVISOR_TOKEN, which the add-on uses to reach the Home Assistant
-# API. The user never has to create a long-lived access token when this works.
 homeassistant_api: true
-# Needed to read the broker's host and credentials back from the Services API.
 hassio_api: true
 
-# "want" means the add-on starts even without a broker, but is handed the
-# broker's host and credentials automatically when Mosquitto is installed.
 services:
   - mqtt:want
 
-# /data survives add-on updates; the learned models and peak history live there.
-# homeassistant_config lets you drop hemopt.yaml next to configuration.yaml.
 map:
   - addon_config:rw
   - homeassistant_config:rw
@@ -47,6 +35,7 @@ options:
   peak_hour_end: 21
   peak_weekdays_only: true
   total_power_entity: ""
+  weather_entity: weather.forecast_home
   ha_url: http://homeassistant:8123
   ha_token: ""
 
@@ -61,5 +50,6 @@ schema:
   peak_hour_end: int(1,24)
   peak_weekdays_only: bool
   total_power_entity: str?
+  weather_entity: str?
   ha_url: str?
   ha_token: password?

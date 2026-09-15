@@ -23,7 +23,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 class PriorityUpdate(BaseModel):
-    priority: int = Field(ge=1, le=5)
+    priority: int = Field(ge=1, le=3)
 
 
 class ComfortUpdate(BaseModel):
@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.9",
+        version="0.1.10",
         lifespan=lifespan,
     )
 

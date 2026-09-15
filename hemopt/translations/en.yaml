@@ -48,3 +48,9 @@ configuration:
       Long-lived access token from your HA profile. Only needed when the Log
       shows SUPERVISOR_TOKEN length=0. Create under Profile → Security →
       Long-lived access tokens.
+  weather_entity:
+    name: Weather entity
+    description: >-
+      Weather entity for the hourly forecast, e.g. weather.forecast_home.
+      Without it the weather pill stays unset and the plan assumes outdoor
+      temperature holds steady.

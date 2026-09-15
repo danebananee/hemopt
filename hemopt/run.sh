@@ -46,6 +46,7 @@ export HEMOPT_PEAK_HOUR_START="$(read_option peak_hour_start 7)"
 export HEMOPT_PEAK_HOUR_END="$(read_option peak_hour_end 21)"
 export HEMOPT_PEAK_WEEKDAYS="$(read_option peak_weekdays_only true)"
 export HEMOPT_TOTAL_POWER_ENTITY="$(read_option total_power_entity "")"
+export HEMOPT_WEATHER_ENTITY="$(read_option weather_entity "")"
 
 echo "[hemopt] peak_enabled=${HEMOPT_PEAK_ENABLED} meter=${HEMOPT_TOTAL_POWER_ENTITY:-"(none)"}"
 

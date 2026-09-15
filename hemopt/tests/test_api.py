@@ -108,7 +108,7 @@ async def test_priority_change_reshapes_the_plan(client):
     low = next(r for r in engine.plan.rooms if r.key == "entre")
     low_average = sum(low.temperature) / len(low.temperature)
 
-    await http.post("/api/rooms/entre/priority", json={"priority": 5})
+    await http.post("/api/rooms/entre/priority", json={"priority": 3})
     high = next(r for r in engine.plan.rooms if r.key == "entre")
     high_average = sum(high.temperature) / len(high.temperature)
 
@@ -155,7 +155,7 @@ async def test_rooms_expose_the_learned_inertia(client):
     assert len(rooms) == 9
     for room in rooms:
         assert room["model"]["tau_hours"] > 0
-        assert 1 <= room["priority"] <= 5
+        assert 1 <= room["priority"] <= 3
 
 
 async def test_replan_endpoint_recomputes(client):

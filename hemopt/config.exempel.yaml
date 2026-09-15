@@ -152,7 +152,7 @@ optimiser:
 # ---------------------------------------------------------------------------
 # Rum.
 #
-# priority 5 = hall temperaturen, 1 = far svaja och bar lastflytten.
+# priority 3 = hall temperaturen, 1 = far svaja och bar lastflytten.
 # heat_share ar rummets andel av varmeeffekten, ungefar proportionell mot
 # golvytan. Bara forhallandet mellan rummen spelar roll.
 #
@@ -165,7 +165,7 @@ rooms:
   - key: vardagsrum
     name: Vardagsrum
     floor: Overvaning
-    priority: 5
+    priority: 3
     temperature_entity: sensor.fa_6a_ee_c8_9a_63_temperature
     humidity_entity: sensor.fa_6a_ee_c8_9a_63_humidity
     climate_entity: climate.fa_6a_ee_c8_9a_63      # KONTROLLERA
@@ -176,7 +176,7 @@ rooms:
   - key: badrum
     name: Badrum
     floor: Overvaning
-    priority: 5
+    priority: 3
     temperature_entity: sensor.f7_d4_23_14_49_da_temperature
     humidity_entity: sensor.f7_d4_23_14_49_da_humidity
     climate_entity: climate.f7_d4_23_14_49_da      # KONTROLLERA
@@ -187,7 +187,7 @@ rooms:
   - key: rios_rum
     name: Rios rum
     floor: Overvaning
-    priority: 5
+    priority: 3
     temperature_entity: sensor.e6_5e_d9_54_a8_e7_temperature
     humidity_entity: sensor.e6_5e_d9_54_a8_e7_humidity
     climate_entity: climate.e6_5e_d9_54_a8_e7      # KONTROLLERA
@@ -198,7 +198,7 @@ rooms:
   - key: sovrum
     name: Sovrum
     floor: Overvaning
-    priority: 4
+    priority: 3
     temperature_entity: sensor.c8_1b_04_e0_7e_90_temperature
     humidity_entity: sensor.c8_1b_04_e0_7e_90_humidity
     climate_entity: climate.c8_1b_04_e0_7e_90      # KONTROLLERA

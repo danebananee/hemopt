@@ -399,14 +399,22 @@ function renderPills() {
   host.textContent = "";
 
   const pricesOk = Boolean(status.prices_available || state.prices?.available);
-  const pills = [
-    ["Home Assistant", status.home_assistant_online],
-    ["Spotpris", pricesOk],
-    ["Väderprognos", status.forecast_available],
-    ["MQTT", status.mqtt_online],
+  const mqttExpected = Boolean(status.mqtt_configured);
+  const weatherExpected = Boolean(status.weather_entity);
+
+  const items = [
+    ["Home Assistant", status.home_assistant_online, true],
+    ["Spotpris", pricesOk, true],
+    [
+      weatherExpected ? "Väderprognos" : "Väder (ej satt)",
+      status.forecast_available,
+      weatherExpected,
+    ],
+    [mqttExpected ? "MQTT" : "MQTT (ej satt)", status.mqtt_online, mqttExpected],
   ];
-  for (const [label, ok] of pills) {
-    host.appendChild(html("span", `pill ${ok ? "ok" : "bad"}`, label));
+  for (const [label, ok, expected] of items) {
+    const cls = !expected ? "pill dim" : ok ? "pill ok" : "pill bad";
+    host.appendChild(html("span", cls, label));
   }
 }
 
@@ -593,7 +601,7 @@ function renderPriceChart() {
   host.textContent = "";
   const prices = state.prices;
   if (!prices || !prices.points || !prices.points.length) {
-    subtitle.textContent = "Spotpris igår, idag och imorgon";
+    subtitle.textContent = "Spotpris igår, idag och imorgon — dra i grafen för exakt pris";
     host.appendChild(
       html(
         "p",
@@ -610,21 +618,28 @@ function renderPriceChart() {
     prices.current_total_sek != null
       ? `${fmt(prices.current_total_sek, 2)} SEK/kWh (spot ${fmt(prices.current_spot_sek, 2)})`
       : "—";
-  subtitle.textContent = `${prices.area} · nu ${current}`;
+  subtitle.textContent = `${prices.area} · nu ${current} · dra eller klicka i grafen`;
 
   const points = prices.points;
   const width = host.clientWidth || 900;
-  const height = host.clientHeight || 280;
+  const height = Math.max(host.clientHeight || 280, 260);
   const margin = { top: 14, right: 18, bottom: 28, left: 46 };
   const innerW = Math.max(width - margin.left - margin.right, 10);
   const innerH = Math.max(height - margin.top - margin.bottom, 10);
   const times = points.map((p) => new Date(p.t).getTime());
   const maxPrice = Math.max(...points.map((p) => Math.max(p.total, p.spot)), 0.05) * 1.12;
   const x = scaleLinear([times[0], times[times.length - 1]], [0, innerW]);
+  const xInv = scaleLinear([0, innerW], [times[0], times[times.length - 1]]);
   const y = scaleLinear([0, maxPrice], [innerH, 0]);
   const nowMs = prices.now ? new Date(prices.now).getTime() : Date.now();
 
-  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
+  const wrap = html("div", "price-chart-wrap");
+  const readout = html("div", "price-readout");
+  const svg = el("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    preserveAspectRatio: "none",
+    class: "price-svg",
+  });
   const root = el("g", { transform: `translate(${margin.left},${margin.top})` });
   svg.appendChild(root);
 
@@ -639,7 +654,6 @@ function renderPriceChart() {
     );
   }
 
-  // Shade tomorrow (upcoming) lightly.
   const tomorrow = points.find((p) => {
     const day = p.day || p.t.slice(0, 10);
     const today = (prices.now || "").slice(0, 10);
@@ -682,11 +696,10 @@ function renderPriceChart() {
   );
 
   if (nowMs >= times[0] && nowMs <= times[times.length - 1]) {
-    const xn = x(nowMs);
     root.appendChild(
       el("line", {
-        x1: xn,
-        x2: xn,
+        x1: x(nowMs),
+        x2: x(nowMs),
         y1: 0,
         y2: innerH,
         stroke: "#ff9f43",
@@ -696,7 +709,124 @@ function renderPriceChart() {
     );
   }
 
-  host.appendChild(svg);
+  const cursor = el("g", { class: "price-cursor", style: "display:none" });
+  const cursorLine = el("line", {
+    y1: 0,
+    y2: innerH,
+    stroke: "#e8eef8",
+    "stroke-width": 1,
+    "stroke-dasharray": "4 3",
+  });
+  const cursorSpot = el("circle", { r: 4, fill: "#9ec1ff", stroke: "#0b0f16", "stroke-width": 1 });
+  const cursorTotal = el("circle", { r: 5, fill: "#5b82b8", stroke: "#0b0f16", "stroke-width": 1 });
+  cursor.appendChild(cursorLine);
+  cursor.appendChild(cursorSpot);
+  cursor.appendChild(cursorTotal);
+  root.appendChild(cursor);
+
+  const hit = el("rect", {
+    x: 0,
+    y: 0,
+    width: innerW,
+    height: innerH,
+    fill: "transparent",
+    style: "cursor: crosshair",
+  });
+  root.appendChild(hit);
+
+  function nearestIndex(ms) {
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < times.length; i += 1) {
+      const dist = Math.abs(times[i] - ms);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function showAt(index) {
+    const point = points[index];
+    const px = x(times[index]);
+    cursor.setAttribute("style", "display:block");
+    cursorLine.setAttribute("x1", String(px));
+    cursorLine.setAttribute("x2", String(px));
+    cursorSpot.setAttribute("cx", String(px));
+    cursorSpot.setAttribute("cy", String(y(point.spot)));
+    cursorTotal.setAttribute("cx", String(px));
+    cursorTotal.setAttribute("cy", String(y(point.total)));
+
+    const when = new Date(point.t).toLocaleString("sv-SE", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const oreTotal = Math.round(point.total * 100);
+    const oreSpot = Math.round(point.spot * 100);
+    readout.textContent = "";
+    readout.appendChild(html("strong", null, when));
+    readout.appendChild(
+      html(
+        "span",
+        null,
+        `Totalt ${fmt(point.total, 3)} SEK/kWh (${oreTotal} öre) · Spot ${fmt(point.spot, 3)} SEK/kWh (${oreSpot} öre)`,
+      ),
+    );
+  }
+
+  function pointerToIndex(event) {
+    const rect = svg.getBoundingClientRect();
+    const clientX = event.clientX ?? event.touches?.[0]?.clientX;
+    if (clientX == null) return null;
+    const localX = ((clientX - rect.left) / rect.width) * width - margin.left;
+    const clamped = Math.min(Math.max(localX, 0), innerW);
+    return nearestIndex(xInv(clamped));
+  }
+
+  let locked = null;
+  function onMove(event) {
+    if (locked !== null) return;
+    const index = pointerToIndex(event);
+    if (index == null) return;
+    event.preventDefault();
+    showAt(index);
+  }
+  function onDown(event) {
+    const index = pointerToIndex(event);
+    if (index == null) return;
+    event.preventDefault();
+    locked = index;
+    showAt(index);
+  }
+  function onUp() {
+    locked = null;
+  }
+
+  hit.addEventListener("mousemove", onMove);
+  hit.addEventListener("touchmove", onMove, { passive: false });
+  hit.addEventListener("mousedown", onDown);
+  hit.addEventListener("touchstart", onDown, { passive: false });
+  window.addEventListener("mouseup", onUp);
+  window.addEventListener("touchend", onUp);
+  hit.addEventListener("mouseleave", () => {
+    if (locked !== null) return;
+    cursor.setAttribute("style", "display:none");
+    readout.textContent = "Dra eller klicka i grafen för exakt tid och pris.";
+  });
+
+  // Default: current (or nearest) slot.
+  showAt(nearestIndex(nowMs));
+  if (!readout.textContent) {
+    readout.textContent = "Dra eller klicka i grafen för exakt tid och pris.";
+  }
+
+  wrap.appendChild(readout);
+  wrap.appendChild(svg);
+  host.appendChild(wrap);
 }
 
 let peakSettingsFingerprint = "";
@@ -900,8 +1030,27 @@ function renderRooms() {
       html(
         "p",
         "muted",
-        "Kopiera config.exempel.yaml till /homeassistant/hemopt.yaml (bredvid configuration.yaml), " +
-          "fyll i dina entiteter och starta om tillägget. Utan rum blir det ingen värmeplan.",
+        "Rum läggs inte till i den här panelen. Skapa filen hemopt.yaml i Home Assistants " +
+          "config-mapp (samma plats som configuration.yaml).",
+      ),
+    );
+    const steps = html("ol", "setup-steps");
+    for (const text of [
+      "Settings → Add-ons → File editor (eller Studio Code Server) → Install/Start",
+      "Öppna /config/ (roten där configuration.yaml ligger)",
+      "Skapa ny fil: hemopt.yaml",
+      "Kopiera rum-delen från config.exempel.yaml i GitHub-repot danebananee/hemopt och byt till dina temperature_entity / climate_entity",
+      "Settings → Add-ons → Kostnadsoptimering → Restart",
+    ]) {
+      steps.appendChild(html("li", null, text));
+    }
+    box.appendChild(steps);
+    box.appendChild(
+      html(
+        "p",
+        "muted",
+        "Prioritet här: 3 = håll temperaturen, 1 = får svaja och bär lastflytten. " +
+          "Utan rum blir det ingen värmeplan.",
       ),
     );
     host.appendChild(box);
@@ -944,12 +1093,17 @@ function renderRooms() {
     const slider = document.createElement("input");
     slider.type = "range";
     slider.min = "1";
-    slider.max = "5";
+    slider.max = "3";
     slider.step = "1";
-    slider.value = String(room.priority);
-    const valueLabel = html("span", "priority-value", String(room.priority));
+    slider.value = String(Math.min(3, Math.max(1, room.priority)));
+    const labels = { 1: "1 · får svaja", 2: "2 · mellan", 3: "3 · håll temp" };
+    const valueLabel = html(
+      "span",
+      "priority-value",
+      labels[slider.value] || String(room.priority),
+    );
     slider.addEventListener("input", () => {
-      valueLabel.textContent = slider.value;
+      valueLabel.textContent = labels[slider.value] || slider.value;
     });
     slider.addEventListener("change", async () => {
       slider.disabled = true;

@@ -242,7 +242,7 @@ class RoomConfig(BaseModel):
     key: str
     name: str
     floor: str = ""
-    priority: int = Field(default=3, ge=1, le=5)
+    priority: int = Field(default=2, ge=1, le=3)
     temperature_entity: str
     humidity_entity: str | None = None
     climate_entity: str | None = None
@@ -254,15 +254,29 @@ class RoomConfig(BaseModel):
     max_setback_offset: float = 1.5
     heat_share: float = Field(default=1.0, gt=0.0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _clamp_legacy_priority(cls, data: object) -> object:
+        """Older configs used 1–5; map 4–5 down to 3."""
+        if isinstance(data, dict) and "priority" in data:
+            try:
+                value = int(data["priority"])
+            except (TypeError, ValueError):
+                return data
+            if value > 3:
+                data = {**data, "priority": 3}
+            elif value < 1:
+                data = {**data, "priority": 1}
+        return data
+
     @property
     def comfort_weight(self) -> float:
         """SEK charged per degree-hour outside the comfort band.
 
-        Priority 5 is expensive enough that the solver will never trade the
-        room away for spot-price savings; priority 1 is cheap enough that it
-        is the first to coast.
+        Priority 3 is expensive enough that the solver will not trade the room
+        away for spot-price savings; priority 1 is the first to coast.
         """
-        return {1: 0.5, 2: 1.5, 3: 4.0, 4: 12.0, 5: 40.0}[self.priority]
+        return {1: 1.0, 2: 8.0, 3: 40.0}[self.priority]
 
 
 class HotWaterConfig(BaseModel):
@@ -502,6 +516,9 @@ class Config(BaseModel):
             entity = entity.strip()
             if entity:
                 data["base_load"]["total_power_entity"] = entity
+
+        if weather := (os.environ.get("HEMOPT_WEATHER_ENTITY") or "").strip():
+            data["site"]["weather_entity"] = weather
 
         if data_dir_env := os.environ.get("HEMOPT_DATA"):
             data["database_path"] = str(Path(data_dir_env) / "hemopt.db")
