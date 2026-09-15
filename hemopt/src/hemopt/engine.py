@@ -842,9 +842,7 @@ class Engine:
                     else self.config.hot_water.min_temperature
                 )
                 try:
-                    await ha.set_temperature_entity(
-                        self.config.hot_water.setpoint_entity, target
-                    )
+                    await ha.set_temperature_entity(self.config.hot_water.setpoint_entity, target)
                     applied += 1
                 except Exception as exc:  # noqa: BLE001
                     self._record_error(f"hot water setpoint: {exc}")

@@ -372,9 +372,7 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
         "heat_pump_power_entity": engine.config.heat_pump.power_entity,
         "heat_pump_outdoor_entity": engine.config.heat_pump.outdoor_entity,
         "room_setpoint_entity": engine.config.heat_pump.room_setpoint_entity,
-        "rooms_with_climate": sum(
-            1 for room in engine.config.rooms if room.climate_entity
-        ),
+        "rooms_with_climate": sum(1 for room in engine.config.rooms if room.climate_entity),
     }
 
     # Spot is independent of Home Assistant — surface it even before a plan.

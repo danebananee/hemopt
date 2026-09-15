@@ -77,9 +77,7 @@ def _load_climate_helpers():
     )
     const_mod = importlib.util.module_from_spec(const_spec)
     sys.modules["custom_components.lk_arc_climate.const"] = const_mod
-    sys.modules["custom_components.lk_arc_climate"] = type(sys)(
-        "custom_components.lk_arc_climate"
-    )
+    sys.modules["custom_components.lk_arc_climate"] = type(sys)("custom_components.lk_arc_climate")
     const_spec.loader.exec_module(const_mod)
 
     spec = importlib.util.spec_from_file_location(

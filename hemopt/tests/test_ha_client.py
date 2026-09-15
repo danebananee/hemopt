@@ -77,4 +77,3 @@ async def test_set_temperature_entity_routes_climate_and_number():
 
     assert seen[0].url.path.endswith("/climate/set_temperature")
     assert seen[1].url.path.endswith("/number/set_value")
-
