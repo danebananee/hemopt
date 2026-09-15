@@ -33,11 +33,14 @@ def _build_engine(args: argparse.Namespace) -> Engine:
         config = demo_config(database_path=args.database or "hemopt-demo.db")
         return DemoEngine(config)
 
-    if not args.config:
-        raise SystemExit("--config is required unless --demo is used")
-    config = Config.load(args.config)
+    config = Config.resolve(args.config)
     if args.database:
         config.database_path = args.database
+    if not config.home_assistant.token:
+        raise SystemExit(
+            "no Home Assistant credentials: pass --config, or run as the add-on "
+            "so the Supervisor can provide them"
+        )
     return Engine(config, store=Store(config.database_path))
 
 
@@ -93,11 +96,16 @@ def main(argv: list[str] | None = None) -> int:
 def _run_doctor(args: argparse.Namespace) -> int:
     from .doctor import format_report, run_doctor
 
-    if not args.config:
-        print("doctor needs a config: hemopt -c config.yaml doctor", file=sys.stderr)
+    config = Config.resolve(args.config)
+    if not config.home_assistant.token:
+        print(
+            "doctor needs Home Assistant credentials: pass -c config.yaml, or run "
+            "it from inside the add-on",
+            file=sys.stderr,
+        )
         return 2
 
-    report = asyncio.run(run_doctor(Config.load(args.config)))
+    report = asyncio.run(run_doctor(config))
     print(format_report(report))
     return 1 if report.failures else 0
 

@@ -7,6 +7,8 @@ rest of the code only ever sees kW, kWh, SEK/kWh and degrees Celsius.
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -14,6 +16,24 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 PriceArea = Literal["SE1", "SE2", "SE3", "SE4"]
+
+# How the spot price is settled. The grid fee and the tax are the same either
+# way; what differs is how finely the energy part is resolved, and therefore
+# how much there is to gain from shifting load within a day.
+Contract = Literal["fixed", "daily", "hourly", "quarterly"]
+
+
+def data_dir() -> Path:
+    """Where persistent state lives.
+
+    Inside the add-on this is /data, which survives updates. Elsewhere it is
+    the working directory, so a checkout behaves like any other Python tool.
+    """
+    return Path(os.environ.get("HEMOPT_DATA") or ".")
+
+
+def profile_path() -> Path:
+    return data_dir() / "profile.json"
 
 
 class SiteConfig(BaseModel):
@@ -39,6 +59,7 @@ class EnergyPriceConfig(BaseModel):
     spot price and to every ore/kWh adder that is configured net of VAT.
     """
 
+    contract: Contract = "hourly"
     vat_rate: float = 0.25
     supplier_markup_ore: float = 8.0
     certificate_ore: float = 0.0
@@ -46,6 +67,9 @@ class EnergyPriceConfig(BaseModel):
     transfer_fee_high_ore: float = 31.12
     transfer_fee_normal_ore: float = 12.4
     prices_include_vat: bool = False
+    # What a fixed-price contract costs, used as the comparison baseline when
+    # simulating what the other contract types would have cost.
+    fixed_price_ore: float = 85.0
 
     def adder_sek_per_kwh(self, high_load: bool) -> float:
         transfer = self.transfer_fee_high_ore if high_load else self.transfer_fee_normal_ore
@@ -222,8 +246,10 @@ class MqttConfig(BaseModel):
     enabled: bool = True
     host: str = "homeassistant.local"
     port: int = 1883
-    username: str = ""
-    password: str = ""
+    # None rather than "" so an anonymous broker is expressible, which is what
+    # the Supervisor reports when Mosquitto runs without authentication.
+    username: str | None = None
+    password: str | None = None
     discovery_prefix: str = "homeassistant"
     node_id: str = "hemopt"
 
@@ -289,6 +315,72 @@ class Config(BaseModel):
     def load(cls, path: str | Path) -> Config:
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         return cls.model_validate(raw)
+
+    @classmethod
+    def resolve(cls, path: str | Path | None = None) -> Config:
+        """Build the effective config from a file, a saved profile and the env.
+
+        Running as a Home Assistant add-on means nobody edits a YAML file: the
+        Supervisor hands over the API token and the broker credentials, and the
+        household profile is written by the setup UI. An explicit path still
+        wins so a hand-written config keeps working.
+        """
+        if path is not None:
+            config = cls.load(path)
+        elif (profile := profile_path()).exists():
+            config = cls.model_validate_json(profile.read_text(encoding="utf-8"))
+        else:
+            config = cls()
+
+        return config.with_environment()
+
+    def with_environment(self) -> Config:
+        """Overlay the environment on top of this config.
+
+        Connection details are taken from the environment unconditionally
+        because under the Supervisor they are rotated for us, and a stale copy
+        saved in a profile would silently break after an add-on restart.
+        """
+        data = self.model_dump(mode="json")
+
+        if url := os.environ.get("HEMOPT_HA_URL"):
+            data["home_assistant"]["base_url"] = url
+        if token := os.environ.get("HEMOPT_HA_TOKEN"):
+            data["home_assistant"]["token"] = token
+
+        if host := os.environ.get("HEMOPT_MQTT_HOST"):
+            data["mqtt"]["enabled"] = True
+            data["mqtt"]["host"] = host
+            data["mqtt"]["port"] = int(os.environ.get("HEMOPT_MQTT_PORT") or 1883)
+            data["mqtt"]["username"] = os.environ.get("HEMOPT_MQTT_USERNAME") or None
+            data["mqtt"]["password"] = os.environ.get("HEMOPT_MQTT_PASSWORD") or None
+
+        if area := os.environ.get("HEMOPT_PRICE_AREA"):
+            data["site"]["price_area"] = area
+        if contract := os.environ.get("HEMOPT_CONTRACT"):
+            data["energy_price"]["contract"] = contract
+
+        if data_dir := os.environ.get("HEMOPT_DATA"):
+            data["database_path"] = str(Path(data_dir) / "hemopt.db")
+
+        return Config.model_validate(data)
+
+    def save_profile(self) -> Path:
+        """Persist the household profile where the add-on will find it again.
+
+        Only the household's own description is stored. Credentials are left
+        out on purpose: they come from the Supervisor on every start, and
+        writing them to disk would turn a backup into a secret leak.
+        """
+        data = self.model_dump(mode="json")
+        data["home_assistant"]["token"] = ""
+        data["mqtt"]["username"] = None
+        data["mqtt"]["password"] = None
+
+        path = profile_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return path
 
     def save(self, path: str | Path) -> None:
         data = self.model_dump(mode="json", exclude_defaults=False)

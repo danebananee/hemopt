@@ -105,9 +105,7 @@ def test_suggestions_stay_within_the_entity_domain():
     from hemopt.doctor import _suggest
 
     known = ["sensor.f7_d4_23_14_49_da_temperature", "climate.f7_d4_23_14_49_da"]
-    assert _suggest("climate.f7_d4_23_14_49_da_thermostat", known) == [
-        "climate.f7_d4_23_14_49_da"
-    ]
+    assert _suggest("climate.f7_d4_23_14_49_da_thermostat", known) == ["climate.f7_d4_23_14_49_da"]
 
 
 async def test_a_missing_thermostat_is_only_a_warning():
