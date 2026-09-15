@@ -1,182 +1,133 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 980" role="img" aria-labelledby="title desc">
-  <title id="title">hemopt — så hänger systemet ihop</title>
-  <desc id="desc">Flöde från indata via hemopt-motorn till styrning av LK Arc och IVT Rego 1000</desc>
-  <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
-    </marker>
-    <marker id="at" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#0f766e"/>
-    </marker>
-    <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#b45309"/>
-    </marker>
-    <style>
-      .title { font: 700 28px DejaVu Sans, sans-serif; fill: #0f172a; }
-      .sub { font: 400 14px DejaVu Sans, sans-serif; fill: #64748b; }
-      .col { font: 700 12px DejaVu Sans, sans-serif; fill: #0f172a; letter-spacing: .06em; }
-      .t { font: 700 15px DejaVu Sans, sans-serif; fill: #0f172a; }
-      .s { font: 400 13px DejaVu Sans, sans-serif; fill: #475569; }
-      .m { font: 500 12px DejaVu Sans Mono, monospace; fill: #334155; }
-      .lbl { font: 500 11px DejaVu Sans, sans-serif; fill: #64748b; }
-      .panel { fill: #fff; stroke: #e2e8f0; stroke-width: 2; }
-    </style>
-  </defs>
-  <rect width="1400" height="980" fill="#f8fafc"/>
-  <text x="48" y="48" class="title">hemopt — så hänger systemet ihop</text>
-  <text x="48" y="74" class="sub">Data in → modell → plan → styrning · Raspberry Pi / Docker · Home Assistant som nav</text>
-
-  <rect x="40" y="110" width="260" height="810" rx="18" class="panel"/>
-  <text x="60" y="140" class="col">INDATA</text>
-
-  <rect x="340" y="110" width="700" height="810" rx="18" class="panel"/>
-  <text x="360" y="140" class="col">HEMOPT-MOTOR</text>
-  <text x="540" y="140" class="sub">varje minut · planerar varje kvart</text>
-
-  <rect x="1080" y="110" width="280" height="810" rx="18" class="panel"/>
-  <text x="1100" y="140" class="col">UTDATA</text>
-
-  <!-- inputs -->
-  <g>
-    <rect x="60" y="160" width="220" height="90" rx="12" fill="#ecfeff" stroke="#5eead4" stroke-width="2"/>
-    <text x="76" y="186" class="t">Nordpool SE3</text>
-    <text x="76" y="208" class="s">Kvartspriser via</text>
-    <text x="76" y="226" class="s">elprisetjustnu.se</text>
-    <text x="76" y="240" class="m">prices.py</text>
-
-    <rect x="60" y="268" width="220" height="110" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
-    <text x="76" y="294" class="t">Home Assistant</text>
-    <text x="76" y="316" class="s">Rum · LK Arc</text>
-    <text x="76" y="334" class="s">H66 ute / effekt / VV</text>
-    <text x="76" y="352" class="s">Husets elmätare</text>
-    <text x="76" y="368" class="m">ha.py</text>
-
-    <rect x="60" y="396" width="220" height="90" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
-    <text x="76" y="422" class="t">Väderprognos</text>
-    <text x="76" y="444" class="s">Timtemperatur 36 h</text>
-    <text x="76" y="462" class="m">weather.get_forecasts</text>
-
-    <rect x="60" y="504" width="220" height="90" rx="12" fill="#fefce8" stroke="#fde047" stroke-width="2"/>
-    <text x="76" y="530" class="t">Din config</text>
-    <text x="76" y="552" class="s">Rumsprioritet 1–5</text>
-    <text x="76" y="570" class="s">Komfortband · EXT</text>
-    <text x="76" y="586" class="m">config.yaml</text>
-
-    <rect x="60" y="612" width="220" height="90" rx="12" fill="#faf5ff" stroke="#d8b4fe" stroke-width="2"/>
-    <text x="76" y="638" class="t">SQLite-minne</text>
-    <text x="76" y="660" class="s">Tröghetsmodeller</text>
-    <text x="76" y="678" class="s">VV-profil · toppar</text>
-    <text x="76" y="694" class="m">storage.py</text>
-
-    <rect x="60" y="720" width="220" height="80" rx="12" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
-    <text x="76" y="746" class="t">hemopt doctor</text>
-    <text x="76" y="768" class="s">Verifierar varje entitet</text>
-    <text x="76" y="786" class="s">föreslår rätt ID:n</text>
-  </g>
-
-  <!-- engine -->
-  <g>
-    <rect x="360" y="160" width="200" height="95" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
-    <text x="376" y="186" class="t">1. Samla</text>
-    <text x="376" y="208" class="s">States + historik</text>
-    <text x="376" y="226" class="s">från HA</text>
-    <text x="376" y="244" class="m">engine.collect</text>
-
-    <rect x="600" y="160" width="220" height="95" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
-    <text x="616" y="186" class="t">2. Lär</text>
-    <text x="616" y="208" class="s">Tröghet · VV · baslast</text>
-    <text x="616" y="226" class="s">minstakvadrat</text>
-    <text x="616" y="244" class="m">thermal / hotwater</text>
-
-    <rect x="360" y="290" width="660" height="150" rx="14" fill="#ecfdf5" stroke="#34d399" stroke-width="2"/>
-    <text x="380" y="322" class="t">3. Planera 36 h (LP / HiGHS)</text>
-    <text x="380" y="350" class="s">Minimera: energi + effektavgift + komfortstraff</text>
-    <text x="380" y="372" class="s">Förvärm rum &amp; varmvatten före dyra timmar</text>
-    <text x="380" y="394" class="s">Respektera rumsprioritet och effekttak</text>
-    <text x="380" y="420" class="m">optimizer.solve · ~0,3 s på Pi</text>
-
-    <rect x="360" y="470" width="660" height="130" rx="14" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
-    <text x="380" y="502" class="t">4. Effektvakt (varje minut)</text>
-    <text x="380" y="530" class="s">Hur mycket energi är kvar i denna klocktimme?</text>
-    <text x="380" y="552" class="s">Får värmepumpen fortsätta? Komfort vinner över tariff.</text>
-    <text x="380" y="578" class="m">guard.evaluate · hysteresis · max blocktid</text>
-
-    <rect x="360" y="630" width="290" height="100" rx="12" fill="#fef2f2" stroke="#fca5a5" stroke-width="2"/>
-    <text x="376" y="658" class="t">5a. Börvärden</text>
-    <text x="376" y="682" class="s">LK-termostater per rum</text>
-    <text x="376" y="700" class="s">climate.set_temperature</text>
-    <text x="376" y="718" class="m">rådgivande</text>
-
-    <rect x="690" y="630" width="310" height="100" rx="12" fill="#fffbeb" stroke="#fbbf24" stroke-width="2"/>
-    <text x="706" y="658" class="t">5b. EXT-block</text>
-    <text x="706" y="682" class="s">Rego 1000 via H66</text>
-    <text x="706" y="700" class="s">port 1 = stoppa värme</text>
-    <text x="706" y="718" class="m">hård stopp</text>
-
-    <text x="360" y="770" class="s">Styrning är avstängd tills «Styr värmen» slås på.</text>
-    <text x="360" y="792" class="s">Vakten räknar även med EXT avstängt — du kan följa den i HA först.</text>
-    <text x="360" y="820" class="t">Loop: samla → lär → planera → vaka → styra → spara</text>
-  </g>
-
-  <!-- outputs -->
-  <g>
-    <rect x="1100" y="160" width="240" height="100" rx="12" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="2"/>
-    <text x="1116" y="186" class="t">Webbpanel</text>
-    <text x="1116" y="208" class="s">Plan · toppar · prioritet</text>
-    <text x="1116" y="226" class="s">FastAPI + static UI</text>
-    <text x="1116" y="246" class="m">:47318</text>
-
-    <rect x="1100" y="286" width="240" height="120" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
-    <text x="1116" y="312" class="t">HA via MQTT</text>
-    <text x="1116" y="334" class="s">Pris · tröskel · vakt</text>
-    <text x="1116" y="352" class="s">Rumsprioritet-reglage</text>
-    <text x="1116" y="370" class="s">Dashboard-vy</text>
-    <text x="1116" y="390" class="m">kostnadsoptimering</text>
-
-    <rect x="1100" y="432" width="240" height="110" rx="12" fill="#fef2f2" stroke="#fca5a5" stroke-width="2"/>
-    <text x="1116" y="458" class="t">LK Arc Hub</text>
-    <text x="1116" y="480" class="s">11 rum, två plan</text>
-    <text x="1116" y="498" class="s">Börvärde per zon</text>
-    <text x="1116" y="516" class="s">Golvvärme styr flöde</text>
-
-    <rect x="1100" y="568" width="240" height="110" rx="12" fill="#fffbeb" stroke="#fbbf24" stroke-width="2"/>
-    <text x="1116" y="594" class="t">IVT Rego 1000</text>
-    <text x="1116" y="616" class="s">Kompressor + VV</text>
-    <text x="1116" y="634" class="s">EXT stoppar hårt</text>
-    <text x="1116" y="652" class="s">H66 = brygga</text>
-
-    <rect x="1100" y="704" width="240" height="90" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
-    <text x="1116" y="730" class="t">Lärdom tillbaka</text>
-    <text x="1116" y="752" class="s">Mätta toppar &amp; tröghet</text>
-    <text x="1116" y="770" class="s">matas in i SQLite</text>
-  </g>
-
-  <!-- arrows -->
-  <path d="M280 205 H340" fill="none" stroke="#0ea5e9" stroke-width="2" marker-end="url(#a)"/>
-  <text x="286" y="198" class="lbl">priser</text>
-  <path d="M280 323 H340" fill="none" stroke="#3b82f6" stroke-width="2" marker-end="url(#a)"/>
-  <text x="286" y="316" class="lbl">states</text>
-  <path d="M280 441 H360" fill="none" stroke="#22c55e" stroke-width="2" marker-end="url(#a)"/>
-  <text x="286" y="434" class="lbl">ute °C</text>
-  <path d="M280 549 H360" fill="none" stroke="#eab308" stroke-width="2" marker-end="url(#a)"/>
-  <text x="286" y="542" class="lbl">prio</text>
-  <path d="M280 657 H360" fill="none" stroke="#a855f7" stroke-width="2" marker-end="url(#a)"/>
-  <text x="286" y="650" class="lbl">modeller</text>
-
-  <path d="M460 255 V290" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
-  <path d="M710 255 V290" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
-  <path d="M690 440 V470" fill="none" stroke="#0f766e" stroke-width="3" marker-end="url(#at)"/>
-  <path d="M505 600 V630" fill="none" stroke="#0f766e" stroke-width="3" marker-end="url(#at)"/>
-  <path d="M845 600 V630" fill="none" stroke="#b45309" stroke-width="3" marker-end="url(#aa)"/>
-
-  <path d="M1020 340 H1100" fill="none" stroke="#0f766e" stroke-width="3" marker-end="url(#at)"/>
-  <text x="1025" y="332" class="lbl">status</text>
-  <path d="M650 680 H1100" fill="none" stroke="#ef4444" stroke-width="2" marker-end="url(#a)"/>
-  <text x="860" y="672" class="lbl">börvärden</text>
-  <path d="M1000 680 H1100" fill="none" stroke="#b45309" stroke-width="3" marker-end="url(#aa)"/>
-  <text x="1010" y="704" class="lbl">EXT</text>
-
-  <path d="M1220 794 V880 H155 V702" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a)"/>
-  <text x="520" y="900" class="lbl">feedback: mätta toppar &amp; tröghet → SQLite</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1170" role="img" aria-label="hemopt - vad kors var">
+<defs>
+<marker id="m0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0f766e"/></marker>
+<marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker>
+</defs>
+<rect width="1600" height="1170" fill="#f8fafc"/>
+<rect x="40" y="110" width="1520" height="112" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="40" y="110" width="1520" height="30" rx="14" fill="#475569" stroke="#475569" stroke-width="1"/>
+<rect x="320" y="152" width="420" height="58" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+<rect x="770" y="152" width="380" height="58" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+<rect x="40" y="262" width="1520" height="468" rx="16" fill="#ffffff" stroke="#0f766e" stroke-width="3"/>
+<rect x="40" y="262" width="1520" height="32" rx="16" fill="#0f766e" stroke="#0f766e" stroke-width="1"/>
+<rect x="70" y="312" width="468" height="392" rx="14" fill="#eff6ff" stroke="#60a5fa" stroke-width="2"/>
+<rect x="86" y="376" width="436" height="76" rx="12" fill="#ffffff" stroke="#bfdbfe" stroke-width="2"/>
+<rect x="86" y="462" width="436" height="96" rx="12" fill="#ffffff" stroke="#bfdbfe" stroke-width="2"/>
+<rect x="86" y="568" width="436" height="62" rx="12" fill="#ffffff" stroke="#bfdbfe" stroke-width="2"/>
+<rect x="86" y="638" width="436" height="62" rx="12" fill="#ffffff" stroke="#bfdbfe" stroke-width="2"/>
+<rect x="558" y="312" width="152" height="392" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="730" y="312" width="800" height="392" rx="14" fill="#ecfdf5" stroke="#10b981" stroke-width="3"/>
+<rect x="748" y="382" width="250" height="140" rx="12" fill="#ffffff" stroke="#6ee7b7" stroke-width="2"/>
+<rect x="1014" y="382" width="250" height="140" rx="12" fill="#ffffff" stroke="#6ee7b7" stroke-width="2"/>
+<rect x="1280" y="382" width="250" height="140" rx="12" fill="#ffffff" stroke="#6ee7b7" stroke-width="2"/>
+<rect x="748" y="538" width="250" height="140" rx="12" fill="#ffffff" stroke="#6ee7b7" stroke-width="2"/>
+<rect x="1014" y="538" width="250" height="140" rx="12" fill="#ffffff" stroke="#6ee7b7" stroke-width="2"/>
+<rect x="1280" y="538" width="250" height="140" rx="12" fill="#ffffff" stroke="#6ee7b7" stroke-width="2"/>
+<rect x="40" y="770" width="1520" height="172" rx="14" fill="#fffbeb" stroke="#ea580c" stroke-width="2"/>
+<rect x="40" y="770" width="1520" height="30" rx="14" fill="#ea580c" stroke="#ea580c" stroke-width="1"/>
+<rect x="70" y="816" width="350" height="110" rx="12" fill="#ffffff" stroke="#fdba74" stroke-width="2"/>
+<rect x="440" y="816" width="320" height="110" rx="12" fill="#ffffff" stroke="#fdba74" stroke-width="2"/>
+<rect x="780" y="816" width="360" height="110" rx="12" fill="#fff7ed" stroke="#f59e0b" stroke-width="3"/>
+<rect x="1160" y="816" width="370" height="110" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="7 5"/>
+<rect x="40" y="982" width="1520" height="148" rx="14" fill="#faf5ff" stroke="#7c3aed" stroke-width="2"/>
+<rect x="40" y="982" width="1520" height="30" rx="14" fill="#7c3aed" stroke="#7c3aed" stroke-width="1"/>
+<rect x="70" y="1028" width="330" height="76" rx="12" fill="#ffffff" stroke="#c4b5fd" stroke-width="2"/>
+<rect x="440" y="1028" width="330" height="76" rx="12" fill="#ffffff" stroke="#c4b5fd" stroke-width="2"/>
+<rect x="810" y="1028" width="330" height="76" rx="12" fill="#ffffff" stroke="#c4b5fd" stroke-width="2"/>
+<rect x="1180" y="1028" width="330" height="76" rx="12" fill="#ffffff" stroke="#c4b5fd" stroke-width="2"/>
+<polyline points="406,1066 434,1066" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#m1)"/>
+<polyline points="776,1066 804,1066" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#m1)"/>
+<polyline points="1146,1066 1174,1066" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#m1)"/>
+<polyline points="880,222 880,262" fill="none" stroke="#0f766e" stroke-width="3" marker-end="url(#m0)"/>
+<polyline points="300,730 300,770" fill="none" stroke="#0f766e" stroke-width="3" marker-end="url(#m0)" marker-start="url(#m0)"/>
+<polyline points="960,730 960,770" fill="none" stroke="#0f766e" stroke-width="3" marker-end="url(#m0)" marker-start="url(#m0)"/>
+<text x="48" y="48" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="28" font-weight="700">hemopt — vad körs var</text>
+<text x="48" y="79" fill="#64748b" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="400">Allt vårt körs på samma Raspberry Pi som Home Assistant. Ingen extra dator, ingen kod på ESP32 eller STM32.</text>
+<text x="60" y="128" fill="#ffffff" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700">MOLN</text>
+<text x="1540" y="127" fill="#d1fae5" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="end">Läses över HTTPS · ingen egen kod</text>
+<text x="336" y="178" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">elprisetjustnu.se — Nordpool</text>
+<text x="336" y="202" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">SE1–SE4 · dygn / timme / kvart</text>
+<text x="786" y="178" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Väderprognos</text>
+<text x="786" y="202" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Timtemperatur 36 h framåt</text>
+<text x="60" y="281" fill="#ffffff" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700">RASPBERRY PI — HOME ASSISTANT OS</text>
+<text x="1540" y="281" fill="#ffffff" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700" text-anchor="end">HÄR KÖRS ALLT VÅRT</text>
+<text x="86" y="338" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Home Assistant Core</text>
+<text x="86" y="360" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Det du ser och rör</text>
+<text x="102" y="402" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Lovelace-vyer</text>
+<text x="102" y="426" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Kostnadsoptimering · Energi</text>
+<text x="102" y="445" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Summerad kostnad dag / månad</text>
+<text x="102" y="488" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Reglage</text>
+<text x="102" y="512" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Slå på styrning · prioritet 1–5</text>
+<text x="102" y="531" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Regler för effekttoppar</text>
+<text x="102" y="550" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Välj elområde och elavtal</text>
+<text x="102" y="594" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Enheter</text>
+<text x="102" y="618" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Lägg till rumsgivare, elmätare</text>
+<text x="102" y="664" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Recorder</text>
+<text x="102" y="688" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Historiken modellen tränar på</text>
+<text x="574" y="342" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Mosquitto</text>
+<text x="574" y="364" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">MQTT-broker</text>
+<text x="574" y="383" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">(HA add-on)</text>
+<text x="574" y="420" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Bär:</text>
+<text x="574" y="442" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">· H66-data</text>
+<text x="574" y="461" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">· hemopts</text>
+<text x="574" y="480" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">  entiteter</text>
+<text x="574" y="499" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">· discovery</text>
+<text x="748" y="340" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">hemopt — Home Assistant Add-on</text>
+<text x="748" y="362" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Egen container, startas av HA Supervisor. Python + HiGHS.</text>
+<text x="764" y="408" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Samla + Lär</text>
+<text x="764" y="432" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">States och historik</text>
+<text x="764" y="451" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Tröghet per rum</text>
+<text x="764" y="470" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">VV-vanor, baslast</text>
+<text x="1030" y="408" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Planerare</text>
+<text x="1030" y="432" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">LP via HiGHS</text>
+<text x="1030" y="451" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">36 h i kvartssteg</text>
+<text x="1030" y="470" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Löser på ~0,3 s</text>
+<text x="1296" y="408" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Effektvakt</text>
+<text x="1296" y="432" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Varje minut</text>
+<text x="1296" y="451" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Mot klocktimmen</text>
+<text x="1296" y="470" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">EXT-block vid behov</text>
+<text x="764" y="564" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Avtalssimulator</text>
+<text x="764" y="588" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Dag / tim / kvart</text>
+<text x="764" y="607" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Kostnad för alla tre</text>
+<text x="764" y="626" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Ger rekommendation</text>
+<text x="1030" y="564" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">SQLite</text>
+<text x="1030" y="588" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Modeller och toppar</text>
+<text x="1030" y="607" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Mätserier</text>
+<text x="1030" y="626" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Överlever omstart</text>
+<text x="1296" y="564" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Setup-UI</text>
+<text x="1296" y="588" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Via HA Ingress</text>
+<text x="1296" y="607" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Välj entiteter och rum</text>
+<text x="1296" y="626" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Elområde och avtal</text>
+<text x="60" y="788" fill="#ffffff" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700">HUSETS NÄTVERK — GIVARE OCH FÄLTBUSS</text>
+<text x="1540" y="787" fill="#d1fae5" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="end">Ingen egen kod · bara HA-integrationer</text>
+<text x="86" y="842" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Husdata H66</text>
+<text x="86" y="866" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">CAN till MQTT-brygga</text>
+<text x="86" y="885" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Läser IVT Rego 1000</text>
+<text x="86" y="904" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">EXT-portar = hård stopp</text>
+<text x="456" y="842" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">LK Arc Hub</text>
+<text x="456" y="866" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">11 rumsgivare, två plan</text>
+<text x="456" y="885" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Börvärde per zon</text>
+<text x="796" y="842" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">Elmätare (HAN / P1)</text>
+<text x="796" y="866" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Hela husets effekt</text>
+<text x="796" y="885" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Krävs för effekttoppar</text>
+<text x="796" y="908" fill="#b45309" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700">← koppla in denna</text>
+<text x="1176" y="842" fill="#64748b" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">ESP32 / STM32</text>
+<text x="1176" y="866" fill="#94a3b8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Behövs inte.</text>
+<text x="1176" y="885" fill="#94a3b8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">H66 är redan bryggan.</text>
+<text x="1176" y="904" fill="#94a3b8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">LP-lösaren ryms inte i en MCU.</text>
+<text x="60" y="1000" fill="#ffffff" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700">DEPLOY — INGEN KLIPP-OCH-KLISTRA</text>
+<text x="1540" y="999" fill="#d1fae5" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="end">Uppdateringar kommer som en knapp i HA</text>
+<text x="86" y="1054" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">1. Git-repo</text>
+<text x="86" y="1078" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Add-on repository</text>
+<text x="456" y="1054" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">2. HA → Add-ons</text>
+<text x="456" y="1078" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Lägg till repository-URL</text>
+<text x="826" y="1054" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">3. Installera</text>
+<text x="826" y="1078" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Ett klick, HA bygger</text>
+<text x="1196" y="1054" fill="#0f172a" font-family="DejaVu Sans, sans-serif" font-size="15" font-weight="700">4. Uppdatera</text>
+<text x="1196" y="1078" fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400">Knapp när ny version finns</text>
+<text x="48" y="1153" fill="#64748b" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="400">Hushållsprofilen (rum, entiteter, elavtal, elområde) är data — inte kod. Samma add-on installeras oförändrad i nästa hushåll.</text>
+<text x="892" y="237" fill="#64748b" font-family="DejaVu Sans, sans-serif" font-size="11" font-weight="400">priser + väderprognos</text>
+<text x="312" y="747" fill="#64748b" font-family="DejaVu Sans, sans-serif" font-size="11" font-weight="400">MQTT</text>
+<text x="972" y="747" fill="#64748b" font-family="DejaVu Sans, sans-serif" font-size="11" font-weight="400">REST + MQTT</text>
 </svg>
