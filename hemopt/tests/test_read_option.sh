@@ -54,3 +54,9 @@ echo "len=${#_supervisor_token}"
 '
 echo "ok: unset SUPERVISOR_TOKEN is safe under set -u"
 
+if grep -nE '\$\{#SUPERVISOR_TOKEN\}|\$\{SUPERVISOR_TOKEN\}[^:-]' "$ROOT/run.sh" | grep -v 'SUPERVISOR_TOKEN:-'; then
+    echo "run.sh references SUPERVISOR_TOKEN unsafely under set -u" >&2
+    exit 1
+fi
+echo "ok: run.sh uses safe SUPERVISOR_TOKEN expansion"
+
