@@ -117,9 +117,14 @@ async def async_setup_entry(
             "eller kontrollera att rumsgivarna syns under Enheter."
         )
     else:
+        _LOGGER.info(
+            "LK Arc Climate: %d termostater skapade (styr climate.*_thermostat, "
+            "inte sensor.hemopt_setpoint_*)",
+            len(entities),
+        )
         for entity in entities:
-            _LOGGER.warning(
-                "LK Arc Climate: termostat %s → %s (ANDRA DENNA — inte sensor.hemopt_setpoint_*)",
+            _LOGGER.info(
+                "LK Arc Climate: termostat %s → %s",
                 entity._zone,  # noqa: SLF001
                 entity.entity_id,
             )

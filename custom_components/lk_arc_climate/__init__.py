@@ -40,7 +40,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         )
         return True
 
-    _LOGGER.warning("LK Arc Climate: skapar config entry automatiskt…")
+    _LOGGER.info("LK Arc Climate: skapar config entry automatiskt…")
     hass.async_create_task(
         hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_IMPORT}, data={})
     )
