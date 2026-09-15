@@ -17,6 +17,7 @@ from .config import Config
 from .engine import Engine, plan_to_dict
 from .ha import HomeAssistantClient
 from .meters import pick_default_total_power, suggest_total_power_entities
+from .panel_routes import register_panel_routes
 from .storage import Store
 from .thermal import ThermalModel
 
@@ -71,7 +72,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.3",
+        version="0.1.4",
         lifespan=lifespan,
     )
 
@@ -224,7 +225,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
 
     @app.get("/api/meters")
     async def meters() -> dict[str, Any]:
-        async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
+        async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
             if not await ha.ping():
                 return {
                     "current": engine.config.base_load.total_power_entity,
@@ -242,7 +243,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     async def set_total_meter(update: MeterUpdate) -> dict[str, Any]:
         entity_id = (update.entity_id or "").strip() or None
         if entity_id is not None:
-            async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
+            async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
                 states = await ha.states()
             if entity_id not in states:
                 raise HTTPException(
@@ -253,6 +254,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
         _LOGGER.info("total power meter set to %s", entity_id or "(none)")
         return {"current": entity_id}
 
+    register_panel_routes(app, lambda: engine)
     return app
 
 
@@ -270,7 +272,7 @@ async def _adopt_meter_if_missing(engine: Engine) -> None:
     if engine.config.base_load.total_power_entity:
         return
     try:
-        async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
+        async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
             if not await ha.ping():
                 return
             states = await ha.states()
@@ -303,6 +305,10 @@ async def _bootstrap(engine: Engine) -> None:
         await engine.replan()
     except Exception:  # noqa: BLE001
         _LOGGER.exception("initial planning failed")
+    try:
+        await engine.refresh_advice()
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("initial advice failed")
 
 
 async def _bootstrap_then_run(engine: Engine) -> None:

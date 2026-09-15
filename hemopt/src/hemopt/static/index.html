@@ -70,6 +70,29 @@
         <section class="card">
           <div class="card-head">
             <div>
+              <h2>Regler för effekttoppar</h2>
+              <p class="muted">Enligt ditt elnätsavtal — vad som räknas och vad det kostar.</p>
+            </div>
+          </div>
+          <form id="peak-settings" class="settings-form"></form>
+        </section>
+      </div>
+
+      <div class="grid-two">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Användning och besparing</h2>
+              <p class="muted" id="history-subtitle">Senaste två veckorna</p>
+            </div>
+          </div>
+          <div class="chart-host small" id="history-chart"></div>
+          <div id="history-summary" class="history-summary"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
               <h2>Varmvatten</h2>
               <p class="muted" id="dhw-subtitle">—</p>
             </div>
@@ -77,6 +100,21 @@
           <div class="chart-host small" id="dhw-chart"></div>
         </section>
       </div>
+
+      <section class="card wide">
+        <div class="card-head">
+          <div>
+            <h2>Jämför elavtal</h2>
+            <p class="muted" id="advice-subtitle">
+              Vad din uppmätta förbrukning hade kostat under andra avräkningsformer.
+            </p>
+          </div>
+          <button type="button" class="btn" id="advice-btn">Räkna om</button>
+        </div>
+        <div id="advice-body">
+          <p class="empty">Hämtar avtalsjämförelse…</p>
+        </div>
+      </section>
 
       <section class="card wide" id="meter-card">
         <div class="card-head">

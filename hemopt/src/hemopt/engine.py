@@ -82,6 +82,7 @@ class Engine:
 
         self._mqtt: MqttBridge | None = None
         self._http: httpx.AsyncClient | None = None
+        self._ha_http: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
         self._load_persisted()
 
@@ -107,6 +108,17 @@ class Engine:
 
     async def start(self) -> None:
         self._http = httpx.AsyncClient(timeout=30.0)
+        # Dedicated client for Home Assistant so base URL and token live on the
+        # connection itself. Reusing the price-feed client without a base URL
+        # used to turn every /api call into a relative path and look like an
+        # outage.
+        ha = self.config.home_assistant
+        self._ha_http = httpx.AsyncClient(
+            base_url=ha.base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {ha.token}"},
+            verify=ha.verify_ssl,
+            timeout=httpx.Timeout(30.0, read=120.0),
+        )
         if self.config.mqtt.enabled:
             self._mqtt = MqttBridge(self.config, on_command=self._handle_command)
             try:
@@ -119,6 +131,9 @@ class Engine:
         if self._mqtt is not None:
             self._mqtt.disconnect()
             self._mqtt = None
+        if self._ha_http is not None:
+            await self._ha_http.aclose()
+            self._ha_http = None
         if self._http is not None:
             await self._http.aclose()
             self._http = None
@@ -166,7 +181,7 @@ class Engine:
 
     async def current_states(self) -> dict[str, str] | None:
         """Read every tracked entity. Overridden by the demo engine."""
-        async with HomeAssistantClient(self.config.home_assistant, self._http) as ha:
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
             online = await ha.ping()
             self.status.home_assistant_online = online
             if not online:
@@ -174,7 +189,7 @@ class Engine:
             return await ha.states()
 
     async def fetch_history(self, start: datetime) -> dict[str, list]:
-        async with HomeAssistantClient(self.config.home_assistant, self._http) as ha:
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
             if not await ha.ping():
                 return {}
             return await ha.history(self._tracked_entities(), start)
@@ -257,7 +272,7 @@ class Engine:
             return
 
         try:
-            async with HomeAssistantClient(self.config.home_assistant, self._http) as ha:
+            async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
                 await ha.set_ext_port(entity, block)
         except Exception as exc:  # noqa: BLE001 - never let actuation kill the loop
             self._record_error(f"EXT block: {exc}")
@@ -375,7 +390,7 @@ class Engine:
 
         entity = self.config.site.weather_entity
         if entity:
-            async with HomeAssistantClient(self.config.home_assistant, self._http) as ha:
+            async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
                 points = await ha.weather_forecast(entity)
             if points:
                 series = resample_forecast(points, times, fallback=measured or 0.0)
@@ -640,7 +655,7 @@ class Engine:
         index = self.plan.step_at(now)
         applied = 0
 
-        async with HomeAssistantClient(self.config.home_assistant, self._http) as ha:
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
             for room_plan in self.plan.rooms:
                 room = self.config.room(room_plan.key)
                 if not room.climate_entity:
@@ -762,6 +777,7 @@ class Engine:
         while True:
             try:
                 await self.train()
+                await self.refresh_advice()
                 self.store.housekeeping()
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("training failed")

@@ -66,9 +66,12 @@ class HomeAssistantClient:
     async def __aenter__(self) -> HomeAssistantClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
+                base_url=self._config.base_url.rstrip("/"),
+                headers=self._auth_headers(),
                 verify=self._config.verify_ssl,
                 timeout=httpx.Timeout(30.0, read=120.0),
             )
+            self._owns_client = True
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -90,31 +93,40 @@ class HomeAssistantClient:
         our credentials. Putting both on every request keeps the two cases
         identical instead of silently addressing the wrong host.
         """
+        if self._owns_client and self._client is not None and self._client.base_url:
+            return path
         return f"{self._config.base_url.rstrip('/')}{path}"
 
-    @property
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._config.token}",
-            "Content-Type": "application/json",
-        }
+    def _auth_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._config.token}"}
+
+    def _json_headers(self) -> dict[str, str]:
+        return {**self._auth_headers(), "Content-Type": "application/json"}
 
     async def ping(self) -> bool:
         try:
-            response = await self._http.get(self._url("/api/"), headers=self._headers)
+            response = await self._http.get(self._url("/api/"), headers=self._auth_headers())
         except httpx.HTTPError as exc:
-            _LOGGER.warning("Home Assistant unreachable: %s", exc)
+            _LOGGER.warning("Home Assistant unreachable at %s: %s", self._config.base_url, exc)
             return False
-        return response.status_code == 200
+        if response.status_code != 200:
+            _LOGGER.warning(
+                "Home Assistant at %s returned %s: %s",
+                self._config.base_url,
+                response.status_code,
+                response.text[:200],
+            )
+            return False
+        return True
 
     async def states(self) -> dict[str, str]:
-        response = await self._http.get(self._url("/api/states"), headers=self._headers)
+        response = await self._http.get(self._url("/api/states"), headers=self._auth_headers())
         response.raise_for_status()
         return {row["entity_id"]: row["state"] for row in response.json()}
 
     async def state(self, entity_id: str) -> str | None:
         response = await self._http.get(
-            self._url(f"/api/states/{entity_id}"), headers=self._headers
+            self._url(f"/api/states/{entity_id}"), headers=self._auth_headers()
         )
         if response.status_code == 404:
             return None
@@ -158,7 +170,7 @@ class HomeAssistantClient:
                 response = await self._http.get(
                     self._url(f"/api/history/period/{start.isoformat()}"),
                     params=params,
-                    headers=self._headers,
+                    headers=self._auth_headers(),
                 )
                 response.raise_for_status()
             except httpx.HTTPError as exc:
@@ -188,7 +200,7 @@ class HomeAssistantClient:
         response = await self._http.post(
             self._url(f"/api/services/{domain}/{service}"),
             json=data or {},
-            headers=self._headers,
+            headers=self._json_headers(),
         )
         if response.status_code >= 400:
             raise HomeAssistantError(
@@ -208,7 +220,7 @@ class HomeAssistantClient:
                 self._url("/api/services/weather/get_forecasts"),
                 params={"return_response": "true"},
                 json={"entity_id": entity_id, "type": "hourly"},
-                headers=self._headers,
+                headers=self._json_headers(),
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:

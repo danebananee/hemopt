@@ -1,7 +1,17 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const REFRESH_MS = 20000;
 
-const state = { plan: null, status: null, peaks: null, rooms: [], meters: null };
+const state = {
+  plan: null,
+  status: null,
+  peaks: null,
+  rooms: [],
+  meters: null,
+  peakSettings: null,
+  history: null,
+  advice: null,
+};
+
 
 /* ------------------------------------------------------------------ utils */
 
@@ -459,7 +469,7 @@ function renderPeaks() {
   const w = peaks.window || {};
   subtitle.textContent = peaks.enabled
     ? `Snitt av ${peaks.n_peaks} toppar på olika dygn, ${String(w.hour_start).padStart(2, "0")}–${String(w.hour_end).padStart(2, "0")} vardagar`
-    : "Effektavgift är avstängd i konfigurationen";
+    : "Effektavgift är avstängd — slå på den under Regler för effekttoppar";
 
   const summary = html("div", "peak-summary");
   const figures = [
@@ -475,36 +485,355 @@ function renderPeaks() {
   }
   host.appendChild(summary);
 
+  if (peaks.current_hour) {
+    const hour = peaks.current_hour;
+    const box = html("div", "peak-now");
+    box.appendChild(
+      html(
+        "div",
+        "peak-now-title",
+        `Pågående timme · ${fmt(hour.energy_kwh, 2)} kWh hittills`,
+      ),
+    );
+    box.appendChild(
+      html(
+        "div",
+        "muted",
+        hour.allowed_kw === null
+          ? "Utanför effektfönstret just nu"
+          : `${fmt(hour.allowed_kw, 2)} kW kvar innan tröskeln · ${fmt(hour.minutes_remaining, 0)} min kvar`,
+      ),
+    );
+    host.appendChild(box);
+  }
+
   if (!peaks.counted.length) {
     host.appendChild(html("p", "empty", "Inga mätta toppar denna månad ännu."));
+  } else {
+    const max = Math.max(...peaks.counted.map((p) => p.kw), 1);
+    const table = html("table");
+    const thead = html("thead");
+    const headRow = html("tr");
+    for (const label of ["Dygn", "Timme", "Effekt", ""]) {
+      headRow.appendChild(html("th", null, label));
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = html("tbody");
+    for (const peak of peaks.counted) {
+      const row = html("tr");
+      row.appendChild(html("td", null, peak.day));
+      row.appendChild(html("td", null, `${String(peak.hour).padStart(2, "0")}:00`));
+      row.appendChild(html("td", null, `${fmt(peak.kw, 2)} kW`));
+      const barCell = html("td", "bar-cell");
+      const bar = html("div", "bar");
+      bar.style.width = `${(peak.kw / max) * 100}%`;
+      barCell.appendChild(bar);
+      row.appendChild(barCell);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  if (peaks.history && peaks.history.length) {
+    host.appendChild(html("h3", "subhead", "Tidigare månader"));
+    const hist = html("table");
+    const head = html("tr");
+    for (const label of ["Månad", "Snitt", "Tröskel", "Kostnad"]) {
+      head.appendChild(html("th", null, label));
+    }
+    const thead = html("thead");
+    thead.appendChild(head);
+    hist.appendChild(thead);
+    const tbody = html("tbody");
+    for (const row of peaks.history) {
+      const tr = html("tr");
+      tr.appendChild(html("td", null, row.month));
+      tr.appendChild(html("td", null, `${fmt(row.average_kw, 2)} kW`));
+      tr.appendChild(html("td", null, `${fmt(row.threshold_kw, 2)} kW`));
+      tr.appendChild(html("td", null, `${fmt(row.cost_sek, 0)} kr`));
+      tbody.appendChild(tr);
+    }
+    hist.appendChild(tbody);
+    host.appendChild(hist);
+  }
+}
+
+const MONTH_LABELS = [
+  "",
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "maj",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "okt",
+  "nov",
+  "dec",
+];
+
+let peakSettingsFingerprint = "";
+
+function renderPeakSettings() {
+  const form = document.getElementById("peak-settings");
+  const settings = state.peakSettings;
+  if (!settings) {
+    form.textContent = "";
+    form.appendChild(html("p", "empty", "Kunde inte läsa reglerna."));
+    peakSettingsFingerprint = "";
+    return;
+  }
+  const fingerprint = JSON.stringify(settings);
+  if (fingerprint === peakSettingsFingerprint && form.childElementCount) return;
+  peakSettingsFingerprint = fingerprint;
+  form.textContent = "";
+
+  const enabledRow = html("label", "setting-row toggle-row");
+  const enabled = document.createElement("input");
+  enabled.type = "checkbox";
+  enabled.checked = Boolean(settings.enabled);
+  enabled.id = "peak-enabled";
+  enabledRow.appendChild(enabled);
+  enabledRow.appendChild(document.createTextNode(" Minimera effekttoppar"));
+  form.appendChild(enabledRow);
+
+  const grid = html("div", "settings-grid");
+  grid.appendChild(
+    fieldNumber("peak-n", "Antal toppar som snittas", settings.n_peaks, 1, 10, 1),
+  );
+  grid.appendChild(
+    fieldNumber("peak-price", "Pris per kW (kr)", settings.price_per_kw_sek, 0, 500, 0.5),
+  );
+  grid.appendChild(
+    fieldNumber("peak-start", "Fönster från (timme)", settings.hour_start, 0, 23, 1),
+  );
+  grid.appendChild(
+    fieldNumber("peak-end", "Fönster till (timme)", settings.hour_end, 1, 24, 1),
+  );
+  form.appendChild(grid);
+
+  const weekdays = html("label", "setting-row");
+  const weekdaysInput = document.createElement("input");
+  weekdaysInput.type = "checkbox";
+  weekdaysInput.checked = Boolean(settings.weekdays_only);
+  weekdaysInput.id = "peak-weekdays";
+  weekdays.appendChild(weekdaysInput);
+  weekdays.appendChild(document.createTextNode(" Bara vardagar"));
+  form.appendChild(weekdays);
+
+  form.appendChild(html("div", "setting-label", "Månader med effektavgift"));
+  const months = html("div", "month-grid");
+  const selected = new Set(settings.months || []);
+  for (let month = 1; month <= 12; month += 1) {
+    const label = html("label", "month-chip");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = String(month);
+    box.checked = selected.has(month);
+    box.dataset.month = String(month);
+    label.appendChild(box);
+    label.appendChild(document.createTextNode(` ${MONTH_LABELS[month]}`));
+    months.appendChild(label);
+  }
+  form.appendChild(months);
+
+  const note = html(
+    "p",
+    "muted",
+    `Marginalkostnad just nu: ${fmt(settings.marginal_sek_per_kw, 0)} kr per kW ` +
+      `(pris / antal toppar).`,
+  );
+  form.appendChild(note);
+
+  const actions = html("div", "setting-actions");
+  const save = html("button", "btn", "Spara regler");
+  save.type = "button";
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    save.textContent = "Sparar…";
+    try {
+      const monthsSelected = [...form.querySelectorAll(".month-grid input:checked")].map(
+        (node) => Number(node.value),
+      );
+      state.peakSettings = await putJSON("/api/settings/peaks", {
+        enabled: enabled.checked,
+        n_peaks: Number(document.getElementById("peak-n").value),
+        price_per_kw_sek: Number(document.getElementById("peak-price").value),
+        hour_start: Number(document.getElementById("peak-start").value),
+        hour_end: Number(document.getElementById("peak-end").value),
+        weekdays_only: weekdaysInput.checked,
+        months: monthsSelected,
+      });
+      await refresh();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      save.disabled = false;
+      save.textContent = "Spara regler";
+    }
+  });
+  actions.appendChild(save);
+  form.appendChild(actions);
+}
+
+function fieldNumber(id, label, value, min, max, step) {
+  const wrap = html("label", "setting-field");
+  wrap.appendChild(html("span", null, label));
+  const input = document.createElement("input");
+  input.type = "number";
+  input.id = id;
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value ?? "");
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function renderHistory() {
+  const host = document.getElementById("history-chart");
+  const summary = document.getElementById("history-summary");
+  const subtitle = document.getElementById("history-subtitle");
+  host.textContent = "";
+  summary.textContent = "";
+  const history = state.history;
+  if (!history) {
+    host.appendChild(html("p", "empty", "Ingen historik ännu."));
     return;
   }
 
-  const max = Math.max(...peaks.counted.map((p) => p.kw), 1);
-  const table = html("table");
-  const thead = html("thead");
-  const headRow = html("tr");
-  for (const label of ["Dygn", "Timme", "Effekt", ""]) {
-    headRow.appendChild(html("th", null, label));
+  subtitle.textContent = `Senaste ${history.days} dygnen`;
+  const points = history.points || [];
+  if (!points.length) {
+    host.appendChild(
+      html("p", "empty", "Ingen timdata sparad ännu — den fylls på när elmätaren är kopplad."),
+    );
+  } else {
+    renderPowerHistory(host, points);
   }
-  thead.appendChild(headRow);
-  table.appendChild(thead);
 
-  const tbody = html("tbody");
-  for (const peak of peaks.counted) {
-    const row = html("tr");
-    row.appendChild(html("td", null, peak.day));
-    row.appendChild(html("td", null, `${String(peak.hour).padStart(2, "0")}:00`));
-    row.appendChild(html("td", null, `${fmt(peak.kw, 2)} kW`));
-    const barCell = html("td", "bar-cell");
-    const bar = html("div", "bar");
-    bar.style.width = `${(peak.kw / max) * 100}%`;
-    barCell.appendChild(bar);
-    row.appendChild(barCell);
-    tbody.appendChild(row);
+  const cards = html("div", "history-kpis");
+  const items = [
+    ["Planerad besparing", history.savings_sek, "kr mot utan styrning"],
+    ["Kostnad med styrning", history.optimised_cost_sek, "kr i planperioden"],
+    ["Kostnad utan styrning", history.baseline_cost_sek, "kr i planperioden"],
+  ];
+  for (const [label, value, note] of items) {
+    const card = html("div", "history-kpi");
+    card.appendChild(html("div", "label", label));
+    card.appendChild(html("div", "value", value == null ? "—" : `${fmt(value, 0)} kr`));
+    card.appendChild(html("div", "muted", note));
+    cards.appendChild(card);
   }
-  table.appendChild(tbody);
-  host.appendChild(table);
+  summary.appendChild(cards);
+}
+
+function renderPowerHistory(host, points) {
+  const width = host.clientWidth || 480;
+  const height = 180;
+  const pad = { top: 12, right: 12, bottom: 24, left: 36 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const times = points.map((p) => new Date(p.t).getTime());
+  const values = points.map((p) => p.kw);
+  const max = Math.max(...values, 1);
+  const x = scaleLinear([times[0], times[times.length - 1]], [0, innerW]);
+  const y = scaleLinear([0, max], [innerH, 0]);
+
+  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height: String(height) });
+  const g = el("g", { transform: `translate(${pad.left},${pad.top})` });
+  for (let i = 0; i <= 4; i += 1) {
+    const value = (max / 4) * i;
+    const yy = y(value);
+    g.appendChild(
+      el("line", {
+        x1: 0,
+        x2: innerW,
+        y1: yy,
+        y2: yy,
+        stroke: "currentColor",
+        "stroke-opacity": "0.12",
+      }),
+    );
+  }
+  g.appendChild(
+    el("path", {
+      d: linePath(points.map((p, i) => [x(times[i]), y(p.kw)])),
+      fill: "none",
+      stroke: "#4da3ff",
+      "stroke-width": "1.5",
+    }),
+  );
+  svg.appendChild(g);
+  host.appendChild(svg);
+}
+
+function renderAdvice() {
+  const host = document.getElementById("advice-body");
+  const subtitle = document.getElementById("advice-subtitle");
+  host.textContent = "";
+  const advice = state.advice;
+  if (!advice) {
+    host.appendChild(html("p", "empty", "Ingen avtalsdata ännu."));
+    return;
+  }
+
+  if (advice.notes && advice.notes.length) {
+    subtitle.textContent = advice.notes[0];
+  } else {
+    subtitle.textContent = `Baserat på ${fmt(advice.measured_days, 0)} dygns uppmätt förbrukning`;
+  }
+
+  if (advice.contract_costs && advice.contract_costs.length) {
+    const table = html("table");
+    const head = html("tr");
+    for (const label of ["Avtal", "Kostnad", "Öre/kWh", "kWh"]) {
+      head.appendChild(html("th", null, label));
+    }
+    const thead = html("thead");
+    thead.appendChild(head);
+    table.appendChild(thead);
+    const tbody = html("tbody");
+    const cheapest = Math.min(...advice.contract_costs.map((c) => c.total_sek));
+    for (const cost of advice.contract_costs) {
+      const row = html("tr", cost.total_sek === cheapest ? "best-row" : null);
+      row.appendChild(html("td", null, cost.name));
+      row.appendChild(html("td", null, `${fmt(cost.total_sek, 0)} kr`));
+      row.appendChild(html("td", null, fmt(cost.ore_per_kwh, 1)));
+      row.appendChild(html("td", null, fmt(cost.kwh, 0)));
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  if (advice.recommendations && advice.recommendations.length) {
+    const list = html("div", "advice-list");
+    for (const rec of advice.recommendations) {
+      const card = html("div", "advice-card");
+      card.appendChild(html("div", "advice-title", rec.title));
+      card.appendChild(html("div", "advice-detail", rec.detail));
+      card.appendChild(
+        html("div", "advice-saving", `≈ ${fmt(rec.annual_saving_sek, 0)} kr/år · ${rec.confidence}`),
+      );
+      if (rec.caveat) card.appendChild(html("div", "muted", rec.caveat));
+      list.appendChild(card);
+    }
+    host.appendChild(list);
+  } else if (!advice.contract_costs.length) {
+    host.appendChild(
+      html(
+        "p",
+        "empty",
+        "Behöver mer mätdata innan avtalsjämförelsen blir meningsfull (minst två dygn).",
+      ),
+    );
+  }
 }
 
 function renderRooms() {
@@ -737,6 +1066,9 @@ function renderAll() {
   renderPlanChart(document.getElementById("plan-chart"), state.plan, state.status?.now);
   renderHotWater(document.getElementById("dhw-chart"), state.plan);
   renderPeaks();
+  renderPeakSettings();
+  renderHistory();
+  renderAdvice();
   renderMeters();
   renderRooms();
   renderNotes();
@@ -746,16 +1078,22 @@ function renderAll() {
 /* ------------------------------------------------------------------ boot */
 
 async function refresh() {
-  const [status, peaks, rooms, meters] = await Promise.all([
+  const [status, peaks, rooms, meters, peakSettings, history, advice] = await Promise.all([
     getJSON("/api/status").catch(() => null),
     getJSON("/api/peaks").catch(() => null),
     getJSON("/api/rooms").catch(() => []),
     getJSON("/api/meters").catch(() => null),
+    getJSON("/api/settings/peaks").catch(() => null),
+    getJSON("/api/history?days=14").catch(() => null),
+    getJSON("/api/advice").catch(() => null),
   ]);
   state.status = status;
   state.peaks = peaks;
   state.rooms = rooms;
   state.meters = meters;
+  state.peakSettings = peakSettings;
+  state.history = history;
+  state.advice = advice;
   state.plan = await getJSON("/api/plan").catch(() => null);
   renderAll();
 }
@@ -778,6 +1116,21 @@ document.getElementById("replan-btn").addEventListener("click", async (event) =>
 document.getElementById("control-toggle").addEventListener("change", async (event) => {
   await postJSON("/api/control", { enabled: event.currentTarget.checked });
   await refresh();
+});
+
+document.getElementById("advice-btn").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = "Räknar…";
+  try {
+    state.advice = await postJSON("/api/advice");
+    renderAdvice();
+  } catch (error) {
+    console.error(error);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Räkna om";
+  }
 });
 
 let resizeTimer = null;

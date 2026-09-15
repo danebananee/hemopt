@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.3",
+        version="0.1.4",
         lifespan=lifespan,
     )
 
@@ -253,7 +253,7 @@ def create_app() -> FastAPI:
         from .ha import HomeAssistantClient
         from .meters import suggest_total_power_entities
 
-        async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
+        async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
             if not await ha.ping():
                 return {
                     "current": engine.config.base_load.total_power_entity,
@@ -274,7 +274,7 @@ def create_app() -> FastAPI:
 
         entity_id = (update.entity_id or "").strip() or None
         if entity_id is not None:
-            async with HomeAssistantClient(engine.config.home_assistant, engine._http) as ha:
+            async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
                 states = await ha.states()
             if entity_id not in states:
                 raise HTTPException(
@@ -285,6 +285,9 @@ def create_app() -> FastAPI:
         _LOGGER.info("total power meter set to %s", entity_id or "(none)")
         return {"current": entity_id}
 
+    from .panel_routes import register_panel_routes
+
+    register_panel_routes(app, require_engine)
     return app
 
 
