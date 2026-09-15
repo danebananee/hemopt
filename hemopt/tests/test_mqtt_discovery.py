@@ -43,3 +43,12 @@ def test_discovery_uses_default_entity_id_not_object_id():
             ("sensor.", "binary_sensor.", "switch.", "number.")
         )
         assert payload["unique_id"].startswith("hemopt_")
+
+    setpoint = next(
+        json.loads(raw)
+        for topic, raw in fake.messages
+        if topic.endswith("/setpoint_tvattstuga/config")
+    )
+    assert setpoint["name"].startswith("Plan (ej styrt)")
+    assert setpoint["entity_category"] == "diagnostic"
+    assert setpoint["default_entity_id"] == "sensor.hemopt_setpoint_tvattstuga"

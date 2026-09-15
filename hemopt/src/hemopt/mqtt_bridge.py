@@ -76,7 +76,13 @@ class MqttBridge:
         client.publish(self._topic("status"), "online", retain=True)
         client.subscribe(self._topic("cmd/#"))
         self.publish_discovery()
-        _LOGGER.info("MQTT connected to %s:%s", self._mqtt.host, self._mqtt.port)
+        _LOGGER.info(
+            "MQTT connected to %s:%s — discovery använder default_entity_id "
+            "(inte deprecated object_id). sensor.hemopt_setpoint_* är planen, "
+            "inte LK-termostater.",
+            self._mqtt.host,
+            self._mqtt.port,
+        )
 
     def _handle_disconnect(self, _client, _userdata, _flags, reason_code, _props=None):
         self._connected = False
@@ -265,11 +271,14 @@ class MqttBridge:
                 "sensor",
                 f"setpoint_{room.key}",
                 {
-                    "name": f"Planerat borvarde {room.name}",
+                    # Read-only plan output — does NOT write to the LK app.
+                    "name": f"Plan (ej styrt) {room.name}",
                     "state_topic": state_topic,
                     "value_template": f"{{{{ value_json.setpoint_{room.key} }}}}",
                     "unit_of_measurement": "°C",
                     "device_class": "temperature",
+                    "entity_category": "diagnostic",
+                    "icon": "mdi:thermometer-off",
                 },
             )
             self._publish_config(

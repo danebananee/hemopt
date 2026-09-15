@@ -112,10 +112,14 @@ async def async_setup_entry(
             "eller kontrollera att rumsgivarna syns under Enheter."
         )
     else:
-        _LOGGER.warning(
-            "LK Arc Climate: skapar %d termostater (andra i Logs efter 'LK Arc Climate:')",
-            len(entities),
-        )
+        for entity in entities:
+            mac_slug = entity._mac.lower().replace(":", "_")  # noqa: SLF001
+            _LOGGER.warning(
+                "LK Arc Climate: termostat %s → climate.%s_thermostat "
+                "(ANDRA DENNA — inte sensor.hemopt_setpoint_*)",
+                entity._zone,  # noqa: SLF001
+                mac_slug,
+            )
 
     async_add_entities(entities)
 
@@ -187,6 +191,112 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
             return None
         return HVACAction.HEATING if current < target - 0.1 else HVACAction.IDLE
 
+    def _measurement_base(self) -> dict[str, Any]:
+        """Best available measurement dict to POST back with a new setpoint."""
+        return dict(self._live_device().get("measurement") or {})
+
+    async def _post_desired_temperature(self, lk: Any, mac: str, celsius: float) -> bool:
+        """POST link2.lk.nu …/measurement/true and verify cloud desiredTemperature.
+
+        Uses the same endpoint as the LK app. Does not use the Azure helper —
+        that can return HTTP 200 without the app ever seeing the change.
+        """
+        tenths = int(round(celsius * 10))
+        base = self._measurement_base()
+
+        # Prefer a fresh cloud copy when available; fall back to coordinator cache
+        # so a momentary measurement GET failure does not block the write.
+        if hasattr(lk, "get_device_measurement"):
+            try:
+                if await lk.get_device_measurement(mac, force_update=True):
+                    fresh = (getattr(lk, "device_measurements", {}) or {}).get(mac) or {}
+                    if fresh:
+                        base = dict(fresh)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug(
+                    "LK Arc Climate: kunde inte hamta measurement for %s fore skrivning",
+                    mac,
+                    exc_info=True,
+                )
+
+        if not base:
+            _LOGGER.error(
+                "LK Arc Climate: ingen measurement-data for %s — kan inte skriva",
+                mac,
+            )
+            return False
+
+        update_data = dict(base)
+        update_data["desiredTemperature"] = tenths
+        endpoint = f"service/arc/sense/{mac}/measurement/true"
+        base_url = getattr(lk, "BASE_URL", "https://link2.lk.nu/")
+        session = getattr(lk, "session", None)
+        jwt = getattr(lk, "jwt_token", None)
+        get_headers = getattr(lk, "_get_headers", None)
+        if session is None or jwt is None or not callable(get_headers):
+            # Older pylksystems: fall back to the helper if present.
+            helper = getattr(lk, "set_device_temperature", None)
+            if not callable(helper):
+                _LOGGER.error("LK Arc Climate: saknar session/jwt och set_device_temperature")
+                return False
+            return bool(await helper(mac, celsius))
+
+        headers = {**get_headers(), "authorization": f"Bearer {jwt}"}
+        url = f"{base_url}{endpoint}"
+        _LOGGER.warning(
+            "LK Arc Climate: POST %s desiredTemperature=%d (%.1f C) for %s",
+            endpoint,
+            tenths,
+            celsius,
+            self._zone,
+        )
+        async with session.post(url, json=update_data, headers=headers) as response:
+            body = await response.text()
+            if response.status != 200:
+                _LOGGER.error(
+                    "LK Arc Climate: measurement POST HTTP %s for %s: %s",
+                    response.status,
+                    mac,
+                    body[:300],
+                )
+                return False
+
+        # Verify the cloud actually stored the new setpoint (not just HTTP 200).
+        if hasattr(lk, "get_device_measurement"):
+            try:
+                if await lk.get_device_measurement(mac, force_update=True):
+                    live = (getattr(lk, "device_measurements", {}) or {}).get(mac) or {}
+                    live_tenths = live.get("desiredTemperature")
+                    if live_tenths is None:
+                        _LOGGER.error(
+                            "LK Arc Climate: POST OK men desiredTemperature saknas i svar for %s",
+                            mac,
+                        )
+                        return False
+                    if abs(int(live_tenths) - tenths) > 0:
+                        _LOGGER.error(
+                            "LK Arc Climate: POST OK men molnet har %s (forvantade %d) for %s",
+                            live_tenths,
+                            tenths,
+                            mac,
+                        )
+                        return False
+                    apply = getattr(self.coordinator, "_apply_device_measurement", None)
+                    if callable(apply):
+                        apply(mac, live)
+                        apply(self._identity, live)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("LK Arc Climate: kunde inte verifiera skrivning for %s", mac)
+                return False
+
+        _LOGGER.warning(
+            "LK Arc Climate: OK — skrev %.1f C till %s (%s) via measurement API (verifierat)",
+            celsius,
+            self._zone,
+            mac,
+        )
+        return True
+
     async def _write_via_measurement_api(self, device_id: str, celsius: float) -> bool:
         """POST link2.lk.nu measurement update — the path the LK app uses."""
         mac = _mac_with_colons(device_id)
@@ -207,25 +317,7 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
 
         try:
             async with client_cm() as lk:
-                if not hasattr(lk, "set_device_temperature"):
-                    _LOGGER.error("LK Arc Climate: set_device_temperature saknas i pylksystems")
-                    return False
-                ok = await lk.set_device_temperature(mac, celsius)
-                if ok:
-                    _LOGGER.warning(
-                        "LK Arc Climate: OK — skrev %.1f C till %s (%s) via measurement API",
-                        celsius,
-                        self._zone,
-                        mac,
-                    )
-                    return True
-                _LOGGER.error(
-                    "LK Arc Climate: measurement API returnerade False for %s (%s) → %.1f C",
-                    self._zone,
-                    mac,
-                    celsius,
-                )
-                return False
+                return await self._post_desired_temperature(lk, mac, celsius)
         except Exception:  # noqa: BLE001
             _LOGGER.exception(
                 "LK Arc Climate: exception vid skrivning till %s (%s) → %.1f C",
@@ -258,10 +350,12 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         celsius = float(temperature)
 
         _LOGGER.warning(
-            "LK Arc Climate: forsoker satta %s (%s) till %.1f C",
+            "LK Arc Climate: forsoker satta %s (%s) till %.1f C "
+            "[entity climate.%s_thermostat — inte sensor.hemopt_setpoint_*]",
             self._zone,
             self._mac,
             celsius,
+            self._mac.lower().replace(":", "_"),
         )
 
         candidates: list[str] = []
@@ -300,7 +394,9 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
                         "title": "LK Arc Climate",
                         "message": (
                             f"Kunde inte skriva {celsius:.1f} °C till {self._zone}. "
-                            "Se Settings → System → Logs (sok LK Arc Climate)."
+                            "Se Settings → System → Logs (sok LK Arc Climate). "
+                            "Obs: sensor.hemopt_setpoint_* ar bara planen — "
+                            "styr via climate.*_thermostat."
                         ),
                         "notification_id": f"lk_arc_climate_{self._mac}",
                     },

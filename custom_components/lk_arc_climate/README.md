@@ -41,20 +41,29 @@ climate.c8_1b_04_e0_7e_90_thermostat
 
 Äldre byggen skrev till en Azure-endpoint som kunde se ut att lyckas utan att
 appen uppdaterades. Från **0.1.21** används samma `link2.lk.nu`-anrop som appen
-(`service/arc/sense/<mac>/measurement/true`).
+(`service/arc/sense/<mac>/measurement/true`). Från **0.1.23** verifieras att
+molnet faktiskt fick det nya börvärdet innan HA visar OK.
 
 Uppdatera hemopt → Restart tillägg → **Restart Home Assistant** → testa igen.
-Kolla **Settings → System → Logs** efter `LK Arc Climate: skrev`.
+Kolla **Settings → System → Logs** efter `LK Arc Climate: OK — skrev`.
 
 ### Viktigt: ratt entitet
 
 Andra **`climate.<mac>_thermostat`** (Thermostat pa rumsenheten).
 
-**Inte** `sensor.hemopt_setpoint_*` — det ar bara hemopts *planerade* borvarde
-(MQTT-sensor, skrivskyddad) och styr inte LK-appen.
+**Inte** `sensor.hemopt_setpoint_*` — det ar bara hemopts *plan* (MQTT, lases
+endast, heter «Plan (ej styrt) …» fran 0.1.23) och styr inte LK-appen.
 
 I Logs ska du se (niva Warning):
-`LK Arc Climate: forsoker satta …` och sedan `OK — skrev … via measurement API`.
+`LK Arc Climate: forsoker satta …` och sedan `OK — skrev … (verifierat)`.
+
+### MQTT-varning om `object_id`
+
+Om Logs visar
+`deprecated option object_id` for `sensor.hemopt_*` kor du en **aldre** hemopt
+an 0.1.22. Tryck **Update** till 0.1.23+, **Restart** tillagget — da republiseras
+discovery med `default_entity_id` och varningen forsvinner. Det har inget med
+LK-appen att gora.
 
 ### Snabbtest
 
@@ -98,11 +107,12 @@ Om loggen säger att `/homeassistant` saknas:
 | Integrationen syns inte under Add integration | Du glömde **Restart Home Assistant** efter att tillägget installerat filerna |
 | *LK Systems is missing* | Installera/aktivera **LK Systems** (angoyd/ha-lksystems) först |
 | Bara Sensors, ingen Thermostat | **LK Arc Climate → ⋮ → Reload**. Kolla Logs för `lk_arc_climate` |
-| Ändring syns inte i LK-appen | Vänta 10–30 s; kolla Logs |
+| MQTT `deprecated option object_id` for sensor.hemopt_* | Du kör &lt; 0.1.22 — **Update** till 0.1.23+, Restart tillägget |
+| Ändring syns inte i LK-appen | Styra `climate.*_thermostat`, inte `sensor.hemopt_setpoint_*`. Logs: `LK Arc Climate:` |
 
 ## Kort checklista
 
-- [ ] hemopt 0.1.20+ uppdaterad och omstartad
+- [ ] hemopt 0.1.23+ uppdaterad och omstartad
 - [ ] Loggen visar att LK Arc Climate installerats
 - [ ] **Restart Home Assistant** en gång
 - [ ] **Add integration → LK Arc Climate**
