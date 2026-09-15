@@ -207,6 +207,7 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
             identifiers={(LK_DOMAIN, identity)},
         )
         self._optimistic_target: float | None = None
+        self._write_lock = asyncio.Lock()
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -280,6 +281,16 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         headers = {**get_headers(), "authorization": f"Bearer {jwt}"}
         return session, headers
 
+    @staticmethod
+    def _request_timeout():
+        """Per-request timeout (pylksystems session defaults to 20s — too short)."""
+        try:
+            from aiohttp import ClientTimeout
+
+            return ClientTimeout(total=60, sock_connect=15, sock_read=45)
+        except ImportError:  # pragma: no cover - unit tests without aiohttp
+            return 60
+
     async def _verify_desired(self, lk: Any, mac: str, tenths: int) -> bool:
         """Re-read measurement; tolerate a short cloud lag."""
         if not hasattr(lk, "get_device_measurement"):
@@ -319,38 +330,56 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         session, headers = auth
         url = f"https://link2.lk.nu/control/arc/sense/{mac}/temperature"
         payload = {"temperature": tenths}
-        _LOGGER.warning(
+        _LOGGER.info(
             "LK Arc Climate: POST control …/temperature %s → %d (%.1f C) for %s",
             mac,
             tenths,
             tenths / 10.0,
             self._zone,
         )
-        async with session.post(url, json=payload, headers=headers) as response:
-            body = await response.text()
-            if response.status not in (200, 204):
-                _LOGGER.error(
-                    "LK Arc Climate: control POST HTTP %s for %s: %s",
-                    response.status,
-                    mac,
-                    body[:300],
-                )
-                return False
-            if response.status == 200 and body:
-                try:
-                    data = json.loads(body)
-                    returned = data.get("temperature")
-                    if returned is not None and abs(int(returned) - tenths) > 0:
-                        _LOGGER.error(
-                            "LK Arc Climate: control svarade temperature=%s (forvantade %d)",
-                            returned,
-                            tenths,
-                        )
-                        return False
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    pass
-        if await self._verify_desired(lk, mac, tenths):
+        try:
+            async with session.post(
+                url, json=payload, headers=headers, timeout=self._request_timeout()
+            ) as response:
+                body = await response.text()
+                if response.status not in (200, 204):
+                    _LOGGER.error(
+                        "LK Arc Climate: control POST HTTP %s for %s: %s",
+                        response.status,
+                        mac,
+                        body[:300],
+                    )
+                    return False
+                if response.status == 200 and body:
+                    try:
+                        data = json.loads(body)
+                        returned = data.get("temperature")
+                        if returned is not None and abs(int(returned) - tenths) > 0:
+                            _LOGGER.error(
+                                "LK Arc Climate: control svarade temperature=%s (forvantade %d)",
+                                returned,
+                                tenths,
+                            )
+                            return False
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+        except TimeoutError:
+            # Server may still have applied the write; confirm via measurement.
             _LOGGER.warning(
+                "LK Arc Climate: control POST timeout for %s — verifierar via measurement",
+                mac,
+            )
+            if await self._verify_desired(lk, mac, tenths):
+                _LOGGER.info(
+                    "LK Arc Climate: OK — %.1f C till %s efter timeout (verifierat)",
+                    tenths / 10.0,
+                    self._zone,
+                )
+                return True
+            return False
+
+        if await self._verify_desired(lk, mac, tenths):
+            _LOGGER.info(
                 "LK Arc Climate: OK — skrev %.1f C till %s (%s) via control API",
                 tenths / 10.0,
                 self._zone,
@@ -358,7 +387,7 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
             )
             return True
         # Control accepted the write (200/204); measurement poll can lag — still OK.
-        _LOGGER.warning(
+        _LOGGER.info(
             "LK Arc Climate: OK — control API accepterade %.1f C for %s "
             "(measurement-verify laggar; antar OK)",
             tenths / 10.0,
@@ -400,28 +429,44 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         update_data["desiredTemperature"] = tenths
         base_url = getattr(lk, "BASE_URL", "https://link2.lk.nu/")
         url = f"{base_url}service/arc/sense/{mac}/measurement/true"
-        _LOGGER.warning(
+        _LOGGER.info(
             "LK Arc Climate: POST measurement/true desiredTemperature=%d for %s",
             tenths,
             self._zone,
         )
-        async with session.post(url, json=update_data, headers=headers) as response:
-            body = await response.text()
-            if response.status != 200:
-                _LOGGER.error(
-                    "LK Arc Climate: measurement POST HTTP %s for %s: %s",
-                    response.status,
-                    mac,
-                    body[:300],
+        try:
+            async with session.post(
+                url, json=update_data, headers=headers, timeout=self._request_timeout()
+            ) as response:
+                body = await response.text()
+                if response.status != 200:
+                    _LOGGER.error(
+                        "LK Arc Climate: measurement POST HTTP %s for %s: %s",
+                        response.status,
+                        mac,
+                        body[:300],
+                    )
+                    return False
+        except TimeoutError:
+            _LOGGER.warning(
+                "LK Arc Climate: measurement POST timeout for %s — verifierar",
+                mac,
+            )
+            if await self._verify_desired(lk, mac, tenths):
+                _LOGGER.info(
+                    "LK Arc Climate: OK — %.1f C till %s efter measurement-timeout",
+                    tenths / 10.0,
+                    self._zone,
                 )
-                return False
+                return True
+            return False
         if not await self._verify_desired(lk, mac, tenths):
             _LOGGER.error(
                 "LK Arc Climate: measurement POST OK men molnet verifierades inte for %s",
                 mac,
             )
             return False
-        _LOGGER.warning(
+        _LOGGER.info(
             "LK Arc Climate: OK — skrev %.1f C till %s (%s) via measurement API",
             tenths / 10.0,
             self._zone,
@@ -492,23 +537,22 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
             return
         celsius = float(temperature)
 
-        _LOGGER.warning(
-            "LK Arc Climate: forsoker satta %s (%s) till %.1f C "
-            "[%s — inte sensor.hemopt_setpoint_*]",
+        async with self._write_lock:
+            await self._async_set_temperature_locked(celsius)
+
+    async def _async_set_temperature_locked(self, celsius: float) -> None:
+        _LOGGER.info(
+            "LK Arc Climate: forsoker satta %s (%s) till %.1f C [%s]",
             self._zone,
             self._mac,
             celsius,
             self.entity_id,
         )
 
+        # Prefer colon-MAC once — duplicates only wasted time against the 20–60s timeout.
         candidates: list[str] = []
-        for value in (
-            _mac_with_colons(self._mac),
-            _mac_with_colons(self._identity),
-            self._mac,
-            self._identity,
-        ):
-            if value and value not in candidates:
+        for value in (_mac_with_colons(self._mac), _mac_with_colons(self._identity)):
+            if value and ":" in value and value not in candidates:
                 candidates.append(value)
 
         ok = False
@@ -518,12 +562,9 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
                 break
 
         if not ok:
-            # Do NOT fall back to the Azure helper — it can report success
-            # without the LK mobile app ever seeing the change.
             _LOGGER.error(
                 "LK Arc Climate: MISSLYCKADES satta %s (%s) till %.1f C. "
-                "Andra climate.*_thermostat (inte sensor.hemopt_setpoint_*). "
-                "Kolla att LK Systems ar inloggad och uppdaterad.",
+                "Kolla Settings → System → Logs (control timeout / HTTP-fel).",
                 self._zone,
                 self._mac,
                 celsius,
@@ -537,9 +578,7 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
                         "title": "LK Arc Climate",
                         "message": (
                             f"Kunde inte skriva {celsius:.1f} °C till {self._zone}. "
-                            "Se Settings → System → Logs (sok LK Arc Climate). "
-                            "Obs: sensor.hemopt_setpoint_* ar bara planen — "
-                            "styr via climate.*_thermostat."
+                            "Se Settings → System → Logs (sok LK Arc Climate)."
                         ),
                         "notification_id": f"lk_arc_climate_{self._mac}",
                     },

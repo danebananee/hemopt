@@ -193,7 +193,7 @@ async def test_control_api_write_succeeds(climate_mod):
             return False
 
     class _Session:
-        def post(self, url, json=None, headers=None):
+        def post(self, url, json=None, headers=None, timeout=None):
             posts.append((url, json))
             return _Resp()
 
@@ -251,7 +251,7 @@ async def test_falls_back_to_measurement_when_control_fails(climate_mod):
             return False
 
     class _Session:
-        def post(self, url, json=None, headers=None):
+        def post(self, url, json=None, headers=None, timeout=None):
             posts.append(url)
             if "/control/" in url:
                 return _Resp(401, "unauthorized")
@@ -292,3 +292,41 @@ async def test_falls_back_to_measurement_when_control_fails(climate_mod):
     assert await entity._post_desired_temperature(_Lk(), "c8:1b:04:e0:7e:90", 21.5) is True
     assert any("/control/" in u for u in posts)
     assert any("measurement/true" in u for u in posts)
+
+
+@pytest.mark.asyncio
+async def test_control_timeout_then_verify_ok(climate_mod):
+    class _Session:
+        def post(self, url, json=None, headers=None, timeout=None):
+            raise TimeoutError
+
+    class _Lk:
+        BASE_URL = "https://link2.lk.nu/"
+        session = _Session()
+        jwt_token = "token"
+        device_measurements = {
+            "c8:1b:04:e0:7e:90": {
+                "currentTemperature": 200,
+                "desiredTemperature": 215,
+            }
+        }
+
+        def _get_headers(self):
+            return {}
+
+        async def get_device_measurement(self, mac, force_update=False):
+            return True
+
+    class _Coord:
+        data = {"devices": [_coord_device()]}
+
+        def _apply_device_measurement(self, device_id, measurement):
+            pass
+
+    entity = climate_mod.LKArcClimate(
+        _Coord(),
+        _coord_device(),
+        mac="c8:1b:04:e0:7e:90",
+        identity="c8:1b:04:e0:7e:90",
+    )
+    assert await entity._post_desired_temperature(_Lk(), "c8:1b:04:e0:7e:90", 21.5) is True
