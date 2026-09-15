@@ -71,7 +71,7 @@ och MQTT-lösenordet. Vill du börja från tomt i stället ger
 | Fält | Vad det är |
 | --- | --- |
 | `rooms[].temperature_entity` | Rummets temperaturgivare (BLE `sensor.*` fungerar) |
-| `rooms[].climate_entity` | `climate.<mac>_thermostat` från [lk_arc_climate](../custom_components/lk_arc_climate) |
+| `rooms[].climate_entity` | `climate.<mac>_thermostat` från [lk_arc_climate](../custom_components/lk_arc_climate) — [utförlig guide](../custom_components/lk_arc_climate/README.md) |
 | `heat_pump.room_setpoint_entity` | Fallback: husbörvärde via H66 |
 | `heat_pump.outdoor_entity` | Utetemperatur |
 | `heat_pump.power_entity` | Värmepumpens effekt |

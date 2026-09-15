@@ -73,6 +73,23 @@ Home Assistant-entiteter (climate / number) — ofta MQTT→H66 under huven.
 Slå på **Styr värmen** i panelen för att skriva börvärden; annars syns bara
 planen. Under **Vad som styrs** syns vilka entiteter som är kopplade.
 
+### LK Arc-rum (golvvärme)
+
+LK Systems-integrationen ger oftast bara **Sensors** (Temperature, Humidity,
+Battery). För skrivbara termostater: installera companion-integrationen
+**LK Arc Climate** och fyll `climate_entity` per rum i `hemopt.yaml`.
+
+Steg-för-steg (menyer på engelska):
+[../custom_components/lk_arc_climate/README.md](../custom_components/lk_arc_climate/README.md).
+
+Kort:
+
+1. Kopiera `custom_components/lk_arc_climate` → `/config/custom_components/`
+2. **Settings → System** → ⋮ → **Restart Home Assistant**
+3. **Settings → Devices & services → Add integration → LK Arc Climate**
+4. **Developer tools → States**: sök `climate.` och `_thermostat`
+5. Sätt samma id som `climate_entity` i `/config/hemopt.yaml`, restart hemopt
+
 ## Inställningar (Configuration)
 
 Effektregler, elmätare, elområde och MQTT sätts här — inte i dashboarden.
