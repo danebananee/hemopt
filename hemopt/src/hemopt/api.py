@@ -73,7 +73,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.23",
+        version="0.1.24",
         lifespan=lifespan,
     )
 
@@ -311,6 +311,19 @@ async def _adopt_meter_if_missing(engine: Engine) -> None:
 
 async def _bootstrap(engine: Engine) -> None:
     """Get a plan on screen before the periodic loops take over."""
+    try:
+        async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
+            if await ha.ping():
+                lk = await ha.ensure_lk_arc_climate()
+                _LOGGER.warning(
+                    "LK Arc Climate check: ok=%s action=%s detail=%s sample=%s",
+                    lk.get("ok"),
+                    lk.get("action"),
+                    lk.get("detail"),
+                    lk.get("sample_climate"),
+                )
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("LK Arc Climate ensure failed")
     try:
         await engine.collect()
     except Exception:  # noqa: BLE001

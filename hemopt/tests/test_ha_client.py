@@ -77,3 +77,61 @@ async def test_set_temperature_entity_routes_climate_and_number():
 
     assert seen[0].url.path.endswith("/climate/set_temperature")
     assert seen[1].url.path.endswith("/number/set_value")
+
+
+async def test_ensure_lk_arc_climate_starts_flow_when_missing():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/api/states"):
+            return httpx.Response(
+                200,
+                json=[
+                    {"entity_id": "sensor.e0_ec_2c_c8_5e_2c_temperature", "state": "21.4"},
+                    {"entity_id": "climate.h66_hproom_temp_setpoint", "state": "21"},
+                ],
+            )
+        if request.url.path.endswith("/api/config/config_entries/flow"):
+            return httpx.Response(
+                200,
+                json={"type": "create_entry", "title": "LK Arc Climate", "flow_id": "x"},
+            )
+        return httpx.Response(404)
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://ha", token="t"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    async with client:
+        result = await client.ensure_lk_arc_climate()
+
+    assert result["ok"] is True
+    assert result["action"] == "create_entry"
+    assert any(r.url.path.endswith("/api/config/config_entries/flow") for r in seen)
+
+
+async def test_ensure_lk_arc_climate_skips_when_present():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/states"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "entity_id": "climate.e0_ec_2c_c8_5e_2c_thermostat",
+                        "state": "heat",
+                    }
+                ],
+            )
+        return httpx.Response(500, text="should not call flow")
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://ha", token="t"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    async with client:
+        result = await client.ensure_lk_arc_climate()
+
+    assert result["ok"] is True
+    assert result["action"] == "already_present"
+    assert result["sample_climate"] == "climate.e0_ec_2c_c8_5e_2c_thermostat"

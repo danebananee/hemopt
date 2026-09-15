@@ -109,8 +109,8 @@ def test_suggestions_stay_within_the_entity_domain():
     assert _suggest("climate.f7_d4_23_14_49_da_thermostat", known) == ["climate.f7_d4_23_14_49_da"]
 
 
-async def test_a_missing_thermostat_is_only_a_warning():
-    """Rooms are still readable and plannable without a controllable thermostat."""
+async def test_a_missing_thermostat_is_a_failure():
+    """Configured climate_entity that does not exist breaks Golvvärme + actuation."""
     config = make_config(
         rooms=[
             {
@@ -123,8 +123,10 @@ async def test_a_missing_thermostat_is_only_a_warning():
     )
     report = await run_doctor(config)
 
-    assert report.failures == 0
-    assert levels(report, "Badrum, termostat") == [WARN]
+    assert report.failures >= 1
+    assert levels(report, "Badrum, termostat") == [FAIL]
+    finding = next(f for f in report.findings if f.label == "Badrum, termostat")
+    assert "Entity not found" in finding.detail or "saknas" in finding.detail
 
 
 async def test_sensor_only_rooms_warn_without_house_setpoint():

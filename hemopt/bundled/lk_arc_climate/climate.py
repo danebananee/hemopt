@@ -88,6 +88,11 @@ def _mac_with_colons(value: str) -> str:
     return value
 
 
+def _mac_slug(value: str) -> str:
+    """HA entity id fragment: e0_ec_2c_c8_5e_2c (same as ha-lksystems sensors)."""
+    return _mac_with_colons(value).replace(":", "_")
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -113,12 +118,10 @@ async def async_setup_entry(
         )
     else:
         for entity in entities:
-            mac_slug = entity._mac.lower().replace(":", "_")  # noqa: SLF001
             _LOGGER.warning(
-                "LK Arc Climate: termostat %s → climate.%s_thermostat "
-                "(ANDRA DENNA — inte sensor.hemopt_setpoint_*)",
+                "LK Arc Climate: termostat %s → %s (ANDRA DENNA — inte sensor.hemopt_setpoint_*)",
                 entity._zone,  # noqa: SLF001
-                mac_slug,
+                entity.entity_id,
             )
 
     async_add_entities(entities)
@@ -144,7 +147,11 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         title = device.get("deviceTitle") or {}
         self._zone = (title.get("zone") or {}).get("zoneName") or identity
 
-        self._attr_unique_id = f"{DOMAIN}_{mac}_thermostat"
+        mac_slug = _mac_slug(mac)
+        # Pin the entity_id so dashboards / hemopt.yaml stay stable
+        # (climate.e0_ec_2c_c8_5e_2c_thermostat — same slug as the sensors).
+        self.entity_id = f"climate.{mac_slug}_thermostat"
+        self._attr_unique_id = f"{DOMAIN}_{mac_slug}_thermostat"
         self._attr_name = "Thermostat"
         self._attr_device_info = DeviceInfo(
             identifiers={(LK_DOMAIN, identity)},
@@ -351,11 +358,11 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
 
         _LOGGER.warning(
             "LK Arc Climate: forsoker satta %s (%s) till %.1f C "
-            "[entity climate.%s_thermostat — inte sensor.hemopt_setpoint_*]",
+            "[%s — inte sensor.hemopt_setpoint_*]",
             self._zone,
             self._mac,
             celsius,
-            self._mac.lower().replace(":", "_"),
+            self.entity_id,
         )
 
         candidates: list[str] = []

@@ -77,16 +77,21 @@ planen. Under **Vad som styrs** syns vilka entiteter som är kopplade.
 
 LK Systems ger oftast bara **Sensors**. Från hemopt **0.1.20** installeras
 **LK Arc Climate** automatiskt i `/config/custom_components/` när tillägget
-startar. Från **0.1.23** verifieras molnskrivningen innan HA visar OK.
+startar. Från **0.1.24** skapas även config entry automatiskt efter
+**Restart Home Assistant** — Golvvärme ska då visa termostater (inte
+Entity not found).
 
 1. **Update** / **Restart** hemopt → kolla **Log** (`LK Arc Climate installerad`)
 2. **Settings → System → ⋮ → Restart Home Assistant** (en gång)
-3. **Settings → Devices & services → Add integration → LK Arc Climate**
+3. Kolla Logs: `LK Arc Climate check:` / `climate.*_thermostat`
 4. **Developer tools → States**: sök `climate.` / `_thermostat`
 5. Matcha `climate_entity` i `/config/hemopt.yaml`, restart hemopt
 
 Styr **`climate.*_thermostat`**, inte `sensor.hemopt_setpoint_*` (det är bara
 planen). MQTT-varning om `object_id` betyder äldre hemopt än 0.1.22 — Update.
+
+Reserv om automatiken missar:
+**Settings → Devices & services → Add integration → LK Arc Climate**
 
 Utförlig guide:
 [../custom_components/lk_arc_climate/README.md](../custom_components/lk_arc_climate/README.md).

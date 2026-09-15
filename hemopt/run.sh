@@ -54,8 +54,9 @@ install_lk_arc_climate() {
     cp -a "$src" "$dest"
     printf 'hemopt\n' >"$marker"
     echo "[hemopt] LK Arc Climate installerad i $dest"
-    echo "[hemopt] Nasta steg (en gang): Restart Home Assistant, sedan"
-    echo "[hemopt]   Settings → Devices & services → Add integration → LK Arc Climate"
+    echo "[hemopt] Restart Home Assistant en gang — därefter skapas"
+    echo "[hemopt]   climate.*_thermostat automatiskt (0.1.24+)."
+    echo "[hemopt] Reserv: Settings → Devices & services → Add integration → LK Arc Climate"
 }
 
 install_lk_arc_climate

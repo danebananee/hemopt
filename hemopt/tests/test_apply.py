@@ -65,6 +65,8 @@ async def test_apply_writes_house_setpoint_when_rooms_lack_climate(monkeypatch):
     seen: list[tuple[str, str, dict]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/states"):
+            return httpx.Response(200, json=[])
         if "/services/" in str(request.url):
             parts = request.url.path.rstrip("/").split("/")
             domain, service = parts[-2], parts[-1]
@@ -125,6 +127,11 @@ async def test_apply_prefers_per_room_climate_over_house_setpoint(monkeypatch):
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/states"):
+            return httpx.Response(
+                200,
+                json=[{"entity_id": "climate.vardagsrum", "state": "heat"}],
+            )
         if "/services/" in str(request.url):
             seen.append(request.read().decode())
         return httpx.Response(200, json={})

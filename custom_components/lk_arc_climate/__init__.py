@@ -10,16 +10,41 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, LK_DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.CLIMATE]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Auto-create the config entry once LK Systems is present.
+
+    Copying files into custom_components is not enough — without a config
+    entry no climate entities appear (dashboard shows Entity not found) and
+    hemopt writes produce no LK Arc Climate log lines.
+    """
+    if hass.config_entries.async_entries(DOMAIN):
+        return True
+
+    if not hass.config_entries.async_entries(LK_DOMAIN):
+        _LOGGER.warning(
+            "LK Arc Climate: LK Systems saknas ännu — lägg till den först, "
+            "sedan startas LK Arc Climate automatiskt."
+        )
+        return True
+
+    _LOGGER.warning("LK Arc Climate: skapar config entry automatiskt…")
+    hass.async_create_task(
+        hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_IMPORT}, data={})
+    )
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

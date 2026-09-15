@@ -811,16 +811,40 @@ class Engine:
 
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
             room_writes = 0
+            missing_climate: list[str] = []
+            try:
+                known_states = await ha.states()
+            except Exception as exc:  # noqa: BLE001
+                known_states = {}
+                self._record_error(f"states: {exc}")
+
             for room_plan in self.plan.rooms:
                 room = self.config.room(room_plan.key)
                 if not room.climate_entity:
                     continue
                 try:
+                    if room.climate_entity not in known_states:
+                        missing_climate.append(room.climate_entity)
+                        self._record_error(
+                            f"{room.name}: {room.climate_entity} saknas "
+                            "(Entity not found — LK Arc Climate ej tillagd? "
+                            "Restart HA efter hemopt-update)"
+                        )
+                        continue
                     await ha.set_temperature_entity(room.climate_entity, room_plan.setpoint[index])
                     applied += 1
                     room_writes += 1
                 except Exception as exc:  # noqa: BLE001 - one room must not stop the rest
                     self._record_error(f"{room.name}: {exc}")
+
+            if missing_climate:
+                _LOGGER.error(
+                    "Hemopt kunde inte styra rum — climate-entiteter saknas: %s. "
+                    "Golvvärme-dashboarden visar då Entity not found. "
+                    "Update hemopt → Restart tillägg → Restart Home Assistant. "
+                    "Kolla Logs efter «LK Arc Climate check».",
+                    ", ".join(missing_climate[:4]),
+                )
 
             # No per-room actuators (common with LK sensors that are read-only):
             # write one house indoor target via H66 / Rego room controller.

@@ -134,6 +134,27 @@ def test_mac_with_colons(climate_mod):
     assert climate_mod._mac_with_colons("C81B04E07E90") == "c8:1b:04:e0:7e:90"
 
 
+def test_entity_id_is_pinned_to_mac_slug(climate_mod):
+    class _Coord:
+        data = {"devices": []}
+
+    device = {
+        "mac": "e0:ec:2c:c8:5e:2c",
+        "deviceTitle": {
+            "deviceGroup": "arc",
+            "deviceType": "arc-sense",
+            "identity": "e0:ec:2c:c8:5e:2c",
+            "zone": {"zoneName": "Tvattstuga"},
+        },
+        "measurement": {"desiredTemperature": 200},
+    }
+    entity = climate_mod.LKArcClimate(
+        _Coord(), device, mac="e0:ec:2c:c8:5e:2c", identity="e0:ec:2c:c8:5e:2c"
+    )
+    assert entity.entity_id == "climate.e0_ec_2c_c8_5e_2c_thermostat"
+    assert entity._attr_unique_id == "lk_arc_climate_e0_ec_2c_c8_5e_2c_thermostat"  # noqa: SLF001
+
+
 @pytest.mark.asyncio
 async def test_post_desired_temperature_verifies_cloud(climate_mod):
     """Write must re-read measurement and reject a fake HTTP 200."""

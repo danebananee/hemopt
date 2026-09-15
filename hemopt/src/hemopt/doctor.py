@@ -167,7 +167,17 @@ async def run_doctor(config: Config) -> Report:
         check(room.temperature_entity, f"{room.name}, temperatur", numeric=True, required=True)
         if room.climate_entity:
             rooms_with_climate += 1
-            check(room.climate_entity, f"{room.name}, termostat", numeric=False, required=False)
+            if room.climate_entity not in states:
+                report.add(
+                    FAIL,
+                    f"{room.name}, termostat",
+                    f"{room.climate_entity} saknas (Entity not found på Golvvärme). "
+                    "Update/Restart hemopt, sedan Restart Home Assistant — "
+                    "LK Arc Climate skapas automatiskt.",
+                    _suggest(room.climate_entity, known),
+                )
+            else:
+                check(room.climate_entity, f"{room.name}, termostat", numeric=False, required=True)
 
     if config.heat_pump.room_setpoint_entity:
         check(

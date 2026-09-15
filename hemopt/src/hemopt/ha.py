@@ -251,6 +251,111 @@ class HomeAssistantClient:
                 f"{domain}.{service} failed with {response.status_code}: {response.text[:200]}"
             )
 
+    async def ensure_lk_arc_climate(self) -> dict[str, object]:
+        """Start the LK Arc Climate config flow if climate.*_thermostat is missing.
+
+        Copying custom_components/lk_arc_climate is not enough — without a
+        config entry the dashboard shows Entity not found and writes never
+        reach the LK cloud (no «LK Arc Climate:» lines in Logs).
+        """
+        result: dict[str, object] = {
+            "ok": False,
+            "action": None,
+            "detail": None,
+            "sample_climate": None,
+        }
+        try:
+            states = await self.states()
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"states failed: {exc}"
+            return result
+
+        climates = sorted(
+            entity_id
+            for entity_id in states
+            if entity_id.startswith("climate.") and entity_id.endswith("_thermostat")
+        )
+        # Prefer MAC-slug thermostats (exclude short H66 names).
+        lk_climates = [entity_id for entity_id in climates if entity_id.count("_") >= 5]
+        if lk_climates:
+            result["ok"] = True
+            result["action"] = "already_present"
+            result["sample_climate"] = lk_climates[0]
+            result["detail"] = f"{len(lk_climates)} climate.*_thermostat"
+            return result
+
+        try:
+            start = await self._http.post(
+                self._url("/api/config/config_entries/flow"),
+                json={"handler": "lk_arc_climate", "show_advanced_options": False},
+                headers=self._json_headers(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            result["detail"] = f"flow start failed: {exc}"
+            return result
+
+        body: dict = {}
+        try:
+            body = start.json() if start.content else {}
+        except ValueError:
+            body = {}
+
+        if start.status_code >= 400:
+            text = (start.text or "")[:300]
+            result["detail"] = f"flow HTTP {start.status_code}: {text}"
+            if "invalid_handler" in text or start.status_code == 400:
+                result["action"] = "component_not_loaded"
+                result["detail"] = (
+                    "lk_arc_climate syns inte i HA ännu — Restart Home Assistant "
+                    "efter att hemopt installerat custom_components/lk_arc_climate"
+                )
+            return result
+
+        flow_type = body.get("type")
+        flow_id = body.get("flow_id")
+        if flow_type == "create_entry":
+            result["ok"] = True
+            result["action"] = "create_entry"
+            result["detail"] = str(body.get("title") or "LK Arc Climate")
+            _LOGGER.warning(
+                "LK Arc Climate: config entry skapad via HA API — "
+                "climate.*_thermostat ska synas om en stund"
+            )
+            return result
+
+        if flow_type == "abort":
+            reason = body.get("reason")
+            result["action"] = f"abort:{reason}"
+            result["ok"] = reason in {"already_configured"}
+            result["detail"] = reason
+            if reason == "missing_lksystems":
+                result["detail"] = "LK Systems saknas — installera angoyd/ha-lksystems först"
+            return result
+
+        if flow_type == "form" and flow_id:
+            try:
+                confirm = await self._http.post(
+                    self._url(f"/api/config/config_entries/flow/{flow_id}"),
+                    json={},
+                    headers=self._json_headers(),
+                )
+                confirm_body = confirm.json() if confirm.content else {}
+            except Exception as exc:  # noqa: BLE001
+                result["detail"] = f"flow confirm failed: {exc}"
+                return result
+            result["action"] = confirm_body.get("type") or "confirm"
+            result["ok"] = confirm_body.get("type") == "create_entry"
+            result["detail"] = str(
+                confirm_body.get("title") or confirm_body.get("reason") or confirm_body
+            )[:200]
+            if result["ok"]:
+                _LOGGER.warning("LK Arc Climate: config entry skapad (form confirm)")
+            return result
+
+        result["action"] = flow_type or f"http_{start.status_code}"
+        result["detail"] = str(body)[:300]
+        return result
+
     async def weather_forecast(self, entity_id: str) -> list[ForecastPoint]:
         """Hourly outdoor temperature forecast from a weather entity.
 
