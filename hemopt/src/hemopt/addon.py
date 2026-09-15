@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.6",
+        version="0.1.7",
         lifespan=lifespan,
     )
 
@@ -283,9 +283,7 @@ def create_app() -> FastAPI:
                             detail=f"{entity_id} finns inte i Home Assistant",
                         )
                 else:
-                    _LOGGER.warning(
-                        "saving meter %s while Home Assistant is offline", entity_id
-                    )
+                    _LOGGER.warning("saving meter %s while Home Assistant is offline", entity_id)
         engine.config.base_load.total_power_entity = entity_id
         engine.config.save_profile()
         _LOGGER.info("total power meter set to %s", entity_id or "(none)")
