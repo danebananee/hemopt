@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from .climate_ids import climate_entity_candidates, resolve_climate_entity
 from .config import Config
 from .ha import HomeAssistantClient, parse_numeric
 
@@ -167,14 +168,36 @@ async def run_doctor(config: Config) -> Report:
         check(room.temperature_entity, f"{room.name}, temperatur", numeric=True, required=True)
         if room.climate_entity:
             rooms_with_climate += 1
-            if room.climate_entity not in states:
+            resolved = resolve_climate_entity(
+                room.climate_entity,
+                states,
+                temperature_entity=room.temperature_entity,
+            )
+            if resolved and resolved != room.climate_entity:
+                report.add(
+                    WARN,
+                    f"{room.name}, termostat",
+                    f"{room.climate_entity} saknas men {resolved} finns — "
+                    "byt till *_thermostat i hemopt.yaml (hemopt auto-fixar vid styrning)",
+                    [resolved],
+                )
+                check(resolved, f"{room.name}, termostat (live)", numeric=False, required=True)
+            elif resolved is None:
                 report.add(
                     FAIL,
                     f"{room.name}, termostat",
                     f"{room.climate_entity} saknas (Entity not found på Golvvärme). "
                     "Update/Restart hemopt, sedan Restart Home Assistant — "
-                    "LK Arc Climate skapas automatiskt.",
-                    _suggest(room.climate_entity, known),
+                    "LK Arc Climate skapas automatiskt. "
+                    "I hemopt.yaml ska id:t sluta på _thermostat.",
+                    _suggest(room.climate_entity, known)
+                    or [
+                        c
+                        for c in climate_entity_candidates(
+                            room.climate_entity, room.temperature_entity
+                        )
+                        if c != room.climate_entity
+                    ],
                 )
             else:
                 check(room.climate_entity, f"{room.name}, termostat", numeric=False, required=True)

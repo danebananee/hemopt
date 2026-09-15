@@ -109,6 +109,27 @@ def test_suggestions_stay_within_the_entity_domain():
     assert _suggest("climate.f7_d4_23_14_49_da_thermostat", known) == ["climate.f7_d4_23_14_49_da"]
 
 
+async def test_doctor_warns_when_thermostat_suffix_is_missing(fake_home_assistant):
+    fake_home_assistant.states.pop("climate.f7_d4_23_14_49_da", None)
+    fake_home_assistant.states["climate.f7_d4_23_14_49_da_thermostat"] = "heat"
+    config = make_config(
+        rooms=[
+            {
+                "key": "badrum",
+                "name": "Badrum",
+                "temperature_entity": "sensor.f7_d4_23_14_49_da_temperature",
+                "climate_entity": "climate.f7_d4_23_14_49_da",
+            }
+        ]
+    )
+    report = await run_doctor(config)
+
+    assert report.failures == 0
+    finding = next(f for f in report.findings if f.label == "Badrum, termostat")
+    assert finding.level == WARN
+    assert "climate.f7_d4_23_14_49_da_thermostat" in finding.detail
+
+
 async def test_a_missing_thermostat_is_a_failure():
     """Configured climate_entity that does not exist breaks Golvvärme + actuation."""
     config = make_config(
@@ -116,7 +137,7 @@ async def test_a_missing_thermostat_is_a_failure():
             {
                 "key": "badrum",
                 "name": "Badrum",
-                "temperature_entity": "sensor.f7_d4_23_14_49_da_temperature",
+                "temperature_entity": "sensor.finns_inte_temperature",
                 "climate_entity": "climate.finns_inte",
             }
         ]

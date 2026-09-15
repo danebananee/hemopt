@@ -18,6 +18,7 @@ import httpx
 
 from . import baseload
 from .advice import AdviceReport, build_advice, samples_from_hourly
+from .climate_ids import repair_room_climate_entities, resolve_climate_entity
 from .config import Config
 from .explain import explain_plan, explain_upcoming, headline
 from .guard import GuardDecision, PeakGuard
@@ -881,15 +882,35 @@ class Engine:
                 if not room.climate_entity:
                     continue
                 try:
-                    if room.climate_entity not in known_states:
+                    entity_id = resolve_climate_entity(
+                        room.climate_entity,
+                        known_states,
+                        temperature_entity=room.temperature_entity,
+                    )
+                    if entity_id is None:
                         missing_climate.append(room.climate_entity)
+                        hint = ""
+                        if not room.climate_entity.endswith("_thermostat"):
+                            hint = (
+                                f" — prova climate.{room.climate_entity.split('.', 1)[-1]}"
+                                "_thermostat"
+                            )
                         self._record_error(
                             f"{room.name}: {room.climate_entity} saknas "
                             "(Entity not found — LK Arc Climate ej tillagd? "
-                            "Restart HA efter hemopt-update)"
+                            f"Restart HA efter hemopt-update){hint}"
                         )
                         continue
-                    await ha.set_temperature_entity(room.climate_entity, room_plan.setpoint[index])
+                    if entity_id != room.climate_entity:
+                        _LOGGER.warning(
+                            "%s: climate_entity %s → %s (auto)",
+                            room.name,
+                            room.climate_entity,
+                            entity_id,
+                        )
+                        room.climate_entity = entity_id
+                        self.config.save_profile()
+                    await ha.set_temperature_entity(entity_id, room_plan.setpoint[index])
                     applied += 1
                     room_writes += 1
                 except Exception as exc:  # noqa: BLE001 - one room must not stop the rest
@@ -1052,6 +1073,20 @@ class Engine:
                                 "LK Arc Climate OK: %s",
                                 lk.get("sample_climate") or lk.get("detail"),
                             )
+                            try:
+                                states = await ha.states()
+                                repaired = repair_room_climate_entities(self.config.rooms, states)
+                                if repaired:
+                                    self.config.save_profile()
+                                    for row in repaired:
+                                        _LOGGER.warning(
+                                            "climate_entity auto-fix %s: %s → %s",
+                                            row["key"],
+                                            row["from"],
+                                            row["to"],
+                                        )
+                            except Exception:  # noqa: BLE001
+                                _LOGGER.exception("climate_entity auto-fix failed")
                             await asyncio.sleep(6 * 3600)
                             continue
                         _LOGGER.warning(

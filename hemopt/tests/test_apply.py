@@ -123,6 +123,83 @@ async def test_apply_writes_house_setpoint_when_rooms_lack_climate(monkeypatch):
     await http.aclose()
 
 
+async def test_apply_rewrites_bare_mac_climate_to_thermostat(monkeypatch, tmp_path):
+    """Legacy climate.<mac> in yaml must map onto climate.<mac>_thermostat."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/api/states"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "entity_id": "climate.d5_ba_fd_c1_0c_c1_thermostat",
+                        "state": "heat",
+                    }
+                ],
+            )
+        if "/services/" in str(request.url):
+            seen.append(request.read().decode())
+        return httpx.Response(200, json={})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    profile = tmp_path / "profile.json"
+    monkeypatch.setenv("HEMOPT_DATA", str(tmp_path))
+    config = Config(
+        home_assistant=HomeAssistantConfig(base_url="http://ha", token="t"),
+        rooms=[
+            RoomConfig(
+                key="garderob",
+                name="Garderob",
+                priority=1,
+                temperature_entity="sensor.d5_ba_fd_c1_0c_c1_temperature",
+                climate_entity="climate.d5_ba_fd_c1_0c_c1",
+            ),
+        ],
+        optimiser=OptimiserConfig(apply_controls=True),
+        database_path=":memory:",
+    )
+    engine = Engine(config)
+    engine._ha_http = http  # noqa: SLF001
+    now = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(engine, "_now", lambda: now)
+    engine.plan = Plan(
+        start=now,
+        times=[now],
+        step_minutes=15,
+        rooms=[
+            RoomPlan(
+                key="garderob",
+                name="Garderob",
+                priority=1,
+                temperature=[18.0],
+                setpoint=[19.0],
+                heat_fraction=[0.5],
+                comfort_min=18.0,
+                comfort_max=21.0,
+            )
+        ],
+        hot_water=None,
+        heat_pump_kw=[1.0],
+        total_power_kw=[1.5],
+        price_sek_per_kwh=[1.0],
+        outdoor_c=[0.0],
+        hour_peaks=[],
+        energy_cost_sek=1.0,
+        peak_cost_sek=0.0,
+        comfort_penalty_sek=0.0,
+    )
+    engine.status.control_enabled = True
+
+    applied = await engine.apply()
+
+    assert applied == 1
+    assert any("climate.d5_ba_fd_c1_0c_c1_thermostat" in body for body in seen)
+    assert config.rooms[0].climate_entity == "climate.d5_ba_fd_c1_0c_c1_thermostat"
+    assert profile.exists()
+    await http.aclose()
+
+
 async def test_apply_prefers_per_room_climate_over_house_setpoint(monkeypatch):
     seen: list[str] = []
 

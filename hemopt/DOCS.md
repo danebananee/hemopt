@@ -79,7 +79,8 @@ LK Systems ger oftast bara **Sensors**. Från hemopt **0.1.20** installeras
 **LK Arc Climate** automatiskt i `/config/custom_components/` när tillägget
 startar. Från **0.1.25** skapas även config entry automatiskt efter
 **Restart Home Assistant** — Golvvärme ska då visa termostater (inte
-Entity not found).
+Entity not found). Från **0.1.31** auto-rättas `climate.<mac>` i yaml till
+`climate.<mac>_thermostat` om den senare finns.
 
 1. **Update** / **Restart** hemopt → kolla **Log** (`LK Arc Climate installerad`)
 2. **Settings → System → ⋮ → Restart Home Assistant** (en gång)

@@ -108,9 +108,13 @@ def _migrate_registry_ids(hass: HomeAssistant, mac: str, identity: str) -> None:
     desired_uid = f"{DOMAIN}_{mac_slug}_thermostat"
     candidates = {
         desired_uid,
+        f"{DOMAIN}_{mac_slug}",
         f"{DOMAIN}_{mac}_thermostat",
+        f"{DOMAIN}_{mac}",
         f"{DOMAIN}_{identity}_thermostat",
+        f"{DOMAIN}_{identity}",
         f"{DOMAIN}_{_mac_with_colons(mac)}_thermostat",
+        f"{DOMAIN}_{_mac_with_colons(mac)}",
     }
     for uid in candidates:
         entry = registry.async_get_entity_id("climate", DOMAIN, uid)
@@ -133,6 +137,19 @@ def _migrate_registry_ids(hass: HomeAssistant, mac: str, identity: str) -> None:
                 )
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("LK Arc Climate: kunde inte byta %s till %s", entry, desired)
+
+    # Also catch a bare climate.<mac_slug> left behind by an older pin.
+    legacy = f"climate.{mac_slug}"
+    if legacy != desired:
+        reg_entry = registry.async_get(legacy)
+        if reg_entry and reg_entry.platform == DOMAIN:
+            try:
+                registry.async_update_entity(
+                    legacy, new_entity_id=desired, new_unique_id=desired_uid
+                )
+                _LOGGER.warning("LK Arc Climate: registry %s → %s (legacy id)", legacy, desired)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("LK Arc Climate: kunde inte byta %s till %s", legacy, desired)
 
 
 async def async_setup_entry(
