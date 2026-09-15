@@ -44,9 +44,10 @@ climate.c8_1b_04_e0_7e_90_thermostat
 ### Om HA ändras men LK-appen inte gör det
 
 Äldre byggen skrev till en Azure-endpoint som kunde se ut att lyckas utan att
-appen uppdaterades. Från **0.1.21** används samma `link2.lk.nu`-anrop som appen
-(`service/arc/sense/<mac>/measurement/true`). Från **0.1.23** verifieras att
-molnet faktiskt fick det nya börvärdet innan HA visar OK.
+appen uppdaterades. Från **0.1.21** användes `measurement/true`. Från **0.1.28**
+används den officiella **Device Control**-API:n
+(`POST https://link2.lk.nu/control/arc/sense/<mac>/temperature`) — samma väg
+som LK:s egna styrning — med `measurement/true` som reserv.
 
 Uppdatera hemopt → Restart tillägg → **Restart Home Assistant** → testa igen.
 Kolla **Settings → System → Logs** efter `LK Arc Climate: OK — skrev`.
