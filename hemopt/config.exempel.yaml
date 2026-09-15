@@ -40,8 +40,9 @@ mqtt:
 energy_price:
   # "Rorligt Elpris" hos Vattenfall ar manadsmedelspot: varje kWh debiteras
   # till manadens medelpris. Da ger lastflytt ingenting pa energidelen.
-  # Radgivningen papekar detta; byt till hourly nar avtalet ar bytt.
-  contract: monthly
+  # "Rorligt dagspris" = dygnsmedel. Lastflytt sparar noll pa energidelen
+  # tills du byter till tim- eller kvartsavrakning.
+  contract: daily
   vat_rate: 0.25
   supplier_markup_ore: 7.00      # Fast paslag spot
   certificate_ore: 1.40          # Fast paslag elcertifikat

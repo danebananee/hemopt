@@ -259,5 +259,5 @@
     "apply_controls": true,
     "move_penalty_sek": 0.08
   },
-  "database_path": "/tmp/pytest-of-ubuntu/pytest-16/test_peak_settings_round_trip0/test.db"
+  "database_path": "/tmp/pytest-of-ubuntu/pytest-19/test_peak_settings_round_trip0/test.db"
 }

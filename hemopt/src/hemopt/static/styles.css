@@ -915,6 +915,91 @@ tr.best-row td {
   font-weight: 600;
 }
 
+tr.current-row td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+td.delta-good {
+  color: var(--good);
+  font-weight: 600;
+}
+
+td.delta-bad {
+  color: var(--warm, #b45309);
+}
+
+.advice-intro {
+  margin: 0 0 0.75rem;
+  max-width: 52rem;
+}
+
+.advice-table {
+  margin-bottom: 1rem;
+}
+
+.scenario-bars {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.scenario-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) 1fr;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.scenario-row.current .scenario-label {
+  font-weight: 600;
+}
+
+.scenario-label {
+  font-size: 0.9rem;
+}
+
+.scenario-tracks {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.scenario-track {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.scenario-track-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.scenario-bar {
+  min-height: 1.35rem;
+  border-radius: 3px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.scenario-bar.bar-without {
+  background: color-mix(in srgb, var(--text-muted) 35%, transparent);
+}
+
+.scenario-bar.bar-with {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+@media (max-width: 720px) {
+  .scenario-row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+}
+
 @media (max-width: 720px) {
   .settings-grid,
   .history-kpis {

@@ -6,8 +6,9 @@ configuration:
   contract:
     name: Avräkning av elavtal
     description: >-
-      Hur ditt spotavtal avräknas. Kvart ger optimeraren mest att arbeta med,
-      dygn ger minst. Tillägget simulerar också vad de andra två hade kostat.
+      Hur ditt spotavtal avräknas. Dygnsmedel (rörligt dagspris) ger ingen
+      energivinst av lastflytt — välj tim eller kvart för det. Tillägget
+      visar vad de andra formerna hade kostat med och utan styrning.
   log_level:
     name: Loggnivå
     description: Höj till debug när något ser fel ut, sänk sedan tillbaka.

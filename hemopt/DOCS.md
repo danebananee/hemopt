@@ -126,7 +126,9 @@ Spotpriset hämtas från elprisetjustnu.se och kräver inte Home Assistant.
 **Effektregler** i panelen är skrivskyddad status. Ändra under Configuration.
 **Effekttoppar denna månad** visar tröskel, pågående timme och historik.
 **Användning och besparing** ritars när elmätaren ger data. **Jämför elavtal**
-behöver minst ett par dygns mätdata.
+visar varje avräkningsform (månad / dygn / timme / kvart) både **utan** och
+**med** lastflytt, och hur mycket det skiljer mot ditt nuvarande avtal
+(behöver minst ett par dygns mätdata).
 
 ## Innan du litar på styrningen
 

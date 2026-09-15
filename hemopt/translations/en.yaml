@@ -7,9 +7,10 @@ configuration:
   contract:
     name: Contract settlement
     description: >-
-      How your spot contract is settled. Quarterly gives the optimiser the most
-      to work with; daily gives it the least. The add-on also simulates what the
-      other two would have cost you.
+      How your spot contract is settled. Daily average (rörligt dagspris)
+      yields no energy saving from load shifting — pick hourly or quarterly
+      for that. The add-on shows what the other forms would have cost with
+      and without control.
   log_level:
     name: Log level
     description: Raise to debug when something looks wrong, then set it back.

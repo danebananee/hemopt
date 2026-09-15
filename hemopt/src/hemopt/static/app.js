@@ -1034,13 +1034,89 @@ function renderAdvice() {
     return;
   }
 
+  const currentName = advice.current_contract_name || "ditt nuvarande avtal";
   if (advice.notes && advice.notes.length) {
     subtitle.textContent = advice.notes[0];
+  } else if (advice.measured_days) {
+    subtitle.textContent =
+      `Ditt avtal: ${currentName}. Baserat på ${fmt(advice.measured_days, 0)} dygns ` +
+      "uppmätt förbrukning — kostnad med och utan lastflytt.";
   } else {
-    subtitle.textContent = `Baserat på ${fmt(advice.measured_days, 0)} dygns uppmätt förbrukning`;
+    subtitle.textContent = "Vad din förbrukning hade kostat under andra avräkningsformer.";
   }
 
-  if (advice.contract_costs && advice.contract_costs.length) {
+  const scenarios = advice.scenarios || [];
+  if (scenarios.length) {
+    const intro = html(
+      "p",
+      "muted advice-intro",
+      "Kolumnen «Mot dig» är årsprognos jämfört med ditt avtal utan styrning. " +
+        "Positivt tal = billigare. «Med styrning» antar att ungefär hälften av " +
+        "förbrukningen kan flyttas till billiga timmar (övre gräns).",
+    );
+    host.appendChild(intro);
+
+    const table = html("table", "advice-table");
+    const head = html("tr");
+    for (const label of [
+      "Avtal",
+      "Utan styrning",
+      "Med styrning",
+      "Mot dig (utan)",
+      "Mot dig (med)",
+    ]) {
+      head.appendChild(html("th", null, label));
+    }
+    const thead = html("thead");
+    thead.appendChild(head);
+    table.appendChild(thead);
+    const tbody = html("tbody");
+
+    const bestWith = Math.min(...scenarios.map((s) => s.with_control.annual_sek));
+    for (const row of scenarios) {
+      const tr = html(
+        "tr",
+        row.is_current
+          ? "current-row"
+          : row.with_control.annual_sek === bestWith
+            ? "best-row"
+            : null,
+      );
+      const name = html("td", null, row.name + (row.is_current ? " · ditt" : ""));
+      tr.appendChild(name);
+      tr.appendChild(
+        html(
+          "td",
+          null,
+          `${fmt(row.without_control.annual_sek, 0)} kr/år`,
+        ),
+      );
+      tr.appendChild(
+        html("td", null, `${fmt(row.with_control.annual_sek, 0)} kr/år`),
+      );
+      tr.appendChild(html("td", deltaClass(row.vs_current_without_sek), formatDelta(row.vs_current_without_sek)));
+      tr.appendChild(html("td", deltaClass(row.vs_current_with_sek), formatDelta(row.vs_current_with_sek)));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    host.appendChild(table);
+
+    const chart = html("div", "scenario-bars");
+    const maxAnnual = Math.max(
+      ...scenarios.map((s) => Math.max(s.without_control.annual_sek, s.with_control.annual_sek)),
+      1,
+    );
+    for (const row of scenarios) {
+      const block = html("div", row.is_current ? "scenario-row current" : "scenario-row");
+      block.appendChild(html("div", "scenario-label", row.name + (row.is_current ? " · ditt" : "")));
+      const tracks = html("div", "scenario-tracks");
+      tracks.appendChild(barTrack("Utan", row.without_control.annual_sek, maxAnnual, "bar-without"));
+      tracks.appendChild(barTrack("Med", row.with_control.annual_sek, maxAnnual, "bar-with"));
+      block.appendChild(tracks);
+      chart.appendChild(block);
+    }
+    host.appendChild(chart);
+  } else if (advice.contract_costs && advice.contract_costs.length) {
     const table = html("table");
     const head = html("tr");
     for (const label of ["Avtal", "Kostnad", "Öre/kWh", "kWh"]) {
@@ -1076,7 +1152,7 @@ function renderAdvice() {
       list.appendChild(card);
     }
     host.appendChild(list);
-  } else if (!advice.contract_costs.length) {
+  } else if (!scenarios.length && !(advice.contract_costs && advice.contract_costs.length)) {
     host.appendChild(
       html(
         "p",
@@ -1085,6 +1161,27 @@ function renderAdvice() {
       ),
     );
   }
+}
+
+function formatDelta(value) {
+  if (value == null || Math.abs(value) < 0.5) return "—";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${fmt(value, 0)} kr/år`;
+}
+
+function deltaClass(value) {
+  if (value == null || Math.abs(value) < 50) return null;
+  return value > 0 ? "delta-good" : "delta-bad";
+}
+
+function barTrack(label, value, max, tone) {
+  const track = html("div", "scenario-track");
+  track.appendChild(html("span", "scenario-track-label", label));
+  const bar = html("div", `scenario-bar ${tone}`);
+  bar.style.width = `${Math.max(4, (100 * value) / max)}%`;
+  bar.appendChild(document.createTextNode(`${fmt(value, 0)} kr`));
+  track.appendChild(bar);
+  return track;
 }
 
 function renderRooms() {

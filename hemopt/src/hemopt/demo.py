@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from .config import (
     BaseLoadConfig,
     Config,
+    EnergyPriceConfig,
     HeatPumpConfig,
     HomeAssistantConfig,
     HotWaterConfig,
@@ -64,6 +65,7 @@ def demo_config(database_path: str = ":memory:") -> Config:
 
     return Config(
         site=SiteConfig(price_area="SE3", main_fuse_amps=20),
+        energy_price=EnergyPriceConfig(contract="daily"),
         peak_tariff=PeakTariffConfig(
             enabled=True,
             n_peaks=5,

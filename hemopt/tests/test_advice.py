@@ -340,6 +340,37 @@ def test_the_report_serialises_for_the_api():
     assert payload["total_annual_saving_sek"] > 0
     assert payload["recommendations"][0]["title"]
     assert payload["contract_costs"][0]["ore_per_kwh"] > 0
+    assert payload["current_contract"] == "monthly"
+    assert len(payload["scenarios"]) == 4
+    assert {s["contract"] for s in payload["scenarios"]} == {
+        "monthly",
+        "daily",
+        "hourly",
+        "quarterly",
+    }
+    current = next(s for s in payload["scenarios"] if s["is_current"])
+    assert current["vs_current_without_sek"] == 0
+    hourly = next(s for s in payload["scenarios"] if s["contract"] == "hourly")
+    assert hourly["vs_current_with_sek"] > hourly["vs_current_without_sek"]
+
+
+def test_scenarios_show_control_value_on_finer_contracts():
+    """On a daily contract, shifting barely moves cost; on hourly it does."""
+    load, spot = year_of_load()
+    config = make_config(energy_price={"contract": "daily"})
+
+    report = build_advice(config, load, spot)
+    by_key = {s.contract: s for s in report.scenarios}
+
+    assert by_key["daily"].is_current
+    # Averaging: with/without control nearly identical for daily.
+    assert by_key["daily"].with_control.total_sek == pytest.approx(
+        by_key["daily"].without_control.total_sek, rel=0.02
+    )
+    # Hourly with control beats hourly without, and beats staying on daily.
+    assert by_key["hourly"].vs_current_with_sek > by_key["hourly"].vs_current_without_sek
+    assert by_key["hourly"].vs_current_with_sek > 500
+    assert any("lastflytt" in note for note in report.notes)
 
 
 def test_hourly_power_converts_to_load_samples():

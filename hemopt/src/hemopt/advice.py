@@ -27,6 +27,7 @@ from .contracts import (
 
 # Ranked so the panel can show the most trustworthy advice first.
 CONFIDENCE_ORDER = {"high": 0, "medium": 1, "low": 2}
+SETTLEMENT_CONTRACTS: tuple[Contract, ...] = ("monthly", "daily", "hourly", "quarterly")
 
 
 def _kr(value: float) -> str:
@@ -56,10 +57,26 @@ class Recommendation:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ContractScenario:
+    """One settlement type priced both as lived and as the optimiser would use it."""
+
+    contract: Contract
+    name: str
+    is_current: bool
+    without_control: ContractCost
+    with_control: ContractCost
+    # Annualised difference vs the current contract *as lived* (positive = cheaper).
+    vs_current_without_sek: float
+    vs_current_with_sek: float
+
+
 @dataclass(slots=True)
 class AdviceReport:
     recommendations: list[Recommendation] = field(default_factory=list)
     contract_costs: list[ContractCost] = field(default_factory=list)
+    scenarios: list[ContractScenario] = field(default_factory=list)
+    current_contract: Contract | None = None
     measured_days: float = 0.0
     notes: list[str] = field(default_factory=list)
 
@@ -68,8 +85,41 @@ class AdviceReport:
         return sum(r.annual_saving_sek for r in self.recommendations)
 
     def as_dict(self) -> dict:
+        days = self.measured_days
+        scale = 365.0 / days if days else 0.0
+        scenarios = []
+        for scenario in self.scenarios:
+            scenarios.append(
+                {
+                    "contract": scenario.contract,
+                    "name": scenario.name,
+                    "is_current": scenario.is_current,
+                    "without_control": {
+                        "total_sek": round(scenario.without_control.total_sek, 2),
+                        "annual_sek": round(scenario.without_control.total_sek * scale, 0),
+                        "ore_per_kwh": round(scenario.without_control.mean_ore_per_kwh, 1),
+                        "energy_sek": round(scenario.without_control.energy_sek, 2),
+                        "kwh": round(scenario.without_control.kwh, 1),
+                    },
+                    "with_control": {
+                        "total_sek": round(scenario.with_control.total_sek, 2),
+                        "annual_sek": round(scenario.with_control.total_sek * scale, 0),
+                        "ore_per_kwh": round(scenario.with_control.mean_ore_per_kwh, 1),
+                        "energy_sek": round(scenario.with_control.energy_sek, 2),
+                        "kwh": round(scenario.with_control.kwh, 1),
+                    },
+                    "vs_current_without_sek": round(scenario.vs_current_without_sek, 0),
+                    "vs_current_with_sek": round(scenario.vs_current_with_sek, 0),
+                }
+            )
         return {
             "measured_days": round(self.measured_days, 1),
+            "current_contract": self.current_contract,
+            "current_contract_name": (
+                CONTRACT_NAMES.get(self.current_contract, self.current_contract)
+                if self.current_contract
+                else None
+            ),
             "total_annual_saving_sek": round(self.total_annual_saving_sek, 0),
             "recommendations": [r.as_dict() for r in self.recommendations],
             "contract_costs": [
@@ -83,6 +133,7 @@ class AdviceReport:
                 }
                 for cost in self.contract_costs
             ],
+            "scenarios": scenarios,
             "notes": self.notes,
         }
 
@@ -109,7 +160,10 @@ def build_advice(
     fuse actually has to survive; without it the fuse advice is withheld rather
     than guessed from hourly means.
     """
-    report = AdviceReport(measured_days=_span_days(load))
+    report = AdviceReport(
+        measured_days=_span_days(load),
+        current_contract=config.energy_price.contract,
+    )
     settings = config.advice
 
     if not settings.enabled:
@@ -120,6 +174,13 @@ def build_advice(
         return report
 
     report.contract_costs = compare(load, spot, config.energy_price, config.peak_tariff.window)
+    report.scenarios = _contract_scenarios(config, load, spot)
+
+    if config.energy_price.contract in {"monthly", "daily", "fixed"}:
+        report.notes.append(
+            "Med dygns- eller manadsmedel sparar lastflytt noll pa energidelen — "
+            "byt till tim- eller kvartsavrakning for att fa ut varde av styrningen."
+        )
 
     candidates = [
         _advise_settlement(config, report, load, spot),
@@ -137,6 +198,60 @@ def build_advice(
         key=lambda rec: (-rec.annual_saving_sek, CONFIDENCE_ORDER.get(rec.confidence, 9)),
     )
     return report
+
+
+def _contract_scenarios(
+    config: Config, load: list[LoadSample], spot: list[float]
+) -> list[ContractScenario]:
+    """Cost of every settlement type, both as lived and with load shifted."""
+    pricing = config.energy_price
+    window = config.peak_tariff.window
+    current = pricing.contract
+    step_hours = _step_hours(load)
+    ceiling = (
+        config.site.main_fuse_amps * config.site.voltage * config.site.phases / 1000.0
+    ) * step_hours
+    shifted = shift_flexible_load(
+        load,
+        spot,
+        flexible_share=config.advice.flexible_share,
+        max_step_kwh=ceiling,
+    )
+
+    as_lived = {
+        contract: settle(load, spot, contract, pricing, window) for contract in SETTLEMENT_CONTRACTS
+    }
+    if current not in as_lived:
+        as_lived[current] = settle(load, spot, current, pricing, window)
+
+    as_controlled = {
+        contract: settle(shifted, spot, contract, pricing, window)
+        for contract in SETTLEMENT_CONTRACTS
+    }
+    if current not in as_controlled:
+        as_controlled[current] = settle(shifted, spot, current, pricing, window)
+
+    baseline = as_lived[current]
+    order = list(SETTLEMENT_CONTRACTS)
+    if current not in order:
+        order = [current, *order]
+
+    scenarios: list[ContractScenario] = []
+    for contract in order:
+        without = as_lived[contract]
+        with_ctrl = as_controlled[contract]
+        scenarios.append(
+            ContractScenario(
+                contract=contract,
+                name=CONTRACT_NAMES.get(contract, contract),
+                is_current=contract == current,
+                without_control=without,
+                with_control=with_ctrl,
+                vs_current_without_sek=annualise(baseline.total_sek - without.total_sek, load),
+                vs_current_with_sek=annualise(baseline.total_sek - with_ctrl.total_sek, load),
+            )
+        )
+    return scenarios
 
 
 # --------------------------------------------------------------------- rules
@@ -180,7 +295,7 @@ def _advise_settlement(
     as_used = settle(load, spot, current, pricing, window)
     optimised = {
         contract: settle(shifted, spot, contract, pricing, window)
-        for contract in ("monthly", "daily", "hourly", "quarterly")
+        for contract in SETTLEMENT_CONTRACTS
     }
     if current not in optimised:
         optimised[current] = as_used
