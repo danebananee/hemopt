@@ -125,6 +125,9 @@ Spotpriset hämtas från elprisetjustnu.se och kräver inte Home Assistant.
 
 **Effektregler** i panelen är skrivskyddad status. Ändra under Configuration.
 **Effekttoppar denna månad** visar tröskel, pågående timme och historik.
+**Besparingsåtgärder** föreslår byte av avräkning och eventuell sänkning av
+huvudsäkring (25 → 20 → 16 A) när det finns tillräckligt med mätdata — annars
+står det att mer data behövs, och om du redan ligger rätt syns det tydligt.
 **Användning och besparing** ritars när elmätaren ger data. **Jämför elavtal**
 visar varje avräkningsform (månad / dygn / timme / kvart) både **utan** och
 **med** lastflytt, och hur mycket det skiljer mot ditt nuvarande avtal

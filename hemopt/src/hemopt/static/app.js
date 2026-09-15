@@ -1024,6 +1024,93 @@ function renderPowerHistory(host, points) {
   host.appendChild(svg);
 }
 
+function renderActions() {
+  const host = document.getElementById("actions-body");
+  const subtitle = document.getElementById("actions-subtitle");
+  if (!host) return;
+  host.textContent = "";
+  const advice = state.advice;
+  if (!advice) {
+    host.appendChild(html("p", "empty", "Ingen data ännu."));
+    return;
+  }
+
+  const actions = advice.actions || [];
+  if (advice.measured_days) {
+    subtitle.textContent =
+      `Baserat på ${fmt(advice.measured_days, 0)} dygns mätdata` +
+      (advice.current_contract_name ? ` · ditt avtal: ${advice.current_contract_name}` : "");
+  } else {
+    subtitle.textContent =
+      "Elavtal och säkringsstorlek — när det finns tillräckligt med mätdata.";
+  }
+
+  if (!actions.length) {
+    host.appendChild(
+      html(
+        "p",
+        "empty",
+        "Behöver mer mätdata innan åtgärder kan föreslås (minst två dygn med elmätare).",
+      ),
+    );
+    return;
+  }
+
+  for (const item of actions) {
+    const card = html("div", `action-card status-${item.status}`);
+    const head = html("div", "action-head");
+    head.appendChild(html("span", `action-badge ${item.status}`, statusLabel(item.status)));
+    head.appendChild(html("h3", "action-title", item.title));
+    card.appendChild(head);
+    card.appendChild(html("p", "action-summary", item.summary));
+    if (item.detail) card.appendChild(html("p", "muted action-detail", item.detail));
+    if (item.annual_saving_sek > 0) {
+      card.appendChild(
+        html(
+          "div",
+          "action-saving",
+          `≈ ${fmt(item.annual_saving_sek, 0)} kr/år · ${item.confidence || "medium"}`,
+        ),
+      );
+    }
+    if (item.key === "fuse" && item.meta && item.meta.options && item.meta.options.length) {
+      card.appendChild(renderFuseOptions(item.meta));
+    }
+    if (item.action) card.appendChild(html("p", "action-next", item.action));
+    if (item.caveat) card.appendChild(html("p", "muted", item.caveat));
+    host.appendChild(card);
+  }
+}
+
+function statusLabel(status) {
+  if (status === "change") return "Åtgärd";
+  if (status === "ok") return "Ligger rätt";
+  return "Mer data";
+}
+
+function renderFuseOptions(meta) {
+  const wrap = html("div", "fuse-options");
+  wrap.appendChild(
+    html(
+      "div",
+      "fuse-options-head",
+      `Högsta topp ${fmt(meta.peak_kw, 1)} kW · marginalkrav ${fmt(meta.margin_kw, 0)} kW · du har ${meta.current_amps} A`,
+    ),
+  );
+  const list = html("ul", "fuse-option-list");
+  for (const opt of meta.options) {
+    const li = html("li", opt.ok ? "fuse-ok" : "fuse-no");
+    const mark = opt.ok ? "Klarar" : "För knappt";
+    const current = opt.is_current ? " · din" : "";
+    li.textContent =
+      `${opt.amps} A — ${mark}${current}: kapacitet ${fmt(opt.capacity_kw, 1)} kW, ` +
+      `marginal ${fmt(opt.headroom_kw, 1)} kW efter topp`;
+    list.appendChild(li);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
 function renderAdvice() {
   const host = document.getElementById("advice-body");
   const subtitle = document.getElementById("advice-subtitle");
@@ -1140,18 +1227,28 @@ function renderAdvice() {
   }
 
   if (advice.recommendations && advice.recommendations.length) {
-    const list = html("div", "advice-list");
-    for (const rec of advice.recommendations) {
-      const card = html("div", "advice-card");
-      card.appendChild(html("div", "advice-title", rec.title));
-      card.appendChild(html("div", "advice-detail", rec.detail));
-      card.appendChild(
-        html("div", "advice-saving", `≈ ${fmt(rec.annual_saving_sek, 0)} kr/år · ${rec.confidence}`),
-      );
-      if (rec.caveat) card.appendChild(html("div", "muted", rec.caveat));
-      list.appendChild(card);
+    // Detaljerade råd ligger i Besparingsåtgärder; här bara en kort pekare.
+    const extra = advice.recommendations.filter(
+      (r) => r.key !== "settlement" && r.key !== "fuse",
+    );
+    if (extra.length) {
+      const list = html("div", "advice-list");
+      for (const rec of extra) {
+        const card = html("div", "advice-card");
+        card.appendChild(html("div", "advice-title", rec.title));
+        card.appendChild(html("div", "advice-detail", rec.detail));
+        card.appendChild(
+          html(
+            "div",
+            "advice-saving",
+            `≈ ${fmt(rec.annual_saving_sek, 0)} kr/år · ${rec.confidence}`,
+          ),
+        );
+        if (rec.caveat) card.appendChild(html("div", "muted", rec.caveat));
+        list.appendChild(card);
+      }
+      host.appendChild(list);
     }
-    host.appendChild(list);
   } else if (!scenarios.length && !(advice.contract_costs && advice.contract_costs.length)) {
     host.appendChild(
       html(
@@ -1460,6 +1557,7 @@ function renderAll() {
   renderPeaks();
   renderPeakSettings();
   renderHistory();
+  renderActions();
   renderAdvice();
   renderMeters();
   renderRooms();
@@ -1519,6 +1617,7 @@ document.getElementById("advice-btn").addEventListener("click", async (event) =>
   button.textContent = "Räknar…";
   try {
     state.advice = await postJSON("/api/advice");
+    renderActions();
     renderAdvice();
   } catch (error) {
     console.error(error);
@@ -1527,6 +1626,25 @@ document.getElementById("advice-btn").addEventListener("click", async (event) =>
     button.textContent = "Räkna om";
   }
 });
+
+const actionsBtn = document.getElementById("actions-btn");
+if (actionsBtn) {
+  actionsBtn.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Räknar…";
+    try {
+      state.advice = await postJSON("/api/advice");
+      renderActions();
+      renderAdvice();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Räkna om";
+    }
+  });
+}
 
 let resizeTimer = null;
 window.addEventListener("resize", () => {

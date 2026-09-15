@@ -205,7 +205,58 @@ def test_fuse_advice_waits_for_enough_history():
     report = build_advice(make_config(), load, spot, peak_kw=5.0)
 
     assert find(report, "fuse") is None
-    assert any("Sakringsradet vantar" in note for note in report.notes)
+    fuse = next(a for a in report.actions if a.key == "fuse")
+    assert fuse.status == "need_data"
+    assert "matdata" in fuse.summary.lower() or "dygn" in fuse.summary.lower()
+
+
+def test_actions_always_include_settlement_and_fuse():
+    load, spot = year_of_load()
+
+    report = build_advice(make_config(), load, spot, peak_kw=5.0)
+
+    assert [a.key for a in report.actions] == ["settlement", "fuse"]
+    assert all(a.status in {"need_data", "change", "ok"} for a in report.actions)
+
+
+def test_fuse_action_says_ok_when_smaller_fuses_do_not_fit():
+    load, spot = year_of_load()
+
+    report = build_advice(make_config(), load, spot, peak_kw=12.5)
+    fuse = next(a for a in report.actions if a.key == "fuse")
+
+    assert fuse.status == "ok"
+    assert "25" in fuse.summary or "ratt" in fuse.summary
+    assert {o["amps"] for o in fuse.meta["options"]} >= {16, 20, 25}
+    assert not any(o["ok"] and o["amps"] < 25 for o in fuse.meta["options"])
+
+
+def test_fuse_action_recommends_20_when_peak_leaves_room():
+    load, spot = year_of_load()
+
+    report = build_advice(make_config(), load, spot, peak_kw=9.5)
+    fuse = next(a for a in report.actions if a.key == "fuse")
+
+    assert fuse.status == "change"
+    assert "20 A" in fuse.title
+    assert fuse.annual_saving_sek == pytest.approx(2750.0)
+
+
+def test_settlement_action_ok_when_already_cheapest():
+    load, spot = year_of_load()
+    config = make_config(energy_price={"contract": "quarterly"})
+
+    report = build_advice(config, load, spot)
+    settlement = next(a for a in report.actions if a.key == "settlement")
+
+    assert settlement.status == "ok"
+    assert "ratt" in settlement.summary
+
+
+def test_empty_load_still_emits_need_data_actions():
+    report = build_advice(make_config(), [], [])
+
+    assert [a.status for a in report.actions] == ["need_data", "need_data"]
 
 
 def test_a_short_history_lowers_confidence_rather_than_hiding_advice():

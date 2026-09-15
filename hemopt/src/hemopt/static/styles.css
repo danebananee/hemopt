@@ -882,6 +882,119 @@ footer {
   margin: 0.2rem 0;
 }
 
+.actions-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.action-card {
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  padding: 0.95rem 1.05rem;
+  border-left: 3px solid color-mix(in srgb, var(--text-muted) 50%, transparent);
+}
+
+.action-card.status-change {
+  border-left-color: var(--good);
+}
+
+.action-card.status-ok {
+  border-left-color: var(--accent);
+}
+
+.action-card.status-need_data {
+  border-left-color: color-mix(in srgb, var(--warm, #b45309) 80%, transparent);
+}
+
+.action-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.35rem;
+}
+
+.action-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-muted) 20%, transparent);
+}
+
+.action-badge.change {
+  background: color-mix(in srgb, var(--good) 25%, transparent);
+  color: var(--good);
+}
+
+.action-badge.ok {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.action-badge.need_data {
+  background: color-mix(in srgb, var(--warm, #b45309) 22%, transparent);
+}
+
+.action-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.action-summary {
+  margin: 0.2rem 0 0.35rem;
+  font-size: 0.98rem;
+}
+
+.action-detail {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+}
+
+.action-saving {
+  margin: 0.35rem 0;
+  color: var(--good);
+  font-weight: 600;
+}
+
+.action-next {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+}
+
+.fuse-options {
+  margin: 0.55rem 0 0.25rem;
+  padding: 0.55rem 0.7rem;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.fuse-options-head {
+  font-size: 0.85rem;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+}
+
+.fuse-option-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+}
+
+.fuse-option-list li {
+  margin: 0.2rem 0;
+}
+
+.fuse-option-list .fuse-ok {
+  color: var(--good);
+}
+
+.fuse-option-list .fuse-no {
+  color: var(--text-muted);
+}
+
 .advice-list {
   display: grid;
   gap: 0.75rem;
