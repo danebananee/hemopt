@@ -43,3 +43,14 @@ if grep -n 'jq -r.*"\.\[\$k\] // empty"' "$ROOT/run.sh"; then
 fi
 
 echo "ok: read_option preserves false and empty string"
+
+# set -u must not crash when SUPERVISOR_TOKEN is unset (add-on self-stop bug).
+bash -c '
+set -euo pipefail
+unset SUPERVISOR_TOKEN
+_supervisor_token="${SUPERVISOR_TOKEN:-}"
+echo "len=${#_supervisor_token}"
+[[ -z $_supervisor_token ]]
+'
+echo "ok: unset SUPERVISOR_TOKEN is safe under set -u"
+

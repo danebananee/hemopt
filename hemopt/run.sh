@@ -54,10 +54,12 @@ echo "[hemopt] peak_enabled=${HEMOPT_PEAK_ENABLED} meter=${HEMOPT_TOTAL_POWER_EN
 # If the Supervisor gave no token, fall back to a long-lived access token from
 # Configuration — never export an empty HEMOPT_HA_TOKEN (that would wipe a
 # token from hemopt.yaml).
-echo "[hemopt] SUPERVISOR_TOKEN length=${#SUPERVISOR_TOKEN}"
-if [[ -n ${SUPERVISOR_TOKEN:-} ]]; then
+# Under `set -u`, SUPERVISOR_TOKEN may be unset — always use ${VAR:-}.
+_supervisor_token="${SUPERVISOR_TOKEN:-}"
+echo "[hemopt] SUPERVISOR_TOKEN length=${#_supervisor_token}"
+if [[ -n $_supervisor_token ]]; then
     export HEMOPT_HA_URL="http://supervisor/core"
-    export HEMOPT_HA_TOKEN="${SUPERVISOR_TOKEN}"
+    export HEMOPT_HA_TOKEN="$_supervisor_token"
     echo "[hemopt] Using Supervisor token against ${HEMOPT_HA_URL}"
 else
     echo "[hemopt] SUPERVISOR_TOKEN saknas."
@@ -92,9 +94,9 @@ fi
 
 # Ask the Supervisor whether an MQTT broker is available. Absence is fine; the
 # service runs without one and simply stops publishing discovery entities.
-if [[ -n ${SUPERVISOR_TOKEN:-} ]]; then
+if [[ -n $_supervisor_token ]]; then
     mqtt_json="$(curl -fsSL \
-        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        -H "Authorization: Bearer ${_supervisor_token}" \
         http://supervisor/services/mqtt 2>/dev/null || true)"
 
     if [[ -n $mqtt_json ]] && [[ $(jq -r '.result // empty' <<<"$mqtt_json") == "ok" ]]; then
