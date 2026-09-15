@@ -117,10 +117,10 @@ Om loggen säger att `/homeassistant` saknas:
 
 ## Kort checklista
 
-- [ ] hemopt 0.1.23+ uppdaterad och omstartad
+- [ ] hemopt 0.1.24+ uppdaterad och omstartad
 - [ ] Loggen visar att LK Arc Climate installerats
 - [ ] **Restart Home Assistant** en gång
-- [ ] **Add integration → LK Arc Climate**
-- [ ] `climate.*_thermostat` syns i States
+- [ ] Logs: `LK Arc Climate check` / `climate.*_thermostat` (Add integration bara som reserv)
+- [ ] `climate.*_thermostat` syns i States / Golvvärme (inte Entity not found)
 - [ ] Test HA → LK-appen
 - [ ] `climate_entity` i `hemopt.yaml` + hemopt restart + **Styr värmen**
