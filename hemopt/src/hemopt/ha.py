@@ -66,11 +66,6 @@ class HomeAssistantClient:
     async def __aenter__(self) -> HomeAssistantClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=self._config.base_url.rstrip("/"),
-                headers={
-                    "Authorization": f"Bearer {self._config.token}",
-                    "Content-Type": "application/json",
-                },
                 verify=self._config.verify_ssl,
                 timeout=httpx.Timeout(30.0, read=120.0),
             )
@@ -87,21 +82,40 @@ class HomeAssistantClient:
             raise RuntimeError("HomeAssistantClient must be used as an async context manager")
         return self._client
 
+    def _url(self, path: str) -> str:
+        """Absolute URL for an API path.
+
+        A caller may hand us a shared client so connections are reused across
+        the engine's loops, and such a client carries neither our base URL nor
+        our credentials. Putting both on every request keeps the two cases
+        identical instead of silently addressing the wrong host.
+        """
+        return f"{self._config.base_url.rstrip('/')}{path}"
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._config.token}",
+            "Content-Type": "application/json",
+        }
+
     async def ping(self) -> bool:
         try:
-            response = await self._http.get("/api/")
+            response = await self._http.get(self._url("/api/"), headers=self._headers)
         except httpx.HTTPError as exc:
             _LOGGER.warning("Home Assistant unreachable: %s", exc)
             return False
         return response.status_code == 200
 
     async def states(self) -> dict[str, str]:
-        response = await self._http.get("/api/states")
+        response = await self._http.get(self._url("/api/states"), headers=self._headers)
         response.raise_for_status()
         return {row["entity_id"]: row["state"] for row in response.json()}
 
     async def state(self, entity_id: str) -> str | None:
-        response = await self._http.get(f"/api/states/{entity_id}")
+        response = await self._http.get(
+            self._url(f"/api/states/{entity_id}"), headers=self._headers
+        )
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -142,7 +156,9 @@ class HomeAssistantClient:
 
             try:
                 response = await self._http.get(
-                    f"/api/history/period/{start.isoformat()}", params=params
+                    self._url(f"/api/history/period/{start.isoformat()}"),
+                    params=params,
+                    headers=self._headers,
                 )
                 response.raise_for_status()
             except httpx.HTTPError as exc:
@@ -169,7 +185,11 @@ class HomeAssistantClient:
         return result
 
     async def call_service(self, domain: str, service: str, data: dict | None = None) -> None:
-        response = await self._http.post(f"/api/services/{domain}/{service}", json=data or {})
+        response = await self._http.post(
+            self._url(f"/api/services/{domain}/{service}"),
+            json=data or {},
+            headers=self._headers,
+        )
         if response.status_code >= 400:
             raise HomeAssistantError(
                 f"{domain}.{service} failed with {response.status_code}: {response.text[:200]}"
@@ -185,9 +205,10 @@ class HomeAssistantClient:
         """
         try:
             response = await self._http.post(
-                "/api/services/weather/get_forecasts",
+                self._url("/api/services/weather/get_forecasts"),
                 params={"return_response": "true"},
                 json={"entity_id": entity_id, "type": "hourly"},
+                headers=self._headers,
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:

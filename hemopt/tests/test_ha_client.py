@@ -1,0 +1,58 @@
+"""The client must address the configured host even with a borrowed transport."""
+
+from __future__ import annotations
+
+import httpx
+
+from hemopt.config import HomeAssistantConfig
+from hemopt.ha import HomeAssistantClient
+
+
+def _recording_client() -> tuple[httpx.AsyncClient, list[httpx.Request]]:
+    """A shared client like the engine's: no base URL and no auth headers."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/":
+            return httpx.Response(200, json={"message": "API running."})
+        return httpx.Response(200, json=[{"entity_id": "sensor.inne", "state": "21.4"}])
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler)), seen
+
+
+async def test_shared_client_still_reaches_the_configured_home_assistant():
+    http, seen = _recording_client()
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://supervisor/core/", token="supervisor-token"),
+        client=http,
+    )
+
+    async with client:
+        assert await client.ping() is True
+        assert await client.states() == {"sensor.inne": "21.4"}
+
+    assert [str(request.url) for request in seen] == [
+        "http://supervisor/core/api/",
+        "http://supervisor/core/api/states",
+    ]
+    assert {request.headers["Authorization"] for request in seen} == {"Bearer supervisor-token"}
+
+
+async def test_service_calls_carry_the_token_on_a_shared_client():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={})
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://supervisor/core", token="supervisor-token"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    async with client:
+        await client.set_climate_temperature("climate.vardagsrum", 21.5)
+
+    assert str(seen[0].url) == "http://supervisor/core/api/services/climate/set_temperature"
+    assert seen[0].headers["Authorization"] == "Bearer supervisor-token"
