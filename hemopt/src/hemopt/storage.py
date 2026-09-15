@@ -238,7 +238,11 @@ class Store:
         with self._cursor() as cursor:
             cursor.execute("SELECT payload FROM thermal_models WHERE room_key = ?", (room_key,))
             row = cursor.fetchone()
-        return ThermalModel(**json.loads(row["payload"])) if row else None
+        if not row:
+            return None
+        payload = json.loads(row["payload"])
+        payload.setdefault("k_stove_per_hour", 0.0)
+        return ThermalModel(**payload)
 
     def save_hot_water_profile(self, profile: UsageProfile) -> None:
         with self._cursor() as cursor:

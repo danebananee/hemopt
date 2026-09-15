@@ -141,8 +141,11 @@ gå några dygn först. Rummens tröghet lärs in från historik (ungefär en ve
 aktuella börvärdesskrivningar. Slå på styrningen först när Log/doctor visar
 att climate-entiteterna finns och planen ser vettig ut.
 
-Önskad rumstemperatur ställer du under **Rum** i panelen («Önskad temp»).
-Planen reglerar kring det bandet; prio 1 hålls hårdast.
+**Braskamin** (valfritt): lägg `wood_stove` i `hemopt.yaml` med en
+temperaturgivare eller binary-sensor och `room_keys` för rummen som känner
+värmen. hemopt detekterar när brasan är tänd, lär K/h-bidrag + VP-ekvivalent
+per rum (så trögheten inte blandas ihop med golvvärmen) och föreslår dyra
+kalla fönster att tända i. Tillägget tänder aldrig själv.
 
 ## Felsök
 

@@ -85,8 +85,9 @@ def seed_default_house(config: Config) -> Config:
     data = config.model_dump(mode="json")
     example_data = seeded.model_dump(mode="json")
     data["rooms"] = example_data["rooms"]
-    for key in ("heat_pump", "hot_water", "ext_control", "energy_price", "advice"):
-        data[key] = example_data[key]
+    for key in ("heat_pump", "hot_water", "ext_control", "energy_price", "advice", "wood_stove"):
+        if key in example_data:
+            data[key] = example_data[key]
     if not data["base_load"].get("total_power_entity"):
         data["base_load"] = example_data["base_load"]
     if not data["site"].get("weather_entity"):
@@ -412,6 +413,25 @@ class ExtControlConfig(BaseModel):
     min_room_temperature: float = 18.0
 
 
+class WoodStoveConfig(BaseModel):
+    """Optional wood stove / fireplace that the household lights by hand.
+
+    hemopt never lights the stove. It detects when it is burning, learns how
+    hard it pushes nearby rooms, and recommends expensive cold windows where a
+    fire would displace the most heat-pump work.
+    """
+
+    enabled: bool = False
+    name: str = "Braskamin"
+    # Prefer a surface/flue probe; a binary sensor works too.
+    temperature_entity: str | None = None
+    binary_entity: str | None = None
+    lit_above_c: float = 40.0
+    lit_below_c: float = 30.0
+    # Rooms that actually feel the fire. Empty = none (must be set).
+    room_keys: list[str] = Field(default_factory=list)
+
+
 class HomeAssistantConfig(BaseModel):
     base_url: str = "http://homeassistant.local:8123"
     token: str = ""
@@ -468,6 +488,7 @@ class Config(BaseModel):
     hot_water: HotWaterConfig = Field(default_factory=HotWaterConfig)
     base_load: BaseLoadConfig = Field(default_factory=BaseLoadConfig)
     ext_control: ExtControlConfig = Field(default_factory=ExtControlConfig)
+    wood_stove: WoodStoveConfig = Field(default_factory=WoodStoveConfig)
     advice: AdviceConfig = Field(default_factory=AdviceConfig)
     rooms: list[RoomConfig] = Field(default_factory=list)
     home_assistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)

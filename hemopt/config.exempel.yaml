@@ -147,6 +147,20 @@ ext_control:
   min_release_minutes: 15
   min_room_temperature: 18.0
 
+# ---------------------------------------------------------------------------
+# Braskamin. hemopt tander den inte — den detekterar, lar inverkan pa rummen
+# och foreslar dyra kalla fonster att tanda i. Kopa en temperaturgivare pa
+# eller nara kaminen, eller en binary_sensor om du har det.
+# ---------------------------------------------------------------------------
+wood_stove:
+  enabled: false
+  name: Braskamin
+  # temperature_entity: sensor.braskamin_temperatur   # KONTROLLERA
+  # binary_entity: binary_sensor.brasa_tand          # alternativ
+  lit_above_c: 40
+  lit_below_c: 30
+  room_keys: [vardagsrum, salong]   # rum som kanner brasans varme
+
 optimiser:
   horizon_hours: 36
   step_minutes: 15

@@ -2,13 +2,13 @@
 
 Each room is treated as a first-order RC network:
 
-    dT/dt = (T_out - T_in) / tau + k_heat * u + k_gain
+    dT/dt = (T_out - T_in) / tau + k_heat * u + k_stove * s + k_gain
 
-`tau` is the thermal time constant the user asked about, the house's inertia
-in hours. `k_heat` is how fast the room climbs with the loop fully open and
-`k_gain` collects solar and internal gains. All three are identified from
-recorded history by least squares, which stays linear because the discretised
-form is linear in the parameters.
+`tau` is the thermal time constant — the house's inertia in hours. `k_heat`
+is how fast the room climbs with the loop fully open, `k_stove` is the extra
+climb while a wood stove is lit, and `k_gain` collects solar and internal
+gains. Parameters are identified from recorded history by non-negative least
+squares on the discretised form.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ class ThermalModel:
     r_squared: float
     samples: int
     fitted: bool
+    k_stove_per_hour: float = 0.0
 
     @classmethod
     def default(cls) -> ThermalModel:
@@ -52,13 +53,24 @@ class ThermalModel:
             r_squared=0.0,
             samples=0,
             fitted=False,
+            k_stove_per_hour=0.0,
         )
 
-    def step(self, indoor: float, outdoor: float, heat_fraction: float, dt_hours: float) -> float:
+    def step(
+        self,
+        indoor: float,
+        outdoor: float,
+        heat_fraction: float,
+        dt_hours: float,
+        stove_on: float = 0.0,
+    ) -> float:
         """Advance the room one step. Mirrors the optimiser's constraint exactly."""
         drift = (outdoor - indoor) / self.tau_hours
         return indoor + dt_hours * (
-            drift + self.k_heat_per_hour * heat_fraction + self.k_gain_per_hour
+            drift
+            + self.k_heat_per_hour * heat_fraction
+            + self.k_stove_per_hour * stove_on
+            + self.k_gain_per_hour
         )
 
     def coefficients(self, dt_hours: float) -> tuple[float, float, float]:
@@ -91,13 +103,14 @@ class ThermalSample:
     indoor: float
     outdoor: float
     heat_fraction: float
+    stove_on: float = 0.0
 
 
-def _nnls_3(design: np.ndarray, target: np.ndarray) -> np.ndarray:
+def _nnls_n(design: np.ndarray, target: np.ndarray) -> np.ndarray:
     """Least squares with all coefficients constrained non-negative.
 
-    With only three parameters the active set can be enumerated exhaustively,
-    which is both exact and shorter than a general NNLS implementation.
+    With only a handful of parameters the active set can be enumerated
+    exhaustively, which is both exact and shorter than a general NNLS.
     """
     best_solution = np.zeros(design.shape[1])
     best_error = math.inf
@@ -118,6 +131,10 @@ def _nnls_3(design: np.ndarray, target: np.ndarray) -> np.ndarray:
                 best_solution = candidate
 
     return best_solution
+
+
+# Backwards-compatible alias used by older tests/helpers.
+_nnls_3 = _nnls_n
 
 
 def resample(
@@ -153,6 +170,7 @@ def resample(
                     indoor=latest.indoor,
                     outdoor=latest.outdoor,
                     heat_fraction=latest.heat_fraction,
+                    stove_on=latest.stove_on,
                 )
             )
         else:
@@ -186,6 +204,7 @@ def identify(
                 [
                     current.outdoor - current.indoor,
                     current.heat_fraction,
+                    current.stove_on,
                     1.0,
                 ]
             )
@@ -203,8 +222,16 @@ def identify(
         _LOGGER.info("thermal fit skipped, heat input never varied")
         return fallback
 
-    coefficients = _nnls_3(design, target)
-    a, b, c = (float(v) for v in coefficients)
+    use_stove = float(np.ptp(design[:, 2])) >= 0.05
+    if use_stove:
+        coefficients = _nnls_n(design, target)
+        a, b, s, c = (float(v) for v in coefficients)
+    else:
+        # Drop the stove column so quiet data does not invent a fake k_stove.
+        coefficients3 = _nnls_n(design[:, [0, 1, 3]], target)
+        a, b, c = (float(v) for v in coefficients3)
+        s = 0.0
+        coefficients = np.array([a, b, s, c], dtype=float)
 
     if a <= 1e-9:
         _LOGGER.info("thermal fit rejected, no measurable heat loss")
@@ -212,6 +239,7 @@ def identify(
 
     tau_hours = dt_hours / a
     k_heat = b / dt_hours
+    k_stove = s / dt_hours
     k_gain = c / dt_hours
 
     if not MIN_TAU_HOURS <= tau_hours <= MAX_TAU_HOURS:
@@ -219,6 +247,9 @@ def identify(
         return fallback
     if not MIN_HEAT_RATE <= k_heat <= MAX_HEAT_RATE:
         _LOGGER.info("thermal fit rejected, heat rate %.3f K/h out of range", k_heat)
+        return fallback
+    if k_stove < 0 or k_stove > MAX_HEAT_RATE:
+        _LOGGER.info("thermal fit rejected, stove rate %.3f K/h out of range", k_stove)
         return fallback
 
     residual = target - design @ coefficients
@@ -232,4 +263,5 @@ def identify(
         r_squared=r_squared,
         samples=len(rows),
         fitted=True,
+        k_stove_per_hour=k_stove,
     )

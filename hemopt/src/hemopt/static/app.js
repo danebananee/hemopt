@@ -10,6 +10,7 @@ const state = {
   peakSettings: null,
   history: null,
   advice: null,
+  woodStove: null,
   prices: null,
 };
 
@@ -1024,6 +1025,101 @@ function renderPowerHistory(host, points) {
   host.appendChild(svg);
 }
 
+function renderWoodStove() {
+  const host = document.getElementById("stove-body");
+  const subtitle = document.getElementById("stove-subtitle");
+  if (!host) return;
+  host.textContent = "";
+  const stove = state.woodStove;
+  if (!stove) {
+    host.appendChild(html("p", "empty", "Ingen brasdata ännu."));
+    return;
+  }
+
+  if (!stove.enabled) {
+    subtitle.textContent = "Avstängd — aktivera wood_stove i hemopt.yaml när du har en givare.";
+    host.appendChild(
+      html(
+        "p",
+        "empty",
+        "Braskaminen är avstängd i konfigurationen. Lägg till wood_stove med temperature_entity eller binary_entity och room_keys.",
+      ),
+    );
+    return;
+  }
+
+  subtitle.textContent = stove.summary || "Braskamin";
+  const card = html("div", `action-card status-${stove.status === "recommend" || stove.status === "lit" ? (stove.status === "lit" ? "ok" : "change") : stove.status === "need_data" || stove.status === "need_sensor" ? "need_data" : "ok"}`);
+  card.appendChild(
+    html(
+      "span",
+      `action-badge ${stove.status === "recommend" ? "change" : stove.status === "lit" ? "ok" : "need_data"}`,
+      stove.status === "lit"
+        ? "Tänd"
+        : stove.status === "recommend"
+          ? "Tänd gärna"
+          : stove.status === "need_sensor" || stove.status === "need_data"
+            ? "Mer data"
+            : "Lugnt",
+    ),
+  );
+  card.appendChild(html("p", "action-summary", stove.summary));
+  if (stove.detail) card.appendChild(html("p", "muted action-detail", stove.detail));
+
+  if (stove.reading && stove.reading.sensor_c != null) {
+    card.appendChild(
+      html(
+        "p",
+        "muted",
+        `Sensor ${fmt(stove.reading.sensor_c, 1)} °C · källa ${stove.reading.source}` +
+          (stove.hours_lit_observed
+            ? ` · ${fmt(stove.hours_lit_observed, 0)} h observerad eldning`
+            : ""),
+      ),
+    );
+  }
+
+  const effects = (stove.effects || []).filter((e) => e.k_stove_per_hour > 0.02);
+  if (effects.length) {
+    const list = html("ul", "stove-effects");
+    for (const effect of effects) {
+      const eq =
+        effect.equivalent_kw != null ? ` · ≈ ${fmt(effect.equivalent_kw, 1)} kW VP` : "";
+      list.appendChild(
+        html(
+          "li",
+          null,
+          `${effect.room_name}: +${fmt(effect.k_stove_per_hour, 2)} K/h när brasan brinner` +
+            ` (tau ${fmt(effect.tau_hours, 0)} h)${eq}`,
+        ),
+      );
+    }
+    card.appendChild(list);
+  }
+
+  if (stove.windows && stove.windows.length) {
+    const list = html("ul", "stove-windows");
+    for (const window of stove.windows) {
+      const start = new Date(window.start);
+      const end = new Date(window.end);
+      const fmtTime = (d) =>
+        `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      list.appendChild(
+        html(
+          "li",
+          null,
+          `${fmtTime(start)}–${fmtTime(end)}: pris ${fmt(window.mean_price_sek, 2)} kr/kWh, ` +
+            `ute ${fmt(window.mean_outdoor_c, 0)} °C, VP ${fmt(window.mean_heat_pump_kw, 1)} kW`,
+        ),
+      );
+    }
+    card.appendChild(html("p", "muted", "Bästa tändfönster i aktuell plan:"));
+    card.appendChild(list);
+  }
+
+  host.appendChild(card);
+}
+
 function renderActions() {
   const host = document.getElementById("actions-body");
   const subtitle = document.getElementById("actions-subtitle");
@@ -1591,6 +1687,7 @@ function renderAll() {
   renderPeakSettings();
   renderHistory();
   renderActions();
+  renderWoodStove();
   renderAdvice();
   renderMeters();
   renderRooms();
@@ -1601,7 +1698,7 @@ function renderAll() {
 /* ------------------------------------------------------------------ boot */
 
 async function refresh() {
-  const [status, peaks, rooms, meters, peakSettings, history, advice, prices] =
+  const [status, peaks, rooms, meters, peakSettings, history, advice, prices, woodStove] =
     await Promise.all([
       getJSON("/api/status").catch(() => null),
       getJSON("/api/peaks").catch(() => null),
@@ -1611,6 +1708,7 @@ async function refresh() {
       getJSON("/api/history?days=14").catch(() => null),
       getJSON("/api/advice").catch(() => null),
       getJSON("/api/prices").catch(() => null),
+      getJSON("/api/wood-stove").catch(() => null),
     ]);
   state.status = status;
   state.peaks = peaks;
@@ -1620,6 +1718,7 @@ async function refresh() {
   state.history = history;
   state.advice = advice;
   state.prices = prices;
+  state.woodStove = woodStove;
   state.plan = await getJSON("/api/plan").catch(() => null);
   renderAll();
 }

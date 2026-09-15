@@ -906,6 +906,23 @@ footer {
   border-left-color: color-mix(in srgb, var(--warm, #b45309) 80%, transparent);
 }
 
+.stove-effects,
+.stove-windows {
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.stove-effects li,
+.stove-windows li {
+  font-size: 0.9rem;
+  padding: 0.35rem 0.55rem;
+  background: color-mix(in srgb, var(--bg) 65%, transparent);
+  border-radius: 3px;
+}
+
 .action-head {
   display: flex;
   flex-wrap: wrap;

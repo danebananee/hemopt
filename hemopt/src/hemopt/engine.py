@@ -38,6 +38,14 @@ from .prices import PriceClient, PriceSeries
 from .storage import Store
 from .thermal import ThermalModel, ThermalSample, identify
 from .timeutil import floor_to_step, is_peak_window
+from .woodstove import (
+    WoodStoveEffect,
+    WoodStoveReading,
+    WoodStoveReport,
+    build_report,
+    detect_lit,
+    recommend_windows,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +87,8 @@ class Engine:
         self.guard = PeakGuard(config.ext_control)
         self.guard_decision = GuardDecision(False, "not evaluated")
         self.advice = AdviceReport()
+        self.wood_stove = WoodStoveReport()
+        self._wood_stove_lit = False
         self._ext_state: dict[str, bool] = {}
 
         self._mqtt: MqttBridge | None = None
@@ -187,6 +197,8 @@ class Engine:
             self.config.heat_pump.outdoor_entity,
             self.config.hot_water.top_temperature_entity,
             self.config.base_load.total_power_entity,
+            self.config.wood_stove.temperature_entity,
+            self.config.wood_stove.binary_entity,
         ):
             if candidate:
                 entities.append(candidate)
@@ -223,6 +235,7 @@ class Engine:
                 rows.append((entity_id, now, value))
         self.store.record_samples(rows)
         self.status.last_sample = now
+        self._update_wood_stove_reading(states, now)
 
         total_entity = self.config.base_load.total_power_entity
         total_kw = parse_numeric(states.get(total_entity)) if total_entity else None
@@ -310,6 +323,30 @@ class Engine:
         outdoor_series = {point.moment: point.value for point in outdoor}
         outdoor_times = sorted(outdoor_series)
 
+        stove_on_by_time, stove_times = self._stove_history_series(history)
+        hours_lit = 0.0
+        sessions = 0
+        if stove_times:
+            prev = False
+            for moment in stove_times:
+                on = stove_on_by_time.get(moment, 0.0) >= 0.5
+                if on:
+                    hours_lit += 0.25  # history is irregular; approx refined below
+                if on and not prev:
+                    sessions += 1
+                prev = on
+            # Better estimate from consecutive deltas.
+            hours_lit = 0.0
+            for earlier, later in zip(stove_times, stove_times[1:], strict=False):
+                if stove_on_by_time.get(earlier, 0.0) >= 0.5:
+                    hours_lit += max((later - earlier).total_seconds() / 3600.0, 0.0)
+            self.store.set_setting(
+                "wood_stove_stats",
+                {"sessions": sessions, "hours_lit": round(hours_lit, 2)},
+            )
+
+        stove_rooms = set(self.config.wood_stove.room_keys)
+
         for room in self.config.rooms:
             indoor = history.get(room.temperature_entity, [])
             if len(indoor) < 100 or not outdoor_times:
@@ -327,12 +364,17 @@ class Engine:
                 heat_fraction = _heat_fraction(
                     climate_by_time, climate_times, point.moment, point.value
                 )
+                stove_on = 0.0
+                if room.key in stove_rooms and stove_times:
+                    stove_val = _nearest_value(stove_on_by_time, stove_times, point.moment)
+                    stove_on = 1.0 if stove_val is not None and stove_val >= 0.5 else 0.0
                 samples.append(
                     ThermalSample(
                         moment=point.moment,
                         indoor=point.value,
                         outdoor=nearest_outdoor,
                         heat_fraction=heat_fraction,
+                        stove_on=stove_on,
                     )
                 )
 
@@ -341,10 +383,11 @@ class Engine:
                 self.models[room.key] = model
                 self.store.save_thermal_model(room.key, model)
                 _LOGGER.info(
-                    "%s: tau %.1f h, heat %.2f K/h, R2 %.2f",
+                    "%s: tau %.1f h, heat %.2f K/h, stove %.2f K/h, R2 %.2f",
                     room.name,
                     model.tau_hours,
                     model.k_heat_per_hour,
+                    model.k_stove_per_hour,
                     model.r_squared,
                 )
 
@@ -613,8 +656,103 @@ class Engine:
         self.plan = plan
         self.status.last_plan = now
         self.store.save_plan(now, plan_to_dict(plan))
+        self.refresh_wood_stove()
         self._publish(plan, now)
         return plan
+
+    def _update_wood_stove_reading(self, states: dict[str, str], now: datetime) -> None:
+        cfg = self.config.wood_stove
+        if not cfg.enabled:
+            self.wood_stove = build_report(cfg, WoodStoveReading(), [], [])
+            return
+        binary = None
+        if cfg.binary_entity:
+            raw = parse_numeric(states.get(cfg.binary_entity))
+            binary = None if raw is None else raw >= 0.5
+        temp = None
+        if cfg.temperature_entity:
+            temp = parse_numeric(states.get(cfg.temperature_entity))
+        reading = detect_lit(
+            cfg,
+            binary_on=binary,
+            temperature_c=temp,
+            previously_lit=self._wood_stove_lit,
+        )
+        reading.updated_at = now
+        self._wood_stove_lit = reading.lit
+        # Keep effects/windows from last refresh; only update live reading.
+        self.wood_stove.reading = reading
+        if reading.lit and self.wood_stove.status not in {"lit", "disabled"}:
+            self.refresh_wood_stove()
+
+    def _stove_history_series(
+        self, history: dict[str, list]
+    ) -> tuple[dict[datetime, float], list[datetime]]:
+        cfg = self.config.wood_stove
+        if not cfg.enabled:
+            return {}, []
+        series: dict[datetime, float] = {}
+        if cfg.binary_entity and cfg.binary_entity in history:
+            for point in history[cfg.binary_entity]:
+                series[point.moment] = 1.0 if point.value >= 0.5 else 0.0
+        elif cfg.temperature_entity and cfg.temperature_entity in history:
+            lit = False
+            for point in sorted(history[cfg.temperature_entity], key=lambda p: p.moment):
+                if lit:
+                    lit = point.value >= cfg.lit_below_c
+                else:
+                    lit = point.value >= cfg.lit_above_c
+                series[point.moment] = 1.0 if lit else 0.0
+        return series, sorted(series)
+
+    def refresh_wood_stove(self) -> WoodStoveReport:
+        """Rebuild stove effects and lighting windows from models + current plan."""
+        cfg = self.config.wood_stove
+        reading = self.wood_stove.reading
+        effects: list[WoodStoveEffect] = []
+        for key in cfg.room_keys:
+            try:
+                room = self.config.room(key)
+            except KeyError:
+                continue
+            model = self.models.get(key, ThermalModel.default())
+            eq = None
+            if model.k_heat_per_hour > 0.05 and model.k_stove_per_hour > 0.0:
+                eq = (model.k_stove_per_hour / model.k_heat_per_hour) * self._nominal_heat_kw(
+                    room.heat_share
+                )
+            effects.append(
+                WoodStoveEffect(
+                    room_key=key,
+                    room_name=room.name,
+                    k_stove_per_hour=model.k_stove_per_hour,
+                    equivalent_kw=eq,
+                    tau_hours=model.tau_hours,
+                )
+            )
+
+        windows = []
+        if self.plan is not None:
+            windows = recommend_windows(
+                times=self.plan.times,
+                price_sek=self.plan.price_sek_per_kwh,
+                outdoor_c=self.plan.outdoor_c,
+                heat_pump_kw=self.plan.heat_pump_kw,
+                step_minutes=self.plan.step_minutes,
+            )
+
+        stats = self.store.setting("wood_stove_stats") or {}
+        sessions = int(stats.get("sessions", 0)) if isinstance(stats, dict) else 0
+        hours = float(stats.get("hours_lit", 0.0)) if isinstance(stats, dict) else 0.0
+        self.wood_stove = build_report(
+            cfg,
+            reading,
+            effects,
+            windows,
+            sessions_observed=sessions,
+            hours_lit_observed=hours,
+        )
+        return self.wood_stove
 
     def _nominal_heat_kw(self, share: float) -> float:
         total = sum(room.heat_share for room in self.config.rooms) or 1.0

@@ -139,6 +139,26 @@ async def run_doctor(config: Config) -> Report:
             required=False,
         )
 
+    if config.wood_stove.enabled:
+        check(
+            config.wood_stove.temperature_entity,
+            "Braskamin, temperatur",
+            numeric=True,
+            required=not bool(config.wood_stove.binary_entity),
+        )
+        check(
+            config.wood_stove.binary_entity,
+            "Braskamin, binary",
+            numeric=False,
+            required=not bool(config.wood_stove.temperature_entity),
+        )
+        if not config.wood_stove.room_keys:
+            report.add(
+                WARN,
+                "Braskamin",
+                "enabled utan room_keys — ange vilka rum som kanner brasans varme",
+            )
+
     if not config.rooms:
         report.add(FAIL, "Rum", "inga rum konfigurerade")
 

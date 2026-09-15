@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.15",
+        version="0.1.16",
         lifespan=lifespan,
     )
 
@@ -180,6 +180,7 @@ def create_app() -> FastAPI:
                         "tau_hours": round(model.tau_hours, 1),
                         "k_heat_per_hour": round(model.k_heat_per_hour, 3),
                         "k_gain_per_hour": round(model.k_gain_per_hour, 4),
+                        "k_stove_per_hour": round(model.k_stove_per_hour, 3),
                         "r_squared": round(model.r_squared, 3),
                         "samples": model.samples,
                         "fitted": model.fitted,
@@ -241,6 +242,11 @@ def create_app() -> FastAPI:
             "models": {key: round(model.tau_hours, 1) for key, model in engine.models.items()},
             "hot_water_kwh_per_day": round(engine.hot_water_profile.daily_total_kwh(), 2),
         }
+
+    @app.get("/api/wood-stove")
+    async def wood_stove() -> dict[str, Any]:
+        require_engine().refresh_wood_stove()
+        return require_engine().wood_stove.as_dict()
 
     @app.get("/api/advice")
     async def advice() -> dict[str, Any]:
