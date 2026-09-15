@@ -50,11 +50,12 @@ varmvattenvanor, och skriver tillbaka börvärden till termostaterna.
 
 ### Installera i Home Assistant
 
-Repot är samtidigt en add-on-databas, så installationen är fyra klick och
-uppdateringar kommer sedan som en knapp:
+Kopiera mappen `hemopt/` till `/addons/hemopt/` på din Home Assistant, till
+exempel med **Samba share** eller **Studio Code Server**. Tillägget dyker upp
+under **Local add-ons** i Add-on Store.
 
-**Settings → Add-ons → Add-on Store →** trepunktsmenyn **→ Repositories →**
-klistra in repots URL **→ Add**, och installera **Kostnadsoptimering (hemopt)**.
+Ligger koden i ett publikt Git-repo fungerar repot också som add-on-databas,
+och då kommer uppdateringar som en **Update**-knapp i stället.
 
 Ingen token och inget MQTT-lösenord behövs: Supervisorn ger tillägget båda.
 Se [`hemopt/DOCS.md`](hemopt/DOCS.md) för hela gången.
