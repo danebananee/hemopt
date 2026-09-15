@@ -12,7 +12,7 @@ Den innehåller tre delar, som alla går att använda var för sig:
 | `dashboards/heatpump-h66-discovery.yaml` | Dashboard för H66 auto-discovery med `h66_`-prefix |
 | `dashboards/kostnadsoptimering.yaml` | Vy för optimeringstjänsten |
 | `www/husdata/heatpump-schematic.svg` | Schematiken som värdena läggs ovanpå |
-| `optimizer/` | Tjänst som flyttar last till billiga timmar och kapar effekttoppar |
+| `hemopt/` | Home Assistant-tillägg som flyttar last och kapar effekttoppar |
 
 ![Dashboarden](docs/dashboard-oversikt.png)
 
@@ -37,17 +37,32 @@ plus en gemensam temperaturgraf för våningen. Vyerna använder entitets-ID:n s
 skapats av community-integrationen `angoyd/ha-lksystems`.
 
 **Kostnadsoptimering** visar spotpris, planerad effekt, månadens effekttoppar
-och en prioritetsreglage per rum. Vyn kräver att tjänsten i `optimizer/` körs.
+och en prioritetsreglage per rum. Vyn kräver att tillägget i `hemopt/` körs.
 
 ## Kostnadsoptimering
 
-`optimizer/` är en separat tjänst som flyttar uppvärmning och varmvatten till
-billiga timmar och håller nere effektavgiften. Den läser rumstemperaturerna
+`hemopt/` är ett Home Assistant-tillägg som flyttar uppvärmning och varmvatten
+till billiga timmar och håller nere effektavgiften. Det läser rumstemperaturerna
 från Home Assistant, hämtar Nordpools kvartspriser, lär sig husets tröghet och
 varmvattenvanor, och skriver tillbaka börvärden till termostaterna.
 
+![Vad körs var](docs/system-overview.png)
+
+### Installera i Home Assistant
+
+Repot är samtidigt en add-on-databas, så installationen är fyra klick och
+uppdateringar kommer sedan som en knapp:
+
+**Settings → Add-ons → Add-on Store →** trepunktsmenyn **→ Repositories →**
+klistra in repots URL **→ Add**, och installera **Kostnadsoptimering (hemopt)**.
+
+Ingen token och inget MQTT-lösenord behövs: Supervisorn ger tillägget båda.
+Se [`hemopt/DOCS.md`](hemopt/DOCS.md) för hela gången.
+
+### Köra lokalt i stället
+
 ```bash
-cd optimizer
+cd hemopt
 uv sync
 uv run hemopt --demo serve --port 47318
 ```
@@ -55,9 +70,9 @@ uv run hemopt --demo serve --port 47318
 Demoläget kör den riktiga optimeraren mot verkliga SE3-priser men ett simulerat
 hus, så du kan titta på den innan något kopplas in.
 
-För skarp drift finns `optimizer/config.exempel.yaml` redan ifylld för det här
-huset, med H66-entiteterna och alla elva LK Arc-rum. Kopiera den till
-`config.yaml`, fyll i token, och låt
+För skarp drift utanför Home Assistant finns `hemopt/config.exempel.yaml`
+ifylld för det här huset, med H66-entiteterna och alla elva LK Arc-rum. Kopiera
+den till `config.yaml`, fyll i token, och låt
 
 ```bash
 uv run hemopt -c config.yaml doctor
@@ -67,7 +82,7 @@ kontrollera varje entitet mot din Home Assistant. Den föreslår rättningar fö
 dem som inte stämmer, vilket är det enda praktiska sättet att få rätt på de
 entitets-ID:n som genereras ur enhetsnamn.
 
-Se [`optimizer/README.md`](optimizer/README.md) för effektavgiftsmodellen,
+Se [`hemopt/README.md`](hemopt/README.md) för effektavgiftsmodellen,
 effektvakten som styr via EXT-kabeln, och hur tjänsten körs på en Raspberry Pi.
 
 ## Installation

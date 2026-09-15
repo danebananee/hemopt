@@ -5,10 +5,11 @@ description: >-
   Flyttar uppvarmning och varmvatten till billiga timmar, kapar effekttoppar och
   jamfor vad de olika elavtalen skulle ha kostat.
 url: https://github.com/bengtsson-daniel/hemopt
+# 32-bit ARM is left out on purpose: numpy publishes armv7 wheels but HiGHS
+# does not, so an armv7 install would try to compile the solver on the device.
 arch:
   - aarch64
   - amd64
-  - armv7
 init: false
 startup: application
 boot: auto

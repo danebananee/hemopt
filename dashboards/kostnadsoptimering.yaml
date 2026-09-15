@@ -1,6 +1,6 @@
 # Kostnadsoptimering - vy for hemopt-tjansten
 #
-# Kraver att optimizer/ kors med mqtt.enabled: true. Entiteterna skapas
+# Kraver att tillagget hemopt/ kors med mqtt.enabled: true. Entiteterna skapas
 # automatiskt via MQTT-autodiscovery under enheten "Kostnadsoptimering".
 #
 # Klistras in i dashboardens rakonfiguration, eller laggs till som en vy i

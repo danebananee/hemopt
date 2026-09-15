@@ -1,11 +1,8 @@
-agent-tools/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
 *.db
 *.db-shm
 *.db-wal
-__pycache__/
-.venv/
-
-# hemopt
-optimizer/.venv/
-optimizer/*.db
-.pytest_cache/

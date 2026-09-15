@@ -1,0 +1,71 @@
+# Kostnadsoptimering (hemopt)
+
+Flyttar uppvärmning och varmvatten till billiga timmar, kapar effekttoppar och
+jämför löpande vad de olika elavtalen skulle ha kostat dig.
+
+Menyvägarna nedan står på engelska, eftersom Home Assistant är på engelska.
+
+## Innan du börjar
+
+Du behöver **Mosquitto broker**. Har du redan H66 på MQTT så har du den.
+Annars: **Settings → Add-ons → Add-on Store**, sök *Mosquitto broker*,
+**Install**, **Start**. Gå sedan till **Settings → Devices & Services** och
+bekräfta MQTT-integrationen som dyker upp under *Discovered*.
+
+## Installera
+
+1. **Settings → Add-ons → Add-on Store**
+2. Trepunktsmenyn uppe till höger → **Repositories**
+3. Klistra in repots URL, **Add**, sedan **Close**
+4. Ladda om sidan. Under rubriken med repots namn finns
+   **Kostnadsoptimering (hemopt)** → **Install**
+5. Fliken **Configuration**: välj **Price area** och **Contract settlement**,
+   tryck **Save**
+6. Fliken **Info**: slå på **Start on boot**, **Watchdog** och
+   **Show in sidebar**, tryck **Start**
+7. Öppna **Kostnadsoptimering** i vänstermenyn
+
+Det är hela installationen. Ingen token att skapa, inget MQTT-lösenord att
+skriva in, ingen YAML att redigera.
+
+Uppdateringar dyker senare upp som en **Update**-knapp på tilläggets sida.
+
+## Vad tillägget redan vet
+
+| Sak | Varifrån |
+| --- | --- |
+| Home Assistant-API | `SUPERVISOR_TOKEN`, ges av Supervisorn |
+| MQTT-broker | Supervisorns tjänste-API, om Mosquitto är installerat |
+| Lagring | `/data`, överlever uppdateringar |
+
+Därför finns varken token eller lösenord bland inställningarna.
+
+## Inställningar
+
+Allt annat — rum, givare, komfortgränser, prioriteter, regler för effekttoppar
+— ställs in i tilläggets egen panel, inte under **Configuration**. Profilen
+sparas som data i `/data/profile.json`, och det är det som gör att samma
+tillägg kan installeras oförändrat i ett annat hushåll.
+
+| Val | Betyder |
+| --- | --- |
+| **Price area** | Ditt elområde, SE1–SE4 |
+| **Contract settlement** | Hur spotavtalet avräknas: dygn, timme eller kvart |
+| **Log level** | Höj till `debug` om något beter sig konstigt |
+
+## Innan du litar på styrningen
+
+Tillägget styr ingenting förrän du slår på **Styr värmen** i panelen. Låt det
+gå några dygn först och jämför den planerade kurvan mot verkligheten.
+Modellerna behöver historik, och tröghet per rum tar ungefär en vecka att lära
+in.
+
+## Felsök
+
+Panelens **Diagnos**-vy kontrollerar varje entitet tillägget är konfigurerat
+att använda och föreslår rättningar för dem som inte finns. Börja alltid där.
+
+Loggen ligger på tilläggets **Log**-flik. Systemloggen finns under
+**Settings → System → Logs**.
+
+Entitets-ID:n slår du upp under **Developer tools → States**.

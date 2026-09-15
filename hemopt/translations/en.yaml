@@ -1,0 +1,15 @@
+configuration:
+  price_area:
+    name: Price area
+    description: >-
+      Your Nordpool bidding zone. Southern Sweden is SE4, the Stockholm and
+      Gothenburg region is SE3.
+  contract:
+    name: Contract settlement
+    description: >-
+      How your spot contract is settled. Quarterly gives the optimiser the most
+      to work with; daily gives it the least. The add-on also simulates what the
+      other two would have cost you.
+  log_level:
+    name: Log level
+    description: Raise to debug when something looks wrong, then set it back.
