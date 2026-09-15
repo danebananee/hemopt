@@ -67,7 +67,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.14",
+        version="0.1.15",
         lifespan=lifespan,
     )
 
@@ -211,6 +211,9 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="comfort_min must be below comfort_max")
         room.comfort_min = update.comfort_min
         room.comfort_max = update.comfort_max
+        engine.store.set_setting(
+            f"comfort_{key}", {"min": room.comfort_min, "max": room.comfort_max}
+        )
         await engine.replan()
         return {"key": key, "comfort_min": room.comfort_min, "comfort_max": room.comfort_max}
 

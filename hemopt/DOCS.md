@@ -136,9 +136,13 @@ visar varje avräkningsform (månad / dygn / timme / kvart) både **utan** och
 ## Innan du litar på styrningen
 
 Tillägget styr ingenting förrän du slår på **Styr värmen** i panelen. Låt det
-gå några dygn först. Rummens tröghet lärs in från historik (ungefär en vecka).
-Du behöver normalt sett inte skriva om koden för att styrningen ska bli bättre
-— modellerna tränas om när det finns data.
+gå några dygn först. Rummens tröghet lärs in från historik (ungefär en vecka)
+**även med styrningen av** — träningen läser Home Assistants recorder, inte
+aktuella börvärdesskrivningar. Slå på styrningen först när Log/doctor visar
+att climate-entiteterna finns och planen ser vettig ut.
+
+Önskad rumstemperatur ställer du under **Rum** i panelen («Önskad temp»).
+Planen reglerar kring det bandet; prio 1 hålls hårdast.
 
 ## Felsök
 

@@ -1,13 +1,11 @@
 # Golvvärme — temperatur + reglage per rum (LK Arc)
 #
-# Sensorerna visar temperatur/fukt/batteri. Börvärdet ställs på climate.*
-# (samma MAC-suffix som givaren). Kontrollera under Developer tools → States
-# att climate.xxx finns; vissa installationer heter climate.xxx_thermostat.
+# Sensorerna visar temperatur/fukt/batteri. Börvärdet ställs på
+# climate.<mac>_thermostat (LK). Om kortet visar «Entity not found»:
+# Developer tools → States → sök climate. och byt entitets-id.
 #
-# Klistra in views:-delen i din dashboard, eller importera hela filen.
-#
-# Obs: när hemopt har «Styr värmen» på skrivs börvärden om enligt planen.
-# Manuala reglage gäller tills nästa styrcykel — eller stäng av styrningen.
+# När hemopt har «Styr värmen» på skrivs LK-börvärdet enligt planen.
+# Önskad komforttemp ställer du i hemopt-panelen (Rum) — dit styr planen.
 
 title: Golvvärme
 
@@ -37,22 +35,22 @@ views:
                 name: Entré
 
           - type: tile
-            entity: climate.e0_ec_2c_c8_5e_2c
+            entity: climate.e0_ec_2c_c8_5e_2c_thermostat
             name: Tvättstuga
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.e9_bd_23_4a_e9_a8
+            entity: climate.e9_bd_23_4a_e9_a8_thermostat
             name: Salong
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.ce_9f_90_cd_bf_74
+            entity: climate.ce_9f_90_cd_bf_74_thermostat
             name: Lekrum
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.ca_97_f7_ba_7d_23
+            entity: climate.ca_97_f7_ba_7d_23_thermostat
             name: Entré
             features:
               - type: target-temperature
@@ -104,37 +102,37 @@ views:
                 name: Kontor
 
           - type: tile
-            entity: climate.d5_ba_fd_c1_0c_c1
+            entity: climate.d5_ba_fd_c1_0c_c1_thermostat
             name: Garderob
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.c8_1b_04_e0_7e_90
+            entity: climate.c8_1b_04_e0_7e_90_thermostat
             name: Sovrum
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.fa_6a_ee_c8_9a_63
+            entity: climate.fa_6a_ee_c8_9a_63_thermostat
             name: Vardagsrum
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.f7_d4_23_14_49_da
+            entity: climate.f7_d4_23_14_49_da_thermostat
             name: Badrum
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.e3_09_14_3f_f0_f0
+            entity: climate.e3_09_14_3f_f0_f0_thermostat
             name: Pysselrum
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.e6_5e_d9_54_a8_e7
+            entity: climate.e6_5e_d9_54_a8_e7_thermostat
             name: Rios rum
             features:
               - type: target-temperature
           - type: tile
-            entity: climate.d0_f5_31_05_49_9d
+            entity: climate.d0_f5_31_05_49_9d_thermostat
             name: Kontor
             features:
               - type: target-temperature

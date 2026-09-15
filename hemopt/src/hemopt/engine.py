@@ -99,6 +99,13 @@ class Engine:
             if isinstance(priority, int) and 1 <= priority <= 5:
                 # Legacy 4–5 meant "hold"; that is priority 1 on the new scale.
                 room.priority = 1 if priority >= 4 else min(priority, 3)
+            comfort = self.store.setting(f"comfort_{room.key}")
+            if isinstance(comfort, dict):
+                lo = comfort.get("min")
+                hi = comfort.get("max")
+                if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and lo < hi:
+                    room.comfort_min = float(lo)
+                    room.comfort_max = float(hi)
 
         profile = self.store.hot_water_profile()
         if profile is not None:

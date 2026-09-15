@@ -1348,7 +1348,40 @@ function renderRooms() {
       room.model.fitted ? `R² ${fmt(room.model.r_squared, 2)}` : "Standardmodell",
     );
     meta.appendChild(badge);
+    if (!room.climate_entity) {
+      meta.appendChild(html("span", "badge", "Ingen termostat — kan inte styras"));
+    }
     card.appendChild(meta);
+
+    const comfortRow = html("div", "priority-row comfort-row");
+    comfortRow.appendChild(html("label", null, "Önskad temp"));
+    const comfortSlider = document.createElement("input");
+    comfortSlider.type = "range";
+    comfortSlider.min = "15";
+    comfortSlider.max = "26";
+    comfortSlider.step = "0.5";
+    const band = 0.75;
+    const target = (Number(room.comfort_min) + Number(room.comfort_max)) / 2;
+    comfortSlider.value = String(Math.round(target * 2) / 2);
+    const comfortLabel = html("span", "priority-value", `${fmt(target, 1)} °C`);
+    comfortSlider.addEventListener("input", () => {
+      comfortLabel.textContent = `${fmt(Number(comfortSlider.value), 1)} °C`;
+    });
+    comfortSlider.addEventListener("change", async () => {
+      const mid = Number(comfortSlider.value);
+      try {
+        await postJSON(`/api/rooms/${room.key}/comfort`, {
+          comfort_min: mid - band,
+          comfort_max: mid + band,
+        });
+        await refresh();
+      } catch (error) {
+        console.error(error);
+      }
+    });
+    comfortRow.appendChild(comfortSlider);
+    comfortRow.appendChild(comfortLabel);
+    card.appendChild(comfortRow);
 
     const priorityRow = html("div", "priority-row");
     priorityRow.appendChild(html("label", null, "Prioritet"));
