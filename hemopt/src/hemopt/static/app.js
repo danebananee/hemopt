@@ -1057,9 +1057,9 @@ function renderNotes() {
         "div",
         "note warn",
         "Tillägget når inte Home Assistant Core-API (det är därför HA/väder/MQTT är röda). " +
-          "Det finns ingen Info-toggle — homeassistant_api ges automatiskt. " +
-          "Uppdatera till 0.1.6, tryck Rebuild, öppna Log och leta efter " +
-          "«HA Core proxy HTTP 200» och «SUPERVISOR_TOKEN length». " +
+          "Loggen visar troligen SUPERVISOR_TOKEN length=0. " +
+          "Sätt en Long-lived access token under Configuration → HA-token " +
+          "(URL http://homeassistant:8123), eller installera om tillägget. " +
           (detail ? `Senaste probesvar: ${detail}.` : ""),
       ),
     );

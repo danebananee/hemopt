@@ -35,4 +35,15 @@ configuration:
     name: Elmätare (entitets-id)
     description: >-
       Sensor för husets totala effekt, t.ex. sensor.p1_meter_active_power.
-      Lämna tomt för att välja i panelen när Home Assistant är online.
+      Lämna tomt om den redan står i hemopt.yaml.
+  ha_url:
+    name: HA-URL (fallback)
+    description: >-
+      Används bara om SUPERVISOR_TOKEN saknas. Inne i tillägget är
+      http://homeassistant:8123 rätt adress.
+  ha_token:
+    name: HA-token (fallback)
+    description: >-
+      Long-lived access token från din HA-profil. Behövs bara om Loggen visar
+      SUPERVISOR_TOKEN length=0. Skapa under Profil → Säkerhet → Long-lived
+      access tokens.

@@ -72,7 +72,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.7",
+        version="0.1.8",
         lifespan=lifespan,
     )
 

@@ -450,23 +450,28 @@ class Config(BaseModel):
     def with_environment(self) -> Config:
         """Overlay the environment on top of this config.
 
-        Connection details are taken from the environment unconditionally
-        because under the Supervisor they are rotated for us, and a stale copy
-        saved in a profile would silently break after an add-on restart.
+        Connection details from the Supervisor override a saved profile, but an
+        empty token must not wipe a long-lived token from ``hemopt.yaml``.
         """
         data = self.model_dump(mode="json")
 
-        if url := os.environ.get("HEMOPT_HA_URL"):
+        if url := (os.environ.get("HEMOPT_HA_URL") or "").strip():
             data["home_assistant"]["base_url"] = url
-        if token := os.environ.get("HEMOPT_HA_TOKEN"):
+        if token := (os.environ.get("HEMOPT_HA_TOKEN") or "").strip():
             data["home_assistant"]["token"] = token
 
-        if host := os.environ.get("HEMOPT_MQTT_HOST"):
+        addon = os.environ.get("HEMOPT_ADDON") == "1"
+        if host := (os.environ.get("HEMOPT_MQTT_HOST") or "").strip():
             data["mqtt"]["enabled"] = True
             data["mqtt"]["host"] = host
             data["mqtt"]["port"] = int(os.environ.get("HEMOPT_MQTT_PORT") or 1883)
             data["mqtt"]["username"] = os.environ.get("HEMOPT_MQTT_USERNAME") or None
             data["mqtt"]["password"] = os.environ.get("HEMOPT_MQTT_PASSWORD") or None
+        elif addon:
+            # Under the add-on, yaml MQTT credentials (often placeholders) only
+            # produce "Not authorized" spam when the Supervisor did not hand us
+            # a broker. Stay quiet until Mosquitto is discoverable.
+            data["mqtt"]["enabled"] = False
 
         if area := os.environ.get("HEMOPT_PRICE_AREA"):
             data["site"]["price_area"] = area

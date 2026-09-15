@@ -76,6 +76,7 @@ Rumsprioritet kan justeras i panelen.
 | **Minimera effekttoppar** | Om optimeraren ska hålla nere debiterbara toppar |
 | **Antal toppar / pris / fönster** | Enligt ditt elnätsavtal |
 | **Elmätare (entitets-id)** | T.ex. `sensor.p1_meter_active_power` |
+| **HA-token / HA-URL** | Bara om Loggen visar `SUPERVISOR_TOKEN length=0` |
 
 Rum, värmepump och övrig husbeskrivning läggs i
 `/homeassistant/hemopt.yaml` (bredvid `configuration.yaml`). Börja från
@@ -83,6 +84,21 @@ Rum, värmepump och övrig husbeskrivning läggs i
 `peak_tariff.window.months`.
 
 Efter ändring i Configuration: **Save**, sedan **Restart** (eller Rebuild).
+
+## Home Assistant-API (viktigt)
+
+Tillägget ska få `SUPERVISOR_TOKEN` automatiskt (`homeassistant_api: true`).
+Om Loggen visar **`SUPERVISOR_TOKEN length=0`** och **HTTP 401**:
+
+1. **Snabbast:** Skapa en *Long-lived access token* under din HA-profil →
+   Säkerhet, klistra in under **Configuration → HA-token**, låt HA-URL vara
+   `http://homeassistant:8123`, **Save**, **Restart**.
+2. **Alternativ:** Avinstallera tillägget och installera om från GitHub-repot
+   (data i `/data` behålls om du inte tar bort den), så Supervisorn ger en
+   riktig token.
+
+Utan token blir HA, väder och MQTT röda och ingen historik laddas — det hjälper
+inte att vänta.
 
 ## Elmätare
 
@@ -116,9 +132,10 @@ Det finns **ingen** Info-toggle «Allow Home Assistant API». Tillägget har
 
 | Symptom | Att göra |
 | --- | --- |
-| Home Assistant / väder / MQTT röda | Öppna **Log**. Leta `SUPERVISOR_TOKEN length` och `HA Core proxy HTTP`. Behöver vara HTTP **200**. Annars: **Update** till senaste, **Rebuild**, starta om. |
-| Token length 0 | Supervisorn gav ingen token — reinstallera tillägget från GitHub-repot. |
+| Home Assistant / väder / MQTT röda | Öppna **Log**. Om `SUPERVISOR_TOKEN length=0`: sätt **HA-token** under Configuration (se ovan) eller installera om tillägget. Behöver `HA API ping HTTP 200`. |
+| Token length 0 | Supervisorn gav ingen token. Använd long-lived token-fallback eller reinstallera. |
 | Minimera toppar av i Configuration men På i panelen | Bug i äldre version: `false` ignorerades. Uppdatera till **0.1.6+**, spara om Configuration, **Restart**. |
+| MQTT «Not authorized» i loop | Saknad Supervisor-token + placeholder-lösen i yaml. Från 0.1.8 stängs yaml-MQTT av i add-on tills Mosquitto upptäcks. |
 | Ingen elmätare | Sätt entitets-id under Configuration. |
 | Ingen plan / inga rum | Skapa `/homeassistant/hemopt.yaml` från exemplet. |
 | Spotpris saknas | Nätverk utåt till elprisetjustnu.se; kolla Log. |

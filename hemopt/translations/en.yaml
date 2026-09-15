@@ -36,4 +36,15 @@ configuration:
     name: Electricity meter (entity id)
     description: >-
       Sensor for whole-house power, e.g. sensor.p1_meter_active_power.
-      Leave blank to pick one in the panel once Home Assistant is online.
+      Leave blank if it is already set in hemopt.yaml.
+  ha_url:
+    name: HA URL (fallback)
+    description: >-
+      Used only when SUPERVISOR_TOKEN is missing. Inside the add-on,
+      http://homeassistant:8123 is the correct address.
+  ha_token:
+    name: HA token (fallback)
+    description: >-
+      Long-lived access token from your HA profile. Only needed when the Log
+      shows SUPERVISOR_TOKEN length=0. Create under Profile → Security →
+      Long-lived access tokens.

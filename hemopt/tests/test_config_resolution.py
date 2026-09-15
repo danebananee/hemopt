@@ -32,6 +32,7 @@ _ADDON_ENV = (
     "HEMOPT_PEAK_HOUR_END",
     "HEMOPT_PEAK_WEEKDAYS",
     "HEMOPT_TOTAL_POWER_ENTITY",
+    "HEMOPT_ADDON",
 )
 
 
@@ -156,6 +157,33 @@ def test_peak_and_meter_options_come_from_the_environment(monkeypatch):
     assert config.peak_tariff.window.hour_end == 22
     assert config.peak_tariff.window.weekdays_only is False
     assert config.base_load.total_power_entity == "sensor.p1_meter_active_power"
+
+
+def test_empty_ha_token_env_does_not_wipe_yaml_token(monkeypatch, tmp_path):
+    path = tmp_path / "house.yaml"
+    path.write_text(
+        "home_assistant:\n  base_url: http://homeassistant:8123\n  token: keep-me\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HEMOPT_ADDON", "1")
+    monkeypatch.setenv("HEMOPT_HA_TOKEN", "")
+    monkeypatch.setenv("HEMOPT_HA_URL", "")
+
+    config = Config.resolve(path)
+
+    assert config.home_assistant.token == "keep-me"
+    assert config.home_assistant.base_url == "http://homeassistant:8123"
+
+
+def test_addon_mode_disables_yaml_mqtt_without_supervisor_broker(monkeypatch, tmp_path):
+    path = tmp_path / "house.yaml"
+    path.write_text(
+        "mqtt:\n  enabled: true\n  host: core-mosquitto\n  username: x\n  password: y\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HEMOPT_ADDON", "1")
+
+    assert Config.resolve(path).mqtt.enabled is False
 
 
 def test_house_yaml_is_preferred_over_the_saved_profile(isolated_data):
