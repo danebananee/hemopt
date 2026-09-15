@@ -95,11 +95,13 @@ class MqttBridge:
     def _publish_config(self, component: str, object_id: str, payload: dict[str, Any]) -> None:
         if self._client is None:
             return
+        entity_object_id = f"hemopt_{object_id}"
         payload = {
             "device": DEVICE,
             "availability_topic": self._topic("status"),
-            "unique_id": f"hemopt_{object_id}",
-            "object_id": f"hemopt_{object_id}",
+            "unique_id": entity_object_id,
+            # HA 2025.12+ / required by 2026.4: full entity id, not bare object_id.
+            "default_entity_id": f"{component}.{entity_object_id}",
             **payload,
         }
         topic = f"{self._mqtt.discovery_prefix}/{component}/{self._mqtt.node_id}/{object_id}/config"

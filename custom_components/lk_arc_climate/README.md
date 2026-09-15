@@ -46,6 +46,16 @@ appen uppdaterades. Från **0.1.21** används samma `link2.lk.nu`-anrop som appe
 Uppdatera hemopt → Restart tillägg → **Restart Home Assistant** → testa igen.
 Kolla **Settings → System → Logs** efter `LK Arc Climate: skrev`.
 
+### Viktigt: ratt entitet
+
+Andra **`climate.<mac>_thermostat`** (Thermostat pa rumsenheten).
+
+**Inte** `sensor.hemopt_setpoint_*` — det ar bara hemopts *planerade* borvarde
+(MQTT-sensor, skrivskyddad) och styr inte LK-appen.
+
+I Logs ska du se (niva Warning):
+`LK Arc Climate: forsoker satta …` och sedan `OK — skrev … via measurement API`.
+
 ### Snabbtest
 
 Ändra börvärdet i HA → öppna LK-appen → samma rum ska uppdateras inom några sekunder.
