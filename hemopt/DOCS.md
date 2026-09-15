@@ -187,6 +187,32 @@ värmen. hemopt detekterar när brasan är tänd, lär K/h-bidrag + VP-ekvivalen
 per rum (så trögheten inte blandas ihop med golvvärmen) och föreslår dyra
 kalla fönster att tända i. Tillägget tänder aldrig själv.
 
+## Loop-mapping (tillfällig diagnostik)
+
+Misstänker du att golvvärmeslingor är kopplade till fel LK Arc-termostat?
+hemopt kan **passivt** korrelera varje rums värmeanrop (börvärde − inne)
+mot fördröjd temperaturstegring i alla rum, utifrån recorder-historik.
+
+```bash
+# i tillägget / lokalt med HA-token
+hemopt loop-mapping
+# eller GET /api/loop-mapping
+```
+
+Resultatet flaggar `suspect_swap` när termostat A värmer rum B tydligt mer
+än A. Föreslagna byten rör **bara** `climate_entity` i profilen (inte den
+fysiska ventilen). Bekräfta i fördelarskåpet innan du litar på det.
+
+```bash
+# valfritt: skriv bytena till profile.json
+curl -X POST …/api/loop-mapping/apply -d '{"confirm":true}'
+```
+
+Det här är **inte** del av styrningen och kan tas bort senare
+(`loop_mapping.py` + API/CLI-hooks). Låt styrningen vara av medan data
+samlas — ju mer börvärdena skiljer sig mellan rummen, desto tydligare
+blir matrisen.
+
 ## Felsök
 
 Det finns **ingen** Info-toggle «Allow Home Assistant API». Tillägget har

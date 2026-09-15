@@ -39,6 +39,11 @@ class MeterUpdate(BaseModel):
     entity_id: str | None = None
 
 
+class LoopMappingApply(BaseModel):
+    confirm: bool = False
+    min_confidence: float = Field(default=0.35, ge=0.0, le=1.0)
+
+
 def create_app() -> FastAPI:
     holder: dict[str, Any] = {"engine": None, "error": None, "booting": True}
 
@@ -67,7 +72,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.29",
+        version="0.1.30",
         lifespan=lifespan,
     )
 
@@ -242,6 +247,20 @@ def create_app() -> FastAPI:
             "models": {key: round(model.tau_hours, 1) for key, model in engine.models.items()},
             "hot_water_kwh_per_day": round(engine.hot_water_profile.daily_total_kwh(), 2),
         }
+
+    @app.get("/api/loop-mapping")
+    async def loop_mapping() -> dict[str, Any]:
+        report = await require_engine().analyse_loop_mapping()
+        return report.as_dict()
+
+    @app.post("/api/loop-mapping/apply")
+    async def loop_mapping_apply(update: LoopMappingApply) -> dict[str, Any]:
+        if not update.confirm:
+            raise HTTPException(
+                status_code=400,
+                detail='skicka {"confirm": true} för att byta climate_entity',
+            )
+        return await require_engine().apply_loop_mapping_swaps(min_confidence=update.min_confidence)
 
     @app.get("/api/wood-stove")
     async def wood_stove() -> dict[str, Any]:

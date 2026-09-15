@@ -23,6 +23,12 @@ from .explain import explain_plan, explain_upcoming, headline
 from .guard import GuardDecision, PeakGuard
 from .ha import HomeAssistantClient, parse_numeric, resample_forecast
 from .hotwater import TankSample, UsageProfile, build_profile, estimate_draws
+from .loop_mapping import (
+    LoopMappingReport,
+    RoomSeries,
+    analyse_loop_mapping,
+    apply_climate_swaps,
+)
 from .mqtt_bridge import MqttBridge
 from .optimizer import (
     HotWaterInput,
@@ -433,6 +439,58 @@ class Engine:
             _LOGGER.info("base load profile built from %d samples", self.base_load.samples)
 
         self.status.last_training = self._now()
+
+    async def analyse_loop_mapping(self) -> LoopMappingReport:
+        """Temporary diagnostic: detect floor-loop ↔ thermostat cross-wiring.
+
+        Passive — reads recorder history only. Not used by the optimiser.
+        Removable once the house wiring is verified.
+        """
+        history_days = self.config.home_assistant.history_days
+        start = self._now() - timedelta(days=history_days)
+        history = await self.fetch_history(start)
+        outdoor_entity = self.config.heat_pump.outdoor_entity
+        outdoor_points = history.get(outdoor_entity, []) if outdoor_entity else []
+        outdoor = {point.moment: point.value for point in outdoor_points}
+
+        series: list[RoomSeries] = []
+        for room in self.config.rooms:
+            indoor_points = history.get(room.temperature_entity, [])
+            climate_points = history.get(room.climate_entity, []) if room.climate_entity else []
+            series.append(
+                RoomSeries(
+                    key=room.key,
+                    name=room.name,
+                    climate_entity=room.climate_entity,
+                    indoor={point.moment: point.value for point in indoor_points},
+                    setpoint={point.moment: point.value for point in climate_points},
+                )
+            )
+
+        return analyse_loop_mapping(
+            series,
+            outdoor,
+            step_minutes=self.config.optimiser.step_minutes,
+            history_days=history_days,
+            now=self._now(),
+        )
+
+    async def apply_loop_mapping_swaps(self, *, min_confidence: float = 0.35) -> dict[str, Any]:
+        """Re-run analysis and apply high-confidence climate_entity swaps.
+
+        Temporary helper for the loop-mapping diagnostic. Writes profile.json
+        only — edit hemopt.yaml by hand if that file should stay in sync.
+        """
+        report = await self.analyse_loop_mapping()
+        applied = apply_climate_swaps(
+            self.config.rooms, report.suggested_swaps, min_confidence=min_confidence
+        )
+        if applied:
+            self.config.save_profile()
+            _LOGGER.info("loop-mapping applied %d climate_entity swap(s)", len(applied))
+        payload = report.as_dict()
+        payload["applied"] = applied
+        return payload
 
     # --- planning ---------------------------------------------------------
     async def outdoor_forecast(self, states: dict[str, str], times: list[datetime]) -> list[float]:

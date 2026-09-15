@@ -44,6 +44,13 @@ class MeterUpdate(BaseModel):
     entity_id: str | None = None
 
 
+class LoopMappingApply(BaseModel):
+    """Optional confirmation payload for temporary climate_entity swaps."""
+
+    confirm: bool = False
+    min_confidence: float = Field(default=0.35, ge=0.0, le=1.0)
+
+
 def create_addon_app() -> FastAPI:
     """Thin entry used by the add-on — see ``hemopt.addon``."""
     from .addon import create_app as create_thin_app
@@ -73,7 +80,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.29",
+        version="0.1.30",
         lifespan=lifespan,
     )
 
@@ -219,6 +226,25 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
             "models": {key: round(model.tau_hours, 1) for key, model in engine.models.items()},
             "hot_water_kwh_per_day": round(engine.hot_water_profile.daily_total_kwh(), 2),
         }
+
+    @app.get("/api/loop-mapping")
+    async def loop_mapping() -> dict[str, Any]:
+        """Temporary diagnostic: cross-correlate thermostat calls vs room rise."""
+        report = await engine.analyse_loop_mapping()
+        return report.as_dict()
+
+    @app.post("/api/loop-mapping/apply")
+    async def loop_mapping_apply(update: LoopMappingApply) -> dict[str, Any]:
+        """Apply high-confidence climate_entity swaps from a fresh analysis.
+
+        Temporary — confirm=true required. Does not touch physical valves.
+        """
+        if not update.confirm:
+            raise HTTPException(
+                status_code=400,
+                detail='skicka {"confirm": true} för att byta climate_entity',
+            )
+        return await engine.apply_loop_mapping_swaps(min_confidence=update.min_confidence)
 
     @app.get("/api/wood-stove")
     async def wood_stove() -> dict[str, Any]:

@@ -67,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("plan", help="compute one plan and print the summary")
     subparsers.add_parser("train", help="refit the models from recorder history")
     subparsers.add_parser("peaks", help="show this month's peak status")
+    subparsers.add_parser(
+        "loop-mapping",
+        help="temporary diagnostic: detect floor-loop ↔ thermostat cross-wiring",
+    )
     subparsers.add_parser("example-config", help="print a starter config.yaml")
     subparsers.add_parser("doctor", help="check every configured entity against Home Assistant")
 
@@ -143,6 +147,13 @@ async def _run_once(engine, command: str) -> int:
                     f"{'fitted' if model.fitted else 'default'}"
                 )
             print(f"hot water {engine.hot_water_profile.daily_total_kwh():.1f} kWh/day")
+            return 0
+
+        if command == "loop-mapping":
+            from .loop_mapping import format_report
+
+            report = await engine.analyse_loop_mapping()
+            print(format_report(report))
             return 0
 
         await engine.collect()

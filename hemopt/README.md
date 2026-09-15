@@ -108,6 +108,10 @@ uv run hemopt -c config.yaml plan
 `train` skriver ut tidskonstanten per rum. Ett normalt hus landar på 40–150
 timmar. Rum som visar `default` har inte tillräckligt med historik än.
 
+Misstänker du felkopplade golvvärmeslingor? Kör den tillfälliga diagnostiken
+`hemopt loop-mapping` (eller `GET /api/loop-mapping`) — se DOCS.md. Den är
+inte del av styrningen och kan tas bort senare.
+
 ### 4. Kör tjänsten
 
 ```bash
