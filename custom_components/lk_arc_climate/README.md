@@ -14,12 +14,11 @@ Home Assistant-menyer nedan är på **engelska** (som i din installation).
 ## Installera (rekommenderat) — via hemopt-tillägget
 
 Du behöver **inte** kopiera filer själv. Från version **0.1.20** lägger
-hemopt in komponenten automatiskt. Från **0.1.24** skapas även
-integrationen automatiskt efter **Restart Home Assistant** — du behöver
-normalt **inte** «Add integration» manuellt.
+hemopt in komponenten automatiskt. Från **0.1.25** injicerar hemopt config entry och startar om HA **en gång**
+automatiskt om `climate.*_thermostat` saknas (fixar Entity not found på Golvvärme).
 
 1. **Settings → Add-ons → Kostnadsoptimering (hemopt)**
-2. Tryck **Update** till **0.1.24+**, sedan **Restart**
+2. Tryck **Update** till **0.1.25+**, sedan **Restart**
 3. Öppna fliken **Log** — du ska se:
    `LK Arc Climate installerad i /homeassistant/custom_components/lk_arc_climate`
 4. **Settings → System → ⋮ → Restart Home Assistant** (en gång)
@@ -117,7 +116,7 @@ Om loggen säger att `/homeassistant` saknas:
 
 ## Kort checklista
 
-- [ ] hemopt 0.1.24+ uppdaterad och omstartad
+- [ ] hemopt 0.1.25+ uppdaterad och omstartad
 - [ ] Loggen visar att LK Arc Climate installerats
 - [ ] **Restart Home Assistant** en gång
 - [ ] Logs: `LK Arc Climate check` / `climate.*_thermostat` (Add integration bara som reserv)

@@ -97,6 +97,8 @@ async def test_ensure_lk_arc_climate_starts_flow_when_missing():
                 200,
                 json={"type": "create_entry", "title": "LK Arc Climate", "flow_id": "x"},
             )
+        if "/services/persistent_notification/" in request.url.path:
+            return httpx.Response(200, json={})
         return httpx.Response(404)
 
     client = HomeAssistantClient(

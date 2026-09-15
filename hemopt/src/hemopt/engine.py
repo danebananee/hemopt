@@ -979,7 +979,32 @@ class Engine:
             self._sample_loop(),
             self._plan_loop(),
             self._train_loop(),
+            self._lk_arc_loop(),
         )
+
+    async def _lk_arc_loop(self) -> None:
+        """Keep trying until climate.*_thermostat exists (fixes Entity not found)."""
+        while True:
+            try:
+                async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+                    if await ha.ping():
+                        lk = await ha.ensure_lk_arc_climate()
+                        if lk.get("ok") and lk.get("action") == "already_present":
+                            _LOGGER.info(
+                                "LK Arc Climate OK: %s",
+                                lk.get("sample_climate") or lk.get("detail"),
+                            )
+                            await asyncio.sleep(6 * 3600)
+                            continue
+                        _LOGGER.warning(
+                            "LK Arc Climate check: ok=%s action=%s detail=%s",
+                            lk.get("ok"),
+                            lk.get("action"),
+                            lk.get("detail"),
+                        )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("LK Arc Climate loop failed")
+            await asyncio.sleep(120)
 
     async def _sample_loop(self) -> None:
         while True:

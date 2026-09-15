@@ -77,7 +77,7 @@ planen. Under **Vad som styrs** syns vilka entiteter som är kopplade.
 
 LK Systems ger oftast bara **Sensors**. Från hemopt **0.1.20** installeras
 **LK Arc Climate** automatiskt i `/config/custom_components/` när tillägget
-startar. Från **0.1.24** skapas även config entry automatiskt efter
+startar. Från **0.1.25** skapas även config entry automatiskt efter
 **Restart Home Assistant** — Golvvärme ska då visa termostater (inte
 Entity not found).
 

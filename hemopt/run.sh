@@ -34,10 +34,13 @@ read_option() {
 
 # Install / refresh the LK Arc Climate custom component into HA's config so
 # the user does not have to copy files by hand. Requires homeassistant_config:rw.
+# Also injects a config entry and (once) asks Supervisor to restart HA — without
+# that step climate.*_thermostat never appears (Golvvärme shows Entity not found).
 install_lk_arc_climate() {
     local src="/opt/hemopt/bundled/lk_arc_climate"
     local dest="/homeassistant/custom_components/lk_arc_climate"
     local marker="$dest/.installed_by_hemopt"
+    local entries="/homeassistant/.storage/core.config_entries"
 
     if [[ ! -d /homeassistant ]]; then
         echo "[hemopt] /homeassistant saknas (homeassistant_config ej monterad) — hoppar over LK Arc Climate"
@@ -54,9 +57,54 @@ install_lk_arc_climate() {
     cp -a "$src" "$dest"
     printf 'hemopt\n' >"$marker"
     echo "[hemopt] LK Arc Climate installerad i $dest"
-    echo "[hemopt] Restart Home Assistant en gang — därefter skapas"
-    echo "[hemopt]   climate.*_thermostat automatiskt (0.1.24+)."
-    echo "[hemopt] Reserv: Settings → Devices & services → Add integration → LK Arc Climate"
+
+    # Ensure a config entry exists in HA storage. Files alone are not enough —
+    # without an entry there are no climate.*_thermostat entities.
+    if [[ -f $entries ]]; then
+        entry_status="$(python3 - "$entries" <<'PY'
+import json, sys, uuid, os
+from datetime import datetime, timezone
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as fh:
+    doc = json.load(fh)
+entries = doc.setdefault("data", {}).setdefault("entries", [])
+if any(e.get("domain") == "lk_arc_climate" for e in entries):
+    print("present")
+    raise SystemExit(0)
+now = datetime.now(timezone.utc).isoformat()
+entries.append(
+    {
+        "created_at": now,
+        "modified_at": now,
+        "entry_id": uuid.uuid4().hex,
+        "version": 1,
+        "minor_version": 1,
+        "domain": "lk_arc_climate",
+        "title": "LK Arc Climate",
+        "data": {},
+        "options": {},
+        "pref_disable_new_entities": False,
+        "pref_disable_polling": False,
+        "source": "import",
+        "unique_id": "lk_arc_climate",
+        "disabled_by": None,
+        "discovery_keys": {},
+        "subentries": [],
+    }
+)
+tmp = path + ".hemopt-tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(doc, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+os.replace(tmp, path)
+print("injected")
+PY
+)" || entry_status="failed"
+        echo "[hemopt] LK Arc Climate config entry: ${entry_status}"
+    else
+        echo "[hemopt] $entries saknas ännu — HA har kanske aldrig startat klart"
+    fi
 }
 
 install_lk_arc_climate
@@ -122,6 +170,45 @@ if [[ -n ${HEMOPT_HA_TOKEN:-} ]]; then
     if [[ ${ha_code:-000} != 200 ]]; then
         echo "[hemopt] HA ping body: $(head -c 240 /tmp/hemopt-ha-ping.json 2>/dev/null || true)"
         echo "[hemopt] HA ping err: $(head -c 240 /tmp/hemopt-ha-ping.err 2>/dev/null || true)"
+    else
+        # One-shot: if climate.*_thermostat still missing, restart HA so the
+        # freshly copied custom component + injected config entry load.
+        boot_marker="/data/.lk_arc_climate_bootstrapped_0_1_25"
+        if [[ ! -f $boot_marker ]]; then
+            climate_count="$(curl -fsS \
+                -H "Authorization: Bearer ${HEMOPT_HA_TOKEN}" \
+                "${HEMOPT_HA_URL%/}/api/states" 2>/dev/null \
+                | jq '[.[] | select(.entity_id|test("^climate\\.[0-9a-f]{2}(_[0-9a-f]{2}){5}_thermostat$"))] | length' \
+                2>/dev/null || echo 0)"
+            echo "[hemopt] LK MAC-climate entities nu: ${climate_count:-0}"
+            if [[ ${climate_count:-0} -lt 1 ]]; then
+                echo "[hemopt] ============================================================"
+                echo "[hemopt] Golvvärme saknar climate.*_thermostat (Entity not found)."
+                echo "[hemopt] Startar om Home Assistant EN gång så LK Arc Climate laddas."
+                echo "[hemopt] ============================================================"
+                touch "$boot_marker"
+                # Prefer Supervisor restart (hassio_api); fall back to HA service.
+                if [[ -n $_supervisor_token ]]; then
+                    curl -sS -X POST \
+                        -H "Authorization: Bearer ${_supervisor_token}" \
+                        -H "Content-Type: application/json" \
+                        http://supervisor/core/restart >/tmp/hemopt-ha-restart.json 2>/tmp/hemopt-ha-restart.err \
+                        && echo "[hemopt] Supervisor core/restart skickad" \
+                        || echo "[hemopt] Supervisor restart misslyckades: $(head -c 200 /tmp/hemopt-ha-restart.err 2>/dev/null || true)"
+                else
+                    curl -sS -X POST \
+                        -H "Authorization: Bearer ${HEMOPT_HA_TOKEN}" \
+                        -H "Content-Type: application/json" \
+                        "${HEMOPT_HA_URL%/}/api/services/homeassistant/restart" \
+                        -d '{}' >/tmp/hemopt-ha-restart.json 2>/tmp/hemopt-ha-restart.err \
+                        && echo "[hemopt] homeassistant.restart skickad" \
+                        || echo "[hemopt] HA restart misslyckades: $(head -c 200 /tmp/hemopt-ha-restart.err 2>/dev/null || true)"
+                fi
+            else
+                touch "$boot_marker"
+                echo "[hemopt] climate.*_thermostat finns redan — ingen HA-omstart behövs"
+            fi
+        fi
     fi
 else
     echo "[hemopt] Hoppar over HA-ping — ingen token."

@@ -284,6 +284,25 @@ class HomeAssistantClient:
             result["detail"] = f"{len(lk_climates)} climate.*_thermostat"
             return result
 
+        # Tell the user in the HA UI — Golvvärme "Entity not found" is the symptom.
+        try:
+            await self.call_service(
+                "persistent_notification",
+                "create",
+                {
+                    "notification_id": "hemopt_lk_arc_climate",
+                    "title": "Golvvärme: termostater saknas",
+                    "message": (
+                        "climate.*_thermostat finns inte (Entity not found på Golvvärme). "
+                        "hemopt installerar LK Arc Climate — **Restart Home Assistant** "
+                        "om du inte redan gjort det. Sensorerna fungerar; bara "
+                        "termostaterna saknas."
+                    ),
+                },
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("persistent_notification for LK Arc failed", exc_info=True)
+
         try:
             start = await self._http.post(
                 self._url("/api/config/config_entries/flow"),

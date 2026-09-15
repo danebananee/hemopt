@@ -18,6 +18,12 @@ views:
     sections:
       - type: grid
         cards:
+          - type: markdown
+            content: |
+              **Termostater = `climate.*_thermostat` (LK Arc Climate).**
+              Om korten nedan visar *Entity not found*: Update hemopt till **0.1.25+**,
+              Restart tillägget, vänta på att HA startar om (hemopt gör det en gång),
+              ladda om denna sida. Sensorerna i grafen/tabellen fungerar ändå.
           - type: heading
             heading: Bottenvåning
             icon: mdi:home-floor-0
