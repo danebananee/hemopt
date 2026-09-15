@@ -172,6 +172,7 @@ class MqttBridge:
                 {"icon": "mdi:clock-alert"},
             ),
             ("plan_status", "Planstatus", {"icon": "mdi:calendar-check"}),
+            ("guard_reason", "Effektvaktens skal", {"icon": "mdi:shield-search"}),
         ]
 
         for object_id, name, extra in sensors:

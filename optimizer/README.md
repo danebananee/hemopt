@@ -37,6 +37,11 @@ temperatur, låga får svaja och bär lastflytten.
 **Lär sig huset.** Tidskonstanten per rum, uppvärmningstakten och
 varmvattenvanorna identifieras ur Home Assistants historik.
 
+**Planerar mot vädret.** Utetemperaturen hämtas som timprognos från en
+weather-entitet. Utan prognos måste planeraren anta att det är lika varmt om
+36 timmar som just nu, vilket felbedömer varenda förvärmning inför ett
+väderomslag.
+
 ## Snabbstart
 
 ```bash
@@ -52,12 +57,16 @@ verkliga SE3-priser men ett simulerat hus, så inget behöver vara inkopplat.
 
 ### 1. Skapa konfigurationen
 
+`config.exempel.yaml` är redan ifylld för det här huset: IVT Rego 1000 via
+Husdata H66, och elva LK Arc-rum fördelade på två plan.
+
 ```bash
-uv run hemopt example-config > config.yaml
+cp config.exempel.yaml config.yaml
 ```
 
-Fyll i en [långlivad access-token](https://www.home-assistant.io/docs/authentication/#your-account-profile)
-och entitets-ID:n. Minsta uppsättning som behövs:
+Kvar att fylla i är en [långlivad access-token](https://www.home-assistant.io/docs/authentication/#your-account-profile)
+och MQTT-lösenordet. Vill du börja från tomt i stället ger
+`uv run hemopt example-config > config.yaml` en generisk mall.
 
 | Fält | Vad det är |
 | --- | --- |
@@ -67,8 +76,27 @@ och entitets-ID:n. Minsta uppsättning som behövs:
 | `heat_pump.power_entity` | Värmepumpens effekt |
 | `base_load.total_power_entity` | Husets totala effekt, för effekttoppar |
 | `hot_water.top_temperature_entity` | Varmvattenberedarens toppgivare |
+| `site.weather_entity` | Väderprognos för utetemperatur |
 
-### 2. Kontrollera modellerna innan du släpper in styrningen
+### 2. Kontrollera att entiteterna finns
+
+Entitets-ID:n som Home Assistant genererar ur enhetsnamn går inte att gissa
+utifrån. `doctor` läser hela din entitetslista och jämför mot konfigurationen:
+
+```bash
+uv run hemopt -c config.yaml doctor
+```
+
+```
+[  ok  ] Utetemperatur: sensor.h66_hpoutdoor = -4.2
+[ varn ] Badrum, termostat: climate.f7_d4_23_14_49_da finns inte i Home Assistant
+              menade du climate.f7_d4_23_14_49_da_thermostat ?
+```
+
+Rätta tills inga **FEL** återstår. Varningar går att leva med: ett rum utan
+termostat kan fortfarande läsas och planeras, det kan bara inte styras.
+
+### 3. Kontrollera modellerna innan du släpper in styrningen
 
 ```bash
 uv run hemopt -c config.yaml train
@@ -78,7 +106,7 @@ uv run hemopt -c config.yaml plan
 `train` skriver ut tidskonstanten per rum. Ett normalt hus landar på 40–150
 timmar. Rum som visar `default` har inte tillräckligt med historik än.
 
-### 3. Kör tjänsten
+### 4. Kör tjänsten
 
 ```bash
 uv run hemopt -c config.yaml serve --host 0.0.0.0 --port 47318
@@ -112,6 +140,34 @@ till mars. Vattenfall pausade breddinförandet efter regeringens besked i mars
 Sätt `enabled: false` om du inte har någon effektavgift än. Då optimeras bara
 mot spotpriset.
 
+### Effektvakten
+
+Planeraren arbetar på ett kvartsrutnät och räknar om var femtonde minut. Det är
+för långsamt för att fånga en ugn och en diskmaskin som startar samtidigt, så
+en separat vakt går varje minut mot den riktiga mätaren och svarar på en enda
+fråga: får värmepumpen fortsätta, givet vad klocktimmen redan hunnit banka in?
+
+Vakten agerar via EXT-ingången i stället för via börvärden, eftersom en
+termostat får ignorera ett börvärde men inte en extern ingång. Den släpper
+alltid taget när ett rum går under `min_room_temperature` — en dyr timme
+kostar några tior, ett kallt hus betydligt mer — och den håller kvar
+blockeringen tills det finns verklig marginal, så kompressorn inte pendlar
+kring tröskeln.
+
+```yaml
+ext_control:
+  enabled: true
+  block_heating_entity: climate.h66_hpext_control_port_1
+  max_block_minutes: 120
+  min_release_minutes: 15
+  min_room_temperature: 18.0
+```
+
+Avstängd som default. Vad EXT-portarna faktiskt gör bestäms i Rego 1000 under
+**Extern ingång 1** respektive **2**, och en aktiverad signal stoppar
+funktionen direkt. Kontrollera vad porten är inställd på innan du slår på
+detta.
+
 ## Home Assistant-entiteter
 
 Med MQTT påslaget dyker enheten **Kostnadsoptimering** upp via autodiscovery:
@@ -126,6 +182,7 @@ Med MQTT påslaget dyker enheten **Kostnadsoptimering** upp via autodiscovery:
 | `sensor.hemopt_inertia_<rum>` | Uppmätt tröghet i timmar |
 | `binary_sensor.hemopt_heating_blocked` | Planen vill inte köra kompressorn nu |
 | `binary_sensor.hemopt_peak_guard` | Effektvakten begränsar just nu |
+| `sensor.hemopt_guard_reason` | Varför vakten gör som den gör |
 | `switch.hemopt_control_enabled` | Släpper in styrningen |
 | `number.hemopt_priority_<rum>` | Rummets prioritet, 1–5 |
 

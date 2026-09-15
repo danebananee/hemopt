@@ -53,9 +53,22 @@ uv run hemopt --demo serve --port 47318
 ```
 
 Demoläget kör den riktiga optimeraren mot verkliga SE3-priser men ett simulerat
-hus, så du kan titta på den innan något kopplas in. Se
-[`optimizer/README.md`](optimizer/README.md) för skarp installation,
-effektavgiftsmodellen och hur den körs på en Raspberry Pi.
+hus, så du kan titta på den innan något kopplas in.
+
+För skarp drift finns `optimizer/config.exempel.yaml` redan ifylld för det här
+huset, med H66-entiteterna och alla elva LK Arc-rum. Kopiera den till
+`config.yaml`, fyll i token, och låt
+
+```bash
+uv run hemopt -c config.yaml doctor
+```
+
+kontrollera varje entitet mot din Home Assistant. Den föreslår rättningar för
+dem som inte stämmer, vilket är det enda praktiska sättet att få rätt på de
+entitets-ID:n som genereras ur enhetsnamn.
+
+Se [`optimizer/README.md`](optimizer/README.md) för effektavgiftsmodellen,
+effektvakten som styr via EXT-kabeln, och hur tjänsten körs på en Raspberry Pi.
 
 ## Installation
 
