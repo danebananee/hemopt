@@ -419,6 +419,46 @@ function renderPills() {
   }
 }
 
+function renderModelActions() {
+  const host = document.getElementById("model-body");
+  const subtitle = document.getElementById("model-subtitle");
+  if (!host) return;
+  host.textContent = "";
+  const actions = state.status?.model_actions || [];
+  const headlineText = state.status?.model_action;
+
+  if (headlineText) {
+    subtitle.textContent = headlineText;
+  } else {
+    subtitle.textContent = "Läsbara åtgärder just nu — inte bara grafer.";
+  }
+
+  if (!actions.length) {
+    host.appendChild(html("p", "empty", "Ingen förklaring ännu — väntar på plan."));
+    return;
+  }
+
+  const now = actions.filter((a) => a.when !== "soon");
+  const soon = actions.filter((a) => a.when === "soon");
+
+  for (const item of now) {
+    host.appendChild(modelActionCard(item));
+  }
+  if (soon.length) {
+    host.appendChild(html("h3", "model-soon-title", "Strax"));
+    for (const item of soon) {
+      host.appendChild(modelActionCard(item));
+    }
+  }
+}
+
+function modelActionCard(item) {
+  const card = html("div", `model-action kind-${item.kind || "info"}`);
+  card.appendChild(html("div", "model-action-title", item.title));
+  if (item.detail) card.appendChild(html("div", "muted model-action-detail", item.detail));
+  return card;
+}
+
 function renderSystems() {
   const host = document.getElementById("systems-body");
   if (!host) return;
@@ -1678,6 +1718,7 @@ function renderChrome() {
 function renderAll() {
   renderPills();
   renderKpis();
+  renderModelActions();
   renderSystems();
   renderChrome();
   renderPriceChart();

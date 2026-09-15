@@ -207,6 +207,47 @@ h2 {
   touch-action: none;
 }
 
+.model-actions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.model-action {
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+  background: var(--bg-input);
+}
+
+.model-action.kind-active {
+  border-left-color: var(--good);
+}
+
+.model-action.kind-warn {
+  border-left-color: var(--warm, #b45309);
+}
+
+.model-action.kind-tip {
+  border-left-color: var(--accent);
+}
+
+.model-action-title {
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.model-action-detail {
+  font-size: 0.9rem;
+}
+
+.model-soon-title {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
 .systems-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -574,6 +574,19 @@ class Config(BaseModel):
             data["site"]["price_area"] = area
         if contract := os.environ.get("HEMOPT_CONTRACT"):
             data["energy_price"]["contract"] = contract
+        for env_key, field_name in (
+            ("HEMOPT_SUPPLIER_MARKUP_ORE", "supplier_markup_ore"),
+            ("HEMOPT_CERTIFICATE_ORE", "certificate_ore"),
+            ("HEMOPT_BALANCING_ORE", "balancing_ore"),
+            ("HEMOPT_ENERGY_TAX_ORE", "energy_tax_ore"),
+        ):
+            raw = (os.environ.get(env_key) or "").strip()
+            if raw:
+                data["energy_price"][field_name] = float(raw)
+        if transfer := (os.environ.get("HEMOPT_TRANSFER_FEE_ORE") or "").strip():
+            value = float(transfer)
+            data["energy_price"]["transfer_fee_high_ore"] = value
+            data["energy_price"]["transfer_fee_normal_ore"] = value
 
         if "HEMOPT_PEAK_ENABLED" in os.environ:
             data["peak_tariff"]["enabled"] = os.environ["HEMOPT_PEAK_ENABLED"].lower() in {

@@ -125,6 +125,23 @@ Spotpriset hämtas från elprisetjustnu.se och kräver inte Home Assistant.
 
 **Effektregler** i panelen är skrivskyddad status. Ändra under Configuration.
 **Effekttoppar denna månad** visar tröskel, pågående timme och historik.
+## En fil att konfigurera
+
+All husbeskrivning samlas i **`/homeassistant/hemopt.yaml`**.
+
+1. Kopiera `hemopt/hemopt.init.yaml` från GitHub-repot
+2. Klistra in som `/homeassistant/hemopt.yaml` (File editor / Samba)
+3. Fyll i rader märkta KONTROLLERA
+4. **Restart** tillägget
+
+| Var | Vad |
+| --- | --- |
+| **Configuration** (tillägget) | Elområde, avräkning, påslag/skatt/överföring, effektavgift, elmätare, MQTT, HA-token |
+| **hemopt.yaml** | Rum, VP, varmvatten, braskamin, säkringsabonnemang, detaljerade nätpriser |
+
+Under **Vad gör modellen** i panelen (och `sensor.hemopt_model_action` i HA)
+syns meningar som «Laddar varmvatten inför dyrare period».
+
 **Besparingsåtgärder** föreslår byte av avräkning och eventuell sänkning av
 huvudsäkring (25 → 20 → 16 A) när det finns tillräckligt med mätdata — annars
 står det att mer data behövs, och om du redan ligger rätt syns det tydligt.

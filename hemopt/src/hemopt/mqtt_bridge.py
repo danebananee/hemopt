@@ -171,6 +171,16 @@ class MqttBridge:
                 "Dyraste timmen",
                 {"icon": "mdi:clock-alert"},
             ),
+            (
+                "model_action",
+                "Vad gor modellen",
+                {"icon": "mdi:text-box-outline"},
+            ),
+            (
+                "model_actions",
+                "Modellens atgarder",
+                {"icon": "mdi:format-list-bulleted"},
+            ),
             ("plan_status", "Planstatus", {"icon": "mdi:calendar-check"}),
             ("guard_reason", "Effektvaktens skal", {"icon": "mdi:shield-search"}),
             (

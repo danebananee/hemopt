@@ -11,6 +11,23 @@ configuration:
       yields no energy saving from load shifting — pick hourly or quarterly
       for that. The add-on shows what the other forms would have cost with
       and without control.
+  supplier_markup_ore:
+    name: Supplier markup (öre/kWh)
+    description: Fixed retail markup excluding VAT.
+  certificate_ore:
+    name: Certificates (öre/kWh)
+    description: Electricity certificate surcharge excluding VAT.
+  balancing_ore:
+    name: Balancing cost (öre/kWh)
+    description: Balancing / variable retail costs excluding VAT.
+  energy_tax_ore:
+    name: Energy tax (öre/kWh)
+    description: Energy tax from your invoice excluding VAT.
+  transfer_fee_ore:
+    name: Transfer fee (öre/kWh)
+    description: >-
+      Grid transfer fee for a single-rate tariff. For time-of-use tariffs set
+      high/normal in hemopt.yaml instead.
   log_level:
     name: Log level
     description: Raise to debug when something looks wrong, then set it back.

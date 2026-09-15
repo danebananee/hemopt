@@ -37,6 +37,11 @@ export HEMOPT_DATA=/data
 export HEMOPT_LOG_LEVEL="$(read_option log_level info)"
 export HEMOPT_PRICE_AREA="$(read_option price_area SE3)"
 export HEMOPT_CONTRACT="$(read_option contract hourly)"
+export HEMOPT_SUPPLIER_MARKUP_ORE="$(read_option supplier_markup_ore "")"
+export HEMOPT_CERTIFICATE_ORE="$(read_option certificate_ore "")"
+export HEMOPT_BALANCING_ORE="$(read_option balancing_ore "")"
+export HEMOPT_ENERGY_TAX_ORE="$(read_option energy_tax_ore "")"
+export HEMOPT_TRANSFER_FEE_ORE="$(read_option transfer_fee_ore "")"
 
 # Peak tariff — set under the add-on's Configuration tab, not the dashboard.
 export HEMOPT_PEAK_ENABLED="$(read_option peak_enabled true)"

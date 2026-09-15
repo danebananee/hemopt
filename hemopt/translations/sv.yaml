@@ -9,6 +9,23 @@ configuration:
       Hur ditt spotavtal avräknas. Dygnsmedel (rörligt dagspris) ger ingen
       energivinst av lastflytt — välj tim eller kvart för det. Tillägget
       visar vad de andra formerna hade kostat med och utan styrning.
+  supplier_markup_ore:
+    name: Elhandlarpåslag (öre/kWh)
+    description: Fast påslag från elhandelsavtalet, exklusive moms.
+  certificate_ore:
+    name: Elcertifikat (öre/kWh)
+    description: Påslag för elcertifikat, exklusive moms.
+  balancing_ore:
+    name: Balanskostnad (öre/kWh)
+    description: Rörliga kostnader / balansansvar, exklusive moms.
+  energy_tax_ore:
+    name: Energiskatt (öre/kWh)
+    description: Energiskatt enligt fakturan, exklusive moms.
+  transfer_fee_ore:
+    name: Överföringsavgift (öre/kWh)
+    description: >-
+      Nätets överföringsavgift vid enkeltariff (samma dygnet runt). Vid
+      tidstariff sätt high/normal i hemopt.yaml i stället.
   log_level:
     name: Loggnivå
     description: Höj till debug när något ser fel ut, sänk sedan tillbaka.

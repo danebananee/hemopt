@@ -1,5 +1,5 @@
 name: Kostnadsoptimering (hemopt)
-version: "0.1.16"
+version: "0.1.17"
 slug: hemopt
 description: >-
   Flyttar uppvarmning och varmvatten till billiga timmar, kapar effekttoppar och
@@ -27,6 +27,11 @@ map:
 options:
   price_area: SE3
   contract: daily
+  supplier_markup_ore: 7.0
+  certificate_ore: 1.4
+  balancing_ore: 5.76
+  energy_tax_ore: 36.0
+  transfer_fee_ore: 35.6
   log_level: info
   peak_enabled: true
   peak_n_peaks: 5
@@ -46,6 +51,11 @@ options:
 schema:
   price_area: list(SE1|SE2|SE3|SE4)
   contract: list(daily|hourly|quarterly)
+  supplier_markup_ore: float(0,200)?
+  certificate_ore: float(0,100)?
+  balancing_ore: float(0,100)?
+  energy_tax_ore: float(0,200)?
+  transfer_fee_ore: float(0,200)?
   log_level: list(debug|info|warning|error)
   peak_enabled: bool
   peak_n_peaks: int(1,10)

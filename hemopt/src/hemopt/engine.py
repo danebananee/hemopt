@@ -19,6 +19,7 @@ import httpx
 from . import baseload
 from .advice import AdviceReport, build_advice, samples_from_hourly
 from .config import Config
+from .explain import explain_plan, explain_upcoming, headline
 from .guard import GuardDecision, PeakGuard
 from .ha import HomeAssistantClient, parse_numeric, resample_forecast
 from .hotwater import TankSample, UsageProfile, build_profile, estimate_draws
@@ -853,6 +854,7 @@ class Engine:
         hourly = _hourly_prices(plan)
         cheapest = min(hourly, key=lambda item: item[1]) if hourly else None
         dearest = max(hourly, key=lambda item: item[1]) if hourly else None
+        actions = self.model_actions(plan, now)
 
         payload: dict[str, Any] = {
             "spot_price": round(plan.price_sek_per_kwh[index], 4),
@@ -871,6 +873,8 @@ class Engine:
             "cheapest_hour": cheapest[0].strftime("%H:%M") if cheapest else "",
             "most_expensive_hour": dearest[0].strftime("%H:%M") if dearest else "",
             "plan_status": plan.status,
+            "model_action": headline(actions),
+            "model_actions": " · ".join(a.title for a in actions[:3]),
             "heating_blocked": _json_bool(blocked[index]),
             "preheating": _json_bool(
                 any(room.temperature[index] > room.comfort_max + 0.05 for room in plan.rooms)
@@ -895,6 +899,23 @@ class Engine:
             )
 
         return payload
+
+    def model_actions(self, plan: Plan | None = None, now: datetime | None = None) -> list:
+        """Narrative of what the optimiser is doing at `now`."""
+        plan = plan if plan is not None else self.plan
+        now = now or self._now()
+        if plan is None:
+            return explain_plan(None, 0, control_enabled=self.status.control_enabled)
+        index = plan.step_at(now)
+        now_actions = explain_plan(
+            plan,
+            index,
+            control_enabled=self.status.control_enabled,
+            guard_blocking=self.guard_decision.block,
+            guard_reason=self.guard_decision.reason,
+            wood_stove=self.wood_stove,
+        )
+        return now_actions + explain_upcoming(plan, index)
 
     def _record_error(self, message: str) -> None:
         _LOGGER.warning(message)

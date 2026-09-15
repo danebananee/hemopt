@@ -1,12 +1,37 @@
-# hemopt - konfiguration for huset med IVT Rego 1000, Husdata H66 och LK Arc
+# =============================================================================
+# hemopt.init.yaml — DIN enda husfil
+# =============================================================================
 #
-# Kopiera till config.yaml och fyll i token. Kor sedan
+# Kopiera till Home Assistant som:
 #
-#     uv run hemopt -c config.yaml doctor
+#     /homeassistant/hemopt.yaml
+#     (samma mapp som configuration.yaml)
 #
-# som kontrollerar att varenda entitet nedan finns i Home Assistant och
-# foreslar rattningar for dem som inte gor det. Gissade entiteter ar markta
-# med KONTROLLERA.
+# Sedan: Settings → Add-ons → Kostnadsoptimering → Restart
+#
+# Vad du andrar HAR:
+#   Configuration-fliken i tillagget  → elomrade, avrakning (daily/hourly/...),
+#                                       effektavgift, elmatare, MQTT, HA-token
+#   DENNA FIL                         → elavtalets paslag, rum, VP, varmvatten,
+#                                       braskamin, sakringsabonnemang, prioritet
+#
+# Du behover INTE koda. Andra bara varden. Rader markta KONTROLLERA maste
+# matcha entiteter under Developer tools → States.
+#
+# Braskamin — snabbstart:
+#   1. Satta wood_stove.enabled: true
+#   2. temperature_entity = givare pa/nara kaminen (eller binary_entity)
+#   3. room_keys = rum som kanner brasans varme (t.ex. vardagsrum, salong)
+#   4. Eldning 3–5 sessioner (gärna kalla kvallar) med styrning AV
+#   5. Panel → Braskamin visar K/h-bidrag och tandrekommendationer
+#
+# Elavtal — andringar utan kod:
+#   energy_price.contract: daily | hourly | quarterly | monthly
+#   supplier_markup_ore, certificate_ore, balancing_ore, energy_tax_ore
+#   transfer_fee_* och grid_subscription fran natfakturan
+#   advice.grid_tariffs for 16/20/25 A (sakringsrad)
+#
+# =============================================================================
 
 site:
   price_area: SE3

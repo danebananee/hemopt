@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .config import Config
 from .engine import Engine, plan_to_dict
+from .explain import headline
 from .ha import HomeAssistantClient
 from .meters import pick_default_total_power, suggest_total_power_entities
 from .panel_routes import register_panel_routes
@@ -72,7 +73,7 @@ def create_app(engine: Engine, run_loops: bool = True) -> FastAPI:
     app = FastAPI(
         title="hemopt",
         description="Cost optimisation for heating, hot water and peak power",
-        version="0.1.16",
+        version="0.1.17",
         lifespan=lifespan,
     )
 
@@ -385,6 +386,7 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
 
     if plan is not None:
         index = plan.step_at(now)
+        actions = engine.model_actions(plan, now)
         payload |= {
             "current_price_sek": round(plan.price_sek_per_kwh[index], 4),
             "planned_power_kw": plan.heat_pump_kw[index],
@@ -400,5 +402,7 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
             "plan_status": plan.status,
             "horizon_hours": round(len(plan.times) * plan.step_minutes / 60.0, 1),
             "notes": plan.notes,
+            "model_actions": [a.as_dict() for a in actions],
+            "model_action": headline(actions),
         }
     return payload
