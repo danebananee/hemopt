@@ -14,11 +14,23 @@ bekräfta MQTT-integrationen som dyker upp under *Discovered*.
 
 ## Installera
 
-Två vägar. Den lokala fungerar direkt och kräver inget publikt repo. Den andra
-ger dig en **Update**-knapp, men förutsätter att koden ligger i ett Git-repo
-som din Home Assistant kan klona utan inloggning.
+### A. Från GitHub (rekommenderat)
 
-### A. Lokalt tillägg
+Repot måste vara **publikt**, eftersom Home Assistant klonar det anonymt. I
+gengäld dyker nya versioner upp som en **Update**-knapp på tilläggets sida.
+
+1. **Settings → Add-ons → Add-on Store**
+2. Trepunktsmenyn uppe till höger → **Repositories**
+3. Klistra in `https://github.com/DITT-GITHUB-NAMN/hemopt`, **Add**, **Close**
+4. Ladda om sidan. Under rubriken med repots namn finns
+   **Kostnadsoptimering (hemopt)**
+
+Home Assistant bygger avbilden på din Raspberry Pi första gången, vilket tar
+några minuter. Det är normalt att **Install** står och snurrar under tiden.
+
+### B. Lokalt tillägg
+
+Går utan GitHub, men då finns ingen **Update**-knapp.
 
 Home Assistant letar efter tillägg i `/addons/<namn>/config.yaml`. Lägg mappen
 `hemopt/` där, alltså som `/addons/hemopt/`, så dyker det upp av sig självt.
@@ -27,25 +39,8 @@ Filerna får du dit med **Samba share** eller **Studio Code Server**, båda finn
 i Add-on Store. Kopiera hela `hemopt/`-mappen, inte repots rot.
 
 Gå sedan till **Settings → Add-ons → Add-on Store**, tryck trepunktsmenyn och
-**Check for updates**. Tillägget hamnar under **Local add-ons**.
-
-Uppdatering görs genom att kopiera in mappen igen och trycka **Rebuild**.
-
-### B. Som add-on-databas
-
-Kräver att repot är publikt, eftersom Home Assistant klonar det anonymt.
-
-1. **Settings → Add-ons → Add-on Store**
-2. Trepunktsmenyn uppe till höger → **Repositories**
-3. Klistra in repots URL, **Add**, sedan **Close**
-4. Ladda om sidan. Under rubriken med repots namn finns
-   **Kostnadsoptimering (hemopt)**
-
-Uppdateringar dyker sedan upp som en **Update**-knapp på tilläggets sida.
-
-Byter du till den här vägen: uppdatera `url` i `repository.json` och i
-`hemopt/config.yaml` till repots faktiska adress. De pekar just nu på en
-platshållare.
+**Check for updates**. Tillägget hamnar under **Local add-ons**. Uppdatering
+görs genom att kopiera in mappen igen och trycka **Rebuild**.
 
 ### Sedan, oavsett väg
 

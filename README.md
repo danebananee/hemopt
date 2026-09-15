@@ -50,12 +50,20 @@ varmvattenvanor, och skriver tillbaka börvärden till termostaterna.
 
 ### Installera i Home Assistant
 
-Kopiera mappen `hemopt/` till `/addons/hemopt/` på din Home Assistant, till
-exempel med **Samba share** eller **Studio Code Server**. Tillägget dyker upp
-under **Local add-ons** i Add-on Store.
+Det här repot är samtidigt en add-on-databas. Gå till **Settings → Add-ons →
+Add-on Store**, trepunktsmenyn → **Repositories**, och lägg till
 
-Ligger koden i ett publikt Git-repo fungerar repot också som add-on-databas,
-och då kommer uppdateringar som en **Update**-knapp i stället.
+```
+https://github.com/DITT-GITHUB-NAMN/hemopt
+```
+
+Då dyker **Kostnadsoptimering (hemopt)** upp i butiken, och nya versioner
+kommer som en **Update**-knapp. Repot måste vara publikt: Home Assistant klonar
+det utan inloggning.
+
+Utan GitHub går det också att kopiera mappen `hemopt/` till `/addons/hemopt/`
+med **Samba share** eller **Studio Code Server**, men då sköts uppdateringar
+för hand.
 
 Ingen token och inget MQTT-lösenord behövs: Supervisorn ger tillägget båda.
 Se [`hemopt/DOCS.md`](hemopt/DOCS.md) för hela gången.
@@ -85,6 +93,23 @@ entitets-ID:n som genereras ur enhetsnamn.
 
 Se [`hemopt/README.md`](hemopt/README.md) för effektavgiftsmodellen,
 effektvakten som styr via EXT-kabeln, och hur tjänsten körs på en Raspberry Pi.
+
+### Publicera repot på GitHub
+
+Skapa ett tomt **publikt** repo som heter `hemopt` på GitHub, utan README eller
+licens, och kör sedan i den här mappen:
+
+```bash
+./scripts/set-repo-url.sh <ditt-github-namn>
+git add -A && git commit -m "Peka manifesten mot GitHub-repot"
+git remote add github https://github.com/<ditt-github-namn>/hemopt.git
+git push -u github main
+```
+
+`set-repo-url.sh` skriver in adressen i `repository.json`, `hemopt/config.yaml`
+och dokumentationen. Home Assistant vägrar lägga till en databas vars
+`repository.json` pekar på något som inte går att nå, så steget måste göras
+innan repot läggs till i Add-on Store.
 
 ## Installation
 

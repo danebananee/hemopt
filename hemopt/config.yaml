@@ -4,8 +4,8 @@ slug: hemopt
 description: >-
   Flyttar uppvarmning och varmvatten till billiga timmar, kapar effekttoppar och
   jamfor vad de olika elavtalen skulle ha kostat.
-# Platshallare. Byt till repots adress om du installerar via add-on-databas.
-url: https://example.invalid/andra-till-ditt-repo
+# Kors av scripts/set-repo-url.sh nar repot har fatt sin riktiga adress.
+url: https://github.com/DITT-GITHUB-NAMN/hemopt
 # 32-bit ARM is left out on purpose: numpy publishes armv7 wheels but HiGHS
 # does not, so an armv7 install would try to compile the solver on the device.
 arch:
