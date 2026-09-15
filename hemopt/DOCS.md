@@ -87,6 +87,18 @@ tillägget den automatiskt första gången det startar.
 Entitets-id för HomeWizard P1 är oftast `sensor.p1_meter_active_power`.
 Kontrollera under **Developer tools → States** om namnet skiljer sig.
 
+## Effekttoppar och elavtal
+
+Under **Regler för effekttoppar** slår du av/på minimeringen och skriver in vad
+elnätsavtalet kräver: antal toppar som snittas, pris per kW, vilka timmar och
+månader som räknas, och om bara vardagar gäller.
+
+**Effekttoppar denna månad** visar tröskeln, pågående timme, de räknade
+topparna och historik från tidigare månader. **Användning och besparing**
+ritar timförbrukningen och jämför planerad kostnad mot utan styrning.
+**Jämför elavtal** visar vad samma uppmätta last hade kostat under andra
+avräkningsformer (månad/dygn/timme/kvart).
+
 ## Innan du litar på styrningen
 
 Tillägget styr ingenting förrän du slår på **Styr värmen** i panelen. Låt det
