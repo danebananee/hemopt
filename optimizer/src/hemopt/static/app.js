@@ -373,6 +373,7 @@ function renderPills() {
   const pills = [
     ["Home Assistant", status.home_assistant_online],
     ["Spotpris", status.prices_available],
+    ["Väderprognos", status.forecast_available],
     ["MQTT", status.mqtt_online],
   ];
   for (const [label, ok] of pills) {

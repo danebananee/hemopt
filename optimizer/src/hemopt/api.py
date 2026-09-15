@@ -218,6 +218,7 @@ def _status_payload(engine: Engine) -> dict[str, Any]:
         "home_assistant_online": status.home_assistant_online,
         "mqtt_online": status.mqtt_online,
         "prices_available": status.prices_available,
+        "forecast_available": status.forecast_available,
         "control_enabled": status.control_enabled,
         "last_sample": status.last_sample.isoformat() if status.last_sample else None,
         "last_plan": status.last_plan.isoformat() if status.last_plan else None,
