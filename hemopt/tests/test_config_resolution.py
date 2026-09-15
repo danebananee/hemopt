@@ -187,6 +187,24 @@ def test_addon_mode_disables_yaml_mqtt_without_supervisor_broker(monkeypatch, tm
     assert Config.resolve(path).mqtt.enabled is False
 
 
+def test_priority_one_holds_temperature_hardest():
+    from hemopt.config import RoomConfig
+
+    assert RoomConfig(
+        key="a", name="A", priority=1, temperature_entity="s.a"
+    ).comfort_weight > RoomConfig(
+        key="b", name="B", priority=3, temperature_entity="s.b"
+    ).comfort_weight
+
+
+def test_addon_seeds_bundled_rooms_when_empty(monkeypatch, isolated_data):
+    monkeypatch.setenv("HEMOPT_ADDON", "1")
+    config = Config.resolve()
+    assert len(config.rooms) >= 5
+    assert all(room.priority == 1 for room in config.rooms)
+    assert (isolated_data / "profile.json").exists()
+
+
 def test_house_yaml_is_preferred_over_the_saved_profile(isolated_data):
     Config.model_validate({"site": {"price_area": "SE4"}}).save_profile()
     yaml_path = isolated_data / "hemopt.yaml"

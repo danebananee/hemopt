@@ -97,7 +97,8 @@ class Engine:
             self.models[room.key] = stored or ThermalModel.default()
             priority = self.store.setting(f"priority_{room.key}")
             if isinstance(priority, int) and 1 <= priority <= 5:
-                room.priority = min(priority, 3)
+                # Legacy 4–5 meant "hold"; that is priority 1 on the new scale.
+                room.priority = 1 if priority >= 4 else min(priority, 3)
 
         profile = self.store.hot_water_profile()
         if profile is not None:

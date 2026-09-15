@@ -1049,8 +1049,9 @@ function renderRooms() {
       html(
         "p",
         "muted",
-        "Prioritet här: 3 = håll temperaturen, 1 = får svaja och bär lastflytten. " +
-          "Utan rum blir det ingen värmeplan.",
+        "Prioritet här: 1 = håll temperaturen (högst), 3 = får svaja och bär lastflytten. " +
+          "Utan rum blir det ingen värmeplan. Saknas rum efter omstart: kolla Log, " +
+          "annars skapas de automatiskt från husexemplet första gången.",
       ),
     );
     host.appendChild(box);
@@ -1096,7 +1097,7 @@ function renderRooms() {
     slider.max = "3";
     slider.step = "1";
     slider.value = String(Math.min(3, Math.max(1, room.priority)));
-    const labels = { 1: "1 · får svaja", 2: "2 · mellan", 3: "3 · håll temp" };
+    const labels = { 1: "1 · håll temp", 2: "2 · mellan", 3: "3 · får svaja" };
     const valueLabel = html(
       "span",
       "priority-value",

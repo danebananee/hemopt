@@ -63,6 +63,60 @@ def house_config_candidates() -> list[Path]:
     ]
 
 
+def bundled_house_example() -> Path | None:
+    """Packaged example house (rooms, heat pump, …) shipped with the add-on."""
+    candidates = [
+        Path("/opt/hemopt/config.exempel.yaml"),
+        Path(__file__).resolve().parents[2] / "config.exempel.yaml",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+def seed_default_house(config: Config) -> Config:
+    """Install the bundled house description when no rooms are configured yet."""
+    example = bundled_house_example()
+    if example is None:
+        return config
+
+    seeded = Config.load(example)
+    data = config.model_dump(mode="json")
+    example_data = seeded.model_dump(mode="json")
+    data["rooms"] = example_data["rooms"]
+    for key in ("heat_pump", "hot_water", "ext_control", "energy_price", "advice"):
+        data[key] = example_data[key]
+    if not data["base_load"].get("total_power_entity"):
+        data["base_load"] = example_data["base_load"]
+    if not data["site"].get("weather_entity"):
+        data["site"]["weather_entity"] = example_data["site"].get("weather_entity")
+    if not data["site"].get("main_fuse_amps"):
+        data["site"]["main_fuse_amps"] = example_data["site"].get("main_fuse_amps")
+
+    merged = Config.model_validate(data).with_environment()
+    for room in merged.rooms:
+        room.priority = 1
+
+    merged.save_profile()
+    for dest in house_config_candidates():
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            # Keep credentials out of the YAML the user may edit.
+            payload = merged.model_dump(mode="json")
+            payload["home_assistant"]["token"] = ""
+            payload["mqtt"]["username"] = None
+            payload["mqtt"]["password"] = None
+            dest.write_text(
+                yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            break
+        except OSError:
+            continue
+    return merged
+
+
 class SiteConfig(BaseModel):
     price_area: PriceArea = "SE3"
     timezone: str = "Europe/Stockholm"
@@ -242,7 +296,7 @@ class RoomConfig(BaseModel):
     key: str
     name: str
     floor: str = ""
-    priority: int = Field(default=2, ge=1, le=3)
+    priority: int = Field(default=1, ge=1, le=3)
     temperature_entity: str
     humidity_entity: str | None = None
     climate_entity: str | None = None
@@ -257,26 +311,29 @@ class RoomConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _clamp_legacy_priority(cls, data: object) -> object:
-        """Older configs used 1–5; map 4–5 down to 3."""
+        """Older configs used 1–5; map 4–5 down to 1 (hold temp)."""
         if isinstance(data, dict) and "priority" in data:
             try:
                 value = int(data["priority"])
             except (TypeError, ValueError):
                 return data
-            if value > 3:
-                data = {**data, "priority": 3}
+            # Legacy scale had 5 = hold; new scale has 1 = hold.
+            if value >= 4:
+                data = {**data, "priority": 1}
             elif value < 1:
                 data = {**data, "priority": 1}
+            elif value > 3:
+                data = {**data, "priority": 3}
         return data
 
     @property
     def comfort_weight(self) -> float:
         """SEK charged per degree-hour outside the comfort band.
 
-        Priority 3 is expensive enough that the solver will not trade the room
-        away for spot-price savings; priority 1 is the first to coast.
+        Priority 1 is expensive enough that the solver will not trade the room
+        away for spot-price savings; priority 3 is the first to coast.
         """
-        return {1: 1.0, 2: 8.0, 3: 40.0}[self.priority]
+        return {1: 40.0, 2: 8.0, 3: 1.0}[self.priority]
 
 
 class HotWaterConfig(BaseModel):
@@ -459,7 +516,12 @@ class Config(BaseModel):
             if config is None:
                 config = cls()
 
-        return config.with_environment()
+        config = config.with_environment()
+        # Under the add-on, seed the known house layout once so the panel is not
+        # stuck on "inga rum" until the user hand-writes YAML.
+        if not config.rooms and os.environ.get("HEMOPT_ADDON") == "1":
+            config = seed_default_house(config)
+        return config
 
     def with_environment(self) -> Config:
         """Overlay the environment on top of this config.

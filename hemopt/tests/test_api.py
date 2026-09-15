@@ -104,11 +104,11 @@ async def test_plan_stays_under_the_peak_threshold(client):
 async def test_priority_change_reshapes_the_plan(client):
     http, engine = client
 
-    await http.post("/api/rooms/entre/priority", json={"priority": 1})
+    await http.post("/api/rooms/entre/priority", json={"priority": 3})
     low = next(r for r in engine.plan.rooms if r.key == "entre")
     low_average = sum(low.temperature) / len(low.temperature)
 
-    await http.post("/api/rooms/entre/priority", json={"priority": 3})
+    await http.post("/api/rooms/entre/priority", json={"priority": 1})
     high = next(r for r in engine.plan.rooms if r.key == "entre")
     high_average = sum(high.temperature) / len(high.temperature)
 

@@ -152,7 +152,7 @@ optimiser:
 # ---------------------------------------------------------------------------
 # Rum.
 #
-# priority 3 = hall temperaturen, 1 = far svaja och bar lastflytten.
+# priority 1 = hall temperaturen (hogst), 3 = far svaja och bar lastflytten.
 # heat_share ar rummets andel av varmeeffekten, ungefar proportionell mot
 # golvytan. Bara forhallandet mellan rummen spelar roll.
 #
@@ -165,7 +165,7 @@ rooms:
   - key: vardagsrum
     name: Vardagsrum
     floor: Overvaning
-    priority: 3
+    priority: 1
     temperature_entity: sensor.fa_6a_ee_c8_9a_63_temperature
     humidity_entity: sensor.fa_6a_ee_c8_9a_63_humidity
     climate_entity: climate.fa_6a_ee_c8_9a_63      # KONTROLLERA
@@ -176,7 +176,7 @@ rooms:
   - key: badrum
     name: Badrum
     floor: Overvaning
-    priority: 3
+    priority: 1
     temperature_entity: sensor.f7_d4_23_14_49_da_temperature
     humidity_entity: sensor.f7_d4_23_14_49_da_humidity
     climate_entity: climate.f7_d4_23_14_49_da      # KONTROLLERA
@@ -187,7 +187,7 @@ rooms:
   - key: rios_rum
     name: Rios rum
     floor: Overvaning
-    priority: 3
+    priority: 1
     temperature_entity: sensor.e6_5e_d9_54_a8_e7_temperature
     humidity_entity: sensor.e6_5e_d9_54_a8_e7_humidity
     climate_entity: climate.e6_5e_d9_54_a8_e7      # KONTROLLERA
@@ -198,7 +198,7 @@ rooms:
   - key: sovrum
     name: Sovrum
     floor: Overvaning
-    priority: 3
+    priority: 1
     temperature_entity: sensor.c8_1b_04_e0_7e_90_temperature
     humidity_entity: sensor.c8_1b_04_e0_7e_90_humidity
     climate_entity: climate.c8_1b_04_e0_7e_90      # KONTROLLERA
@@ -209,7 +209,7 @@ rooms:
   - key: kontor
     name: Kontor
     floor: Overvaning
-    priority: 3
+    priority: 1
     temperature_entity: sensor.d0_f5_31_05_49_9d_temperature
     humidity_entity: sensor.d0_f5_31_05_49_9d_humidity
     climate_entity: climate.d0_f5_31_05_49_9d      # KONTROLLERA
@@ -220,7 +220,7 @@ rooms:
   - key: pysselrum
     name: Pysselrum
     floor: Overvaning
-    priority: 2
+    priority: 1
     temperature_entity: sensor.e3_09_14_3f_f0_f0_temperature
     humidity_entity: sensor.e3_09_14_3f_f0_f0_humidity
     climate_entity: climate.e3_09_14_3f_f0_f0      # KONTROLLERA
@@ -243,7 +243,7 @@ rooms:
   - key: salong
     name: Salong
     floor: Bottenvaning
-    priority: 3
+    priority: 1
     temperature_entity: sensor.e9_bd_23_4a_e9_a8_temperature
     humidity_entity: sensor.e9_bd_23_4a_e9_a8_humidity
     climate_entity: climate.e9_bd_23_4a_e9_a8      # KONTROLLERA
@@ -254,7 +254,7 @@ rooms:
   - key: lekrum
     name: Lekrum
     floor: Bottenvaning
-    priority: 3
+    priority: 1
     temperature_entity: sensor.ce_9f_90_cd_bf_74_temperature
     humidity_entity: sensor.ce_9f_90_cd_bf_74_humidity
     climate_entity: climate.ce_9f_90_cd_bf_74      # KONTROLLERA

@@ -150,7 +150,7 @@ def test_preheating_happens_before_the_spike():
 
 
 def test_high_priority_room_is_protected():
-    problem = build_problem(priorities={"vardagsrum": 3, "garage": 1})
+    problem = build_problem(priorities={"vardagsrum": 1, "garage": 3})
     plan = solve(problem)
 
     protected = next(r for r in plan.rooms if r.key == "vardagsrum")

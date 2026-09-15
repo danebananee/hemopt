@@ -30,15 +30,15 @@ from .storage import Store
 from .thermal import ThermalModel
 
 DEMO_ROOMS = [
-    ("vardagsrum", "Vardagsrum", "Övervåning", 3, 21.0, 22.5, 2.2),
-    ("sovrum", "Sovrum", "Övervåning", 3, 19.0, 20.5, 1.4),
-    ("badrum", "Badrum", "Övervåning", 3, 22.0, 23.5, 1.0),
+    ("vardagsrum", "Vardagsrum", "Övervåning", 1, 21.0, 22.5, 2.2),
+    ("sovrum", "Sovrum", "Övervåning", 1, 19.0, 20.5, 1.4),
+    ("badrum", "Badrum", "Övervåning", 1, 22.0, 23.5, 1.0),
     ("kontor", "Kontor", "Övervåning", 2, 20.0, 22.0, 1.2),
     ("pysselrum", "Pysselrum", "Övervåning", 2, 19.0, 21.5, 1.0),
-    ("salong", "Salong", "Bottenvåning", 2, 20.5, 22.0, 1.6),
+    ("salong", "Salong", "Bottenvåning", 1, 20.5, 22.0, 1.6),
     ("lekrum", "Lekrum", "Bottenvåning", 2, 20.0, 22.0, 1.3),
-    ("entre", "Entré", "Bottenvåning", 1, 18.0, 21.0, 0.9),
-    ("tvattstuga", "Tvättstuga", "Bottenvåning", 1, 18.0, 21.0, 0.8),
+    ("entre", "Entré", "Bottenvåning", 3, 18.0, 21.0, 0.9),
+    ("tvattstuga", "Tvättstuga", "Bottenvåning", 3, 18.0, 21.0, 0.8),
 ]
 
 

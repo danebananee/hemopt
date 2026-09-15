@@ -21,6 +21,7 @@ RUN apt-get update \
 # reachable. That is why the Python project lives here rather than beside it.
 COPY pyproject.toml /opt/hemopt/pyproject.toml
 COPY README.md /opt/hemopt/README.md
+COPY config.exempel.yaml /opt/hemopt/config.exempel.yaml
 COPY src /opt/hemopt/src
 
 RUN pip install --no-cache-dir --upgrade pip \
