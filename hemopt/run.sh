@@ -109,6 +109,28 @@ PY
 
 install_lk_arc_climate
 
+# Ship the Golvvärme dashboard YAML into HA config so the user can point a
+# Lovelace dashboard at it (or replace an old copy that still shows Entity not found).
+install_golvvarme_dashboard() {
+    local src="/opt/hemopt/bundled/dashboards/golvvarme.yaml"
+    local dest_dir="/homeassistant/dashboards"
+    local dest="$dest_dir/golvvarme.yaml"
+
+    if [[ ! -d /homeassistant ]]; then
+        return
+    fi
+    if [[ ! -f $src ]]; then
+        echo "[hemopt] Bundlad golvvarme-dashboard saknas ($src)"
+        return
+    fi
+    mkdir -p "$dest_dir"
+    cp -a "$src" "$dest"
+    echo "[hemopt] Dashboard skriven till $dest"
+    echo "[hemopt]   Settings → Dashboards → lägg till / ersätt med dashboards/golvvarme.yaml"
+}
+
+install_golvvarme_dashboard
+
 export HEMOPT_ADDON=1
 export HEMOPT_DATA=/data
 export HEMOPT_LOG_LEVEL="$(read_option log_level info)"
@@ -173,7 +195,7 @@ if [[ -n ${HEMOPT_HA_TOKEN:-} ]]; then
     else
         # One-shot: if climate.*_thermostat still missing, restart HA so the
         # freshly copied custom component + injected config entry load.
-        boot_marker="/data/.lk_arc_climate_bootstrapped_0_1_25"
+        boot_marker="/data/.lk_arc_climate_bootstrapped_0_1_27"
         if [[ ! -f $boot_marker ]]; then
             climate_count="$(curl -fsS \
                 -H "Authorization: Bearer ${HEMOPT_HA_TOKEN}" \

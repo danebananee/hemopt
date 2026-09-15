@@ -51,6 +51,8 @@ def _load_climate_helpers():
     ha.helpers.entity.DeviceInfo = dict
     ha.helpers.entity_platform = type(sys)("homeassistant.helpers.entity_platform")
     ha.helpers.entity_platform.AddEntitiesCallback = object
+    ha.helpers.entity_registry = type(sys)("homeassistant.helpers.entity_registry")
+    ha.helpers.entity_registry.async_get = lambda hass: None
     ha.helpers.update_coordinator = type(sys)("homeassistant.helpers.update_coordinator")
 
     class _CoordinatorEntity:
@@ -68,6 +70,7 @@ def _load_climate_helpers():
     sys.modules["homeassistant.helpers"] = ha.helpers
     sys.modules["homeassistant.helpers.entity"] = ha.helpers.entity
     sys.modules["homeassistant.helpers.entity_platform"] = ha.helpers.entity_platform
+    sys.modules["homeassistant.helpers.entity_registry"] = ha.helpers.entity_registry
     sys.modules["homeassistant.helpers.update_coordinator"] = ha.helpers.update_coordinator
 
     # Also stub relative const import by loading const first
@@ -153,6 +156,8 @@ def test_entity_id_is_pinned_to_mac_slug(climate_mod):
     )
     assert entity.entity_id == "climate.e0_ec_2c_c8_5e_2c_thermostat"
     assert entity._attr_unique_id == "lk_arc_climate_e0_ec_2c_c8_5e_2c_thermostat"  # noqa: SLF001
+    assert entity._attr_name == "Tvattstuga"  # noqa: SLF001
+    assert entity._attr_has_entity_name is False
 
 
 @pytest.mark.asyncio

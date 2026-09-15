@@ -14,6 +14,7 @@ from homeassistant.components.climate import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -93,6 +94,45 @@ def _mac_slug(value: str) -> str:
     return _mac_with_colons(value).replace(":", "_")
 
 
+def _desired_entity_id(mac: str) -> str:
+    return f"climate.{_mac_slug(mac)}_thermostat"
+
+
+def _migrate_registry_ids(hass: HomeAssistant, mac: str, identity: str) -> None:
+    """Force climate.<mac_slug>_thermostat even if an older unique_id created another id."""
+    registry = er.async_get(hass)
+    mac_slug = _mac_slug(mac)
+    desired = _desired_entity_id(mac)
+    desired_uid = f"{DOMAIN}_{mac_slug}_thermostat"
+    candidates = {
+        desired_uid,
+        f"{DOMAIN}_{mac}_thermostat",
+        f"{DOMAIN}_{identity}_thermostat",
+        f"{DOMAIN}_{_mac_with_colons(mac)}_thermostat",
+    }
+    for uid in candidates:
+        entry = registry.async_get_entity_id("climate", DOMAIN, uid)
+        if not entry:
+            continue
+        updates: dict[str, Any] = {}
+        if entry != desired:
+            updates["new_entity_id"] = desired
+        reg_entry = registry.async_get(entry)
+        if reg_entry and reg_entry.unique_id != desired_uid:
+            updates["new_unique_id"] = desired_uid
+        if updates:
+            try:
+                registry.async_update_entity(entry, **updates)
+                _LOGGER.warning(
+                    "LK Arc Climate: registry %s → %s (%s)",
+                    entry,
+                    desired,
+                    updates,
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("LK Arc Climate: kunde inte byta %s till %s", entry, desired)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -109,6 +149,7 @@ async def async_setup_entry(
             if not mac or mac in seen:
                 continue
             seen.add(mac)
+            _migrate_registry_ids(hass, mac, identity or mac)
             entities.append(LKArcClimate(coordinator, device, mac=mac, identity=identity))
 
     if not entities:
@@ -142,7 +183,8 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
     _attr_target_temperature_step = TEMP_STEP
-    _attr_has_entity_name = True
+    # Keep names simple so HA does not rewrite entity_id from the device name.
+    _attr_has_entity_name = False
 
     def __init__(self, coordinator, device: dict, *, mac: str, identity: str) -> None:
         super().__init__(coordinator)
@@ -153,15 +195,35 @@ class LKArcClimate(CoordinatorEntity, ClimateEntity):
         self._zone = (title.get("zone") or {}).get("zoneName") or identity
 
         mac_slug = _mac_slug(mac)
+        self._desired_entity_id = _desired_entity_id(mac)
         # Pin the entity_id so dashboards / hemopt.yaml stay stable
         # (climate.e0_ec_2c_c8_5e_2c_thermostat — same slug as the sensors).
-        self.entity_id = f"climate.{mac_slug}_thermostat"
+        self.entity_id = self._desired_entity_id
         self._attr_unique_id = f"{DOMAIN}_{mac_slug}_thermostat"
-        self._attr_name = "Thermostat"
+        self._attr_name = self._zone
         self._attr_device_info = DeviceInfo(
             identifiers={(LK_DOMAIN, identity)},
         )
         self._optimistic_target: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.entity_id == self._desired_entity_id:
+            return
+        registry = er.async_get(self.hass)
+        try:
+            registry.async_update_entity(self.entity_id, new_entity_id=self._desired_entity_id)
+            _LOGGER.warning(
+                "LK Arc Climate: entity_id %s → %s (dashboard/hemopt)",
+                self.entity_id,
+                self._desired_entity_id,
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception(
+                "LK Arc Climate: kunde inte låsa entity_id till %s (nu: %s)",
+                self._desired_entity_id,
+                self.entity_id,
+            )
 
     def _live_device(self) -> dict:
         """Fresh device dict from the coordinator, falling back to setup copy."""
