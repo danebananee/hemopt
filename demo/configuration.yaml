@@ -1,0 +1,26 @@
+# Demo-instans for att forhandsgranska dashboarden utan varmepump.
+# Se README.md ("Kora demon lokalt"). Anvand INTE den har filen i din
+# riktiga Home Assistant.
+
+homeassistant:
+  name: Husdata demo
+  latitude: 65.317
+  longitude: 21.479
+  elevation: 10
+  unit_system: metric
+  time_zone: Europe/Stockholm
+
+http:
+  server_port: 48213
+
+frontend:
+history:
+logbook:
+recorder:
+  purge_keep_days: 2
+
+lovelace:
+  mode: yaml
+  dashboards: {}
+
+template: !include demo_entities.yaml

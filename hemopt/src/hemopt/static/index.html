@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <base href="./" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hemopt — kostnadsoptimering</title>
+    <link rel="stylesheet" href="static/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⚡</text></svg>"
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">⚡</span>
+        <div>
+          <h1>Kostnadsoptimering</h1>
+          <p class="brand-sub">
+            Värme, varmvatten och effekttoppar mot Nordpool
+            <span class="area" id="price-area">SE3</span>
+          </p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <div class="pills" id="status-pills"></div>
+        <label class="toggle" title="Låt optimeraren skriva börvärden till Home Assistant">
+          <input type="checkbox" id="control-toggle" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">Styr värmen</span>
+        </label>
+        <button class="btn" id="replan-btn">Planera om</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="kpis" id="kpis" aria-label="Nyckeltal"></section>
+
+      <section class="card wide">
+        <div class="card-head">
+          <div>
+            <h2>Plan för kommande dygnet</h2>
+            <p class="muted" id="plan-subtitle">Läser in…</p>
+          </div>
+          <div class="legend">
+            <span class="key key-price">Elpris</span>
+            <span class="key key-power">Planerad total effekt</span>
+            <span class="key key-pump">Värmepump</span>
+            <span class="key key-hourly">Timmedel (debiteras)</span>
+            <span class="key key-threshold">Effekttak</span>
+          </div>
+        </div>
+        <div class="chart-host" id="plan-chart"></div>
+        <div id="plan-notes" class="notes"></div>
+      </section>
+
+      <div class="grid-two">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Effekttoppar denna månad</h2>
+              <p class="muted" id="peak-subtitle">—</p>
+            </div>
+          </div>
+          <div id="peak-body"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>Varmvatten</h2>
+              <p class="muted" id="dhw-subtitle">—</p>
+            </div>
+          </div>
+          <div class="chart-host small" id="dhw-chart"></div>
+        </section>
+      </div>
+
+      <section class="card wide">
+        <div class="card-head">
+          <div>
+            <h2>Rum och prioritet</h2>
+            <p class="muted">
+              Hög prioritet håller temperaturen. Låg prioritet får svaja och bär lastflytten.
+            </p>
+          </div>
+        </div>
+        <div class="rooms" id="rooms"></div>
+      </section>
+
+      <section class="card wide" id="error-card" hidden>
+        <div class="card-head"><h2>Senaste fel</h2></div>
+        <ul class="errors" id="errors"></ul>
+      </section>
+    </main>
+
+    <footer>
+      <span id="footer-status">—</span>
+      <span class="muted">Spotpris från elprisetjustnu.se</span>
+    </footer>
+
+    <script src="static/app.js"></script>
+  </body>
+</html>

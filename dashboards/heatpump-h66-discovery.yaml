@@ -1,0 +1,678 @@
+# Husdata H66 auto-discovery - dashboard anpassad till denna installation
+#
+# Laggs till via Installningar > Dashboards > Lagg till dashboard, eller i
+# configuration.yaml (se README). Alla entiteter kommer fran
+# H66:ns MQTT auto-discovery med MQTT_PREFIX=HP och MQTT_NAME=H66.
+#
+# Entiteterna har prefixet h66_, t.ex. sensor.h66_hpoutdoor.
+
+title: Varmepump
+views:
+  - title: Oversikt
+    path: oversikt
+    icon: mdi:heat-pump
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: conditional
+            grid_options:
+              columns: full
+            conditions:
+              - condition: state
+                entity: binary_sensor.h66_hpalarm
+                state: "on"
+            card:
+              type: markdown
+              content: >-
+                ## Larm fran varmepumpen
+
+                Pumpen rapporterar ett aktivt larm. Kontrollera displayen pa
+                pumpen och H66:ns loggsida.
+
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Just nu
+            heading_style: title
+            icon: mdi:thermometer
+          - type: tile
+            entity: sensor.h66_hpoutdoor
+            name: Ute
+            icon: mdi:snowflake-thermometer
+          - type: tile
+            entity: sensor.h66_hpindoor
+            name: Inne
+            icon: mdi:home-thermometer
+          - type: tile
+            entity: sensor.h66_hpwarm_water_1_top
+            name: Varmvatten topp
+            icon: mdi:water-thermometer
+          - type: tile
+            entity: sensor.h66_hphot_gas
+            name: Hetgas
+            icon: mdi:thermometer-high
+          - type: heading
+            heading: Drift
+            heading_style: subtitle
+            icon: mdi:cog
+          - type: tile
+            entity: binary_sensor.h66_hpcompressor
+            name: Kompressor
+            color: orange
+          - type: tile
+            entity: binary_sensor.h66_hpswitch_valve_1
+            name: Vaxelventil
+            color: cyan
+          - type: tile
+            entity: sensor.h66_hpadd_heat_status
+            name: Tillskottsvarme
+            color: red
+          - type: tile
+            entity: binary_sensor.h66_hpalarm
+            name: Larm
+            color: red
+
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Kompressor och vaxelventil
+            heading_style: title
+            icon: mdi:chart-timeline
+          - type: history-graph
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: binary_sensor.h66_hpcompressor
+                name: Kompressor
+              - entity: binary_sensor.h66_hpswitch_valve_1
+                name: Vaxelventil
+              - entity: binary_sensor.h66_hppump_cold_circuit
+                name: Koldbararpump
+              - entity: binary_sensor.h66_hppump_radiator
+                name: Radiatorpump
+          - type: heading
+            heading: Temperaturer
+            heading_style: title
+            icon: mdi:chart-line
+          - type: history-graph
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: sensor.h66_hpheat_carrier_forwrd
+                name: Framledning
+              - entity: sensor.h66_hpradiator_forward
+                name: Radiator fram
+              - entity: sensor.h66_hpheat_carrier_return
+                name: Radiator retur
+              - entity: sensor.h66_hpbrine_in_evaporator
+                name: Kollektor in
+              - entity: sensor.h66_hpbrine_out_condenser
+                name: Kollektor ut
+              - entity: sensor.h66_hpwarm_water_1_top
+                name: Varmvatten topp
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Systemoversikt
+            heading_style: title
+            icon: mdi:sitemap-outline
+          - type: picture-elements
+            grid_options:
+              columns: full
+            image: /local/husdata/heatpump-schematic.svg
+            elements:
+              - type: state-label
+                entity: sensor.h66_hpoutdoor
+                style:
+                  top: 19.4%
+                  left: 6.6%
+                  color: &value_color "#eef3f8"
+                  font-size: &value_size clamp(13px, 1.65vw, 34px)
+                  font-weight: &value_weight "600"
+                  text-shadow: &value_shadow 0 1px 4px rgba(0, 0, 0, 0.9)
+              - type: state-label
+                entity: sensor.h66_hpindoor
+                style:
+                  top: 50%
+                  left: 18%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpradiator_forward
+                style:
+                  top: 27.6%
+                  left: 46%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpheat_carrier_return
+                style:
+                  top: 58.5%
+                  left: 50%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpheat_carrier_forwrd
+                style:
+                  top: 27.6%
+                  left: 64%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-icon
+                entity: binary_sensor.h66_hpcompressor
+                icon: mdi:air-conditioner
+                tap_action:
+                  action: more-info
+                style:
+                  top: 60.3%
+                  left: 70.5%
+                  "--mdc-icon-size": clamp(22px, 2.6vw, 52px)
+              - type: state-label
+                entity: sensor.h66_hphot_gas
+                style:
+                  top: 70%
+                  left: 70.5%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpwarm_water_1_top
+                style:
+                  top: 34.2%
+                  left: 89.5%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpbrine_in_evaporator
+                style:
+                  top: 86.4%
+                  left: 17%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+              - type: state-label
+                entity: sensor.h66_hpbrine_out_condenser
+                style:
+                  top: 95.5%
+                  left: 17%
+                  color: *value_color
+                  font-size: *value_size
+                  font-weight: *value_weight
+                  text-shadow: *value_shadow
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: EXT-styrning
+            heading_style: title
+            icon: mdi:electric-switch
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              **1 = aktiv EXT-signal, 0 = frisläppt.** Vad respektive port
+              blockerar bestäms av kabelanslutningen och värmepumpens
+              konfiguration. Aktivering kan stoppa kompressor, varmvatten eller
+              eltillskott omedelbart.
+          - type: tile
+            entity: climate.h66_hpext_control_port_1
+            name: EXT-port 1
+            grid_options:
+              columns: 18
+            features:
+              - type: target-temperature
+          - type: tile
+            entity: climate.h66_hpext_control_port_2
+            name: EXT-port 2
+            grid_options:
+              columns: 18
+            features:
+              - type: target-temperature
+          - type: button
+            name: Aktivera EXT 1
+            icon: mdi:pause-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_1
+              data:
+                temperature: 1
+              confirmation:
+                text: Aktivera EXT-port 1? Funktionen som porten styr blockeras.
+          - type: button
+            name: Frisläpp EXT 1
+            icon: mdi:play-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_1
+              data:
+                temperature: 0
+          - type: button
+            name: Aktivera EXT 2
+            icon: mdi:pause-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_2
+              data:
+                temperature: 1
+              confirmation:
+                text: Aktivera EXT-port 2? Funktionen som porten styr blockeras.
+          - type: button
+            name: Frisläpp EXT 2
+            icon: mdi:play-circle
+            grid_options:
+              columns: 9
+            tap_action:
+              action: perform-action
+              perform_action: climate.set_temperature
+              target:
+                entity_id: climate.h66_hpext_control_port_2
+              data:
+                temperature: 0
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Varmeinstallningar
+            heading_style: title
+            icon: mdi:tune
+          - type: gauge
+            entity: sensor.h66_hpindoor
+            name: Rumstemperatur
+            unit: "°C"
+            min: 10
+            max: 30
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 10
+                color: "#3d92d1"
+              - from: 19
+                color: "#43a047"
+              - from: 23
+                color: "#e8623a"
+          - type: gauge
+            entity: sensor.h66_hpheating_setpoint
+            name: Varmeborvarde
+            unit: "°C"
+            min: 0
+            max: 50
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 0
+                color: "#3d92d1"
+              - from: 20
+                color: "#43a047"
+              - from: 40
+                color: "#e8623a"
+          - type: gauge
+            entity: sensor.h66_hpadd_heat_status
+            name: Tillskottsvarme
+            unit: "%"
+            min: 0
+            max: 100
+            needle: true
+            grid_options:
+              columns: 12
+            segments:
+              - from: 0
+                color: "#43a047"
+              - from: 1
+                color: "#e8623a"
+
+  - title: Golvvarme nere
+    path: golvvarme-nere
+    icon: mdi:home-floor-0
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Bottenvaning
+            heading_style: title
+            icon: mdi:heating-coil
+          - type: history-graph
+            grid_options:
+              columns: full
+            title: Temperaturer senaste dygnet
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: sensor.e0_ec_2c_c8_5e_2c_temperature
+                name: Tvattstuga
+              - entity: sensor.e9_bd_23_4a_e9_a8_temperature
+                name: Salong
+              - entity: sensor.ce_9f_90_cd_bf_74_temperature
+                name: Lekrum
+              - entity: sensor.ca_97_f7_ba_7d_23_temperature
+                name: Entre
+          - type: entities
+            title: Tvattstuga
+            icon: mdi:washing-machine
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e0_ec_2c_c8_5e_2c_temperature
+                name: Temperatur
+              - entity: sensor.e0_ec_2c_c8_5e_2c_humidity
+                name: Luftfuktighet
+              - entity: sensor.e0_ec_2c_c8_5e_2c_battery
+                name: Batteri
+          - type: entities
+            title: Salong
+            icon: mdi:sofa
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e9_bd_23_4a_e9_a8_temperature
+                name: Temperatur
+              - entity: sensor.e9_bd_23_4a_e9_a8_humidity
+                name: Luftfuktighet
+              - entity: sensor.e9_bd_23_4a_e9_a8_battery
+                name: Batteri
+          - type: entities
+            title: Lekrum
+            icon: mdi:toy-brick
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.ce_9f_90_cd_bf_74_temperature
+                name: Temperatur
+              - entity: sensor.ce_9f_90_cd_bf_74_humidity
+                name: Luftfuktighet
+              - entity: sensor.ce_9f_90_cd_bf_74_battery
+                name: Batteri
+          - type: entities
+            title: Entre
+            icon: mdi:door
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.ca_97_f7_ba_7d_23_temperature
+                name: Temperatur
+              - entity: sensor.ca_97_f7_ba_7d_23_humidity
+                name: Luftfuktighet
+              - entity: sensor.ca_97_f7_ba_7d_23_battery
+                name: Batteri
+
+  - title: Golvvarme uppe
+    path: golvvarme-uppe
+    icon: mdi:home-floor-1
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Overvaning
+            heading_style: title
+            icon: mdi:heating-coil
+          - type: history-graph
+            grid_options:
+              columns: full
+            title: Temperaturer senaste dygnet
+            hours_to_show: 24
+            show_names: true
+            entities:
+              - entity: sensor.d5_ba_fd_c1_0c_c1_temperature
+                name: Garderob
+              - entity: sensor.c8_1b_04_e0_7e_90_temperature
+                name: Sovrum
+              - entity: sensor.fa_6a_ee_c8_9a_63_temperature
+                name: Vardagsrum uppe
+              - entity: sensor.f7_d4_23_14_49_da_temperature
+                name: Badrum
+              - entity: sensor.e3_09_14_3f_f0_f0_temperature
+                name: Pysselrum
+              - entity: sensor.e6_5e_d9_54_a8_e7_temperature
+                name: Rios rum
+              - entity: sensor.d0_f5_31_05_49_9d_temperature
+                name: Kontor
+          - type: entities
+            title: Garderob
+            icon: mdi:wardrobe
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.d5_ba_fd_c1_0c_c1_temperature
+                name: Temperatur
+              - entity: sensor.d5_ba_fd_c1_0c_c1_humidity
+                name: Luftfuktighet
+              - entity: sensor.d5_ba_fd_c1_0c_c1_battery
+                name: Batteri
+          - type: entities
+            title: Sovrum
+            icon: mdi:bed
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.c8_1b_04_e0_7e_90_temperature
+                name: Temperatur
+              - entity: sensor.c8_1b_04_e0_7e_90_humidity
+                name: Luftfuktighet
+              - entity: sensor.c8_1b_04_e0_7e_90_battery
+                name: Batteri
+          - type: entities
+            title: Vardagsrum uppe
+            icon: mdi:sofa
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.fa_6a_ee_c8_9a_63_temperature
+                name: Temperatur
+              - entity: sensor.fa_6a_ee_c8_9a_63_humidity
+                name: Luftfuktighet
+              - entity: sensor.fa_6a_ee_c8_9a_63_battery
+                name: Batteri
+          - type: entities
+            title: Badrum
+            icon: mdi:shower
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.f7_d4_23_14_49_da_temperature
+                name: Temperatur
+              - entity: sensor.f7_d4_23_14_49_da_humidity
+                name: Luftfuktighet
+              - entity: sensor.f7_d4_23_14_49_da_battery
+                name: Batteri
+          - type: entities
+            title: Pysselrum
+            icon: mdi:palette
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e3_09_14_3f_f0_f0_temperature
+                name: Temperatur
+              - entity: sensor.e3_09_14_3f_f0_f0_humidity
+                name: Luftfuktighet
+              - entity: sensor.e3_09_14_3f_f0_f0_battery
+                name: Batteri
+          - type: entities
+            title: Rios rum
+            icon: mdi:cat
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.e6_5e_d9_54_a8_e7_temperature
+                name: Temperatur
+              - entity: sensor.e6_5e_d9_54_a8_e7_humidity
+                name: Luftfuktighet
+              - entity: sensor.e6_5e_d9_54_a8_e7_battery
+                name: Batteri
+          - type: entities
+            title: Kontor
+            icon: mdi:desk
+            grid_options:
+              columns: 12
+            entities:
+              - entity: sensor.d0_f5_31_05_49_9d_temperature
+                name: Temperatur
+              - entity: sensor.d0_f5_31_05_49_9d_humidity
+                name: Luftfuktighet
+              - entity: sensor.d0_f5_31_05_49_9d_battery
+                name: Batteri
+
+  - title: Alla varden
+    path: varden
+    icon: mdi:format-list-bulleted
+    type: sections
+    max_columns: 4
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Temperaturer
+            heading_style: title
+            icon: mdi:thermometer
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.h66_hpoutdoor
+                name: Ute
+              - entity: sensor.h66_hpindoor
+                name: Inne
+              - entity: sensor.h66_hpindoor_2
+                name: Inne 2
+              - entity: sensor.h66_hpradiator_forward
+                name: Radiator fram
+              - entity: sensor.h66_hpheat_carrier_forwrd
+                name: Framledning
+              - entity: sensor.h66_hpheat_carrier_return
+                name: Returledning
+              - entity: sensor.h66_hphot_gas
+                name: Hetgas
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Kollektor och varmvatten
+            heading_style: title
+            icon: mdi:water-thermometer
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.h66_hpbrine_in_evaporator
+                name: Kollektor in
+              - entity: sensor.h66_hpbrine_out_condenser
+                name: Kollektor ut
+              - entity: sensor.h66_hpwarm_water_1_top
+                name: Varmvatten topp
+              - entity: sensor.h66_hpwarm_water_setpoint
+                name: Varmvatten borvarde
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Status och installningar
+            heading_style: title
+            icon: mdi:cog-outline
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: binary_sensor.h66_hpcompressor
+                name: Kompressor
+              - entity: binary_sensor.h66_hpswitch_valve_1
+                name: Vaxelventil 1
+              - entity: binary_sensor.h66_hpswitch_valve_2
+                name: Vaxelventil 2
+              - entity: binary_sensor.h66_hppump_cold_circuit
+                name: Koldbararpump
+              - entity: binary_sensor.h66_hppump_heat_circuit
+                name: Varmebararpump
+              - entity: binary_sensor.h66_hppump_radiator
+                name: Radiatorpump
+              - entity: binary_sensor.h66_hpfan
+                name: Flakt
+              - entity: binary_sensor.h66_hpheating_cable
+                name: Varmekabel
+              - entity: binary_sensor.h66_hpcrank_case_heater
+                name: Vevhusvarmare
+              - entity: binary_sensor.h66_hpalarm
+                name: Larm
+              - type: divider
+              - entity: climate.h66_hpext_control_port_1
+                name: EXT-port 1
+              - entity: climate.h66_hpext_control_port_2
+                name: EXT-port 2
+              - type: divider
+              - entity: sensor.h66_hpheating_setpoint
+                name: Borvarde varme
+              - entity: sensor.h66_hpheating_setpoint_2
+                name: Borvarde varme 2
+              - entity: sensor.h66_hpindoor
+                name: Rumstemperatur
+              - entity: sensor.h66_hpadd_heat_status
+                name: Tillskottsvarme
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Energi
+            heading_style: title
+            icon: mdi:lightning-bolt
+          - type: entities
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.h66_hppower_consumption
+                name: Effekt just nu
+              - entity: sensor.h66_hpaccumulated_consumption
+                name: Ackumulerad forbrukning
+              - entity: sensor.h66_hpsupp_energy_heating
+                name: Levererad varmeenergi
+              - entity: sensor.h66_hpsupp_energy_hotwater
+                name: Levererad varmvattenenergi
+              - entity: sensor.h66_hpcompr_cons_heating
+                name: Kompressor varme
+              - entity: sensor.h66_hpcompr_cons_hotwat
+                name: Kompressor varmvatten
+              - entity: sensor.h66_hpaux_cons_heating
+                name: Eltillskott varme
+              - entity: sensor.h66_hpaux_cons_hot_water
+                name: Eltillskott varmvatten

@@ -1,0 +1,13 @@
+configuration:
+  price_area:
+    name: Elområde
+    description: >-
+      Ditt elområde. Södra Sverige är SE4, Stockholm och Göteborg ligger i SE3.
+  contract:
+    name: Avräkning av elavtal
+    description: >-
+      Hur ditt spotavtal avräknas. Kvart ger optimeraren mest att arbeta med,
+      dygn ger minst. Tillägget simulerar också vad de andra två hade kostat.
+  log_level:
+    name: Loggnivå
+    description: Höj till debug när något ser fel ut, sänk sedan tillbaka.

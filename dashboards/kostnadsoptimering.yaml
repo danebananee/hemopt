@@ -1,0 +1,251 @@
+# Kostnadsoptimering - vy for hemopt-tjansten
+#
+# Kraver att tillagget hemopt/ kors med mqtt.enabled: true. Entiteterna skapas
+# automatiskt via MQTT-autodiscovery under enheten "Kostnadsoptimering".
+#
+# Klistras in i dashboardens rakonfiguration, eller laggs till som en vy i
+# den befintliga varmepumpsdashboarden.
+
+title: Kostnadsoptimering
+
+views:
+  - title: Kostnad
+    path: kostnad
+    icon: mdi:cash-clock
+    type: sections
+    max_columns: 3
+
+    sections:
+      - type: grid
+        column_span: 3
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.hemopt_peak_guard
+                state: "on"
+            card:
+              type: markdown
+              content: >-
+                ## Effektvakten begransar just nu
+
+
+                Uttaget ligger nara manadens effekttroskel. Vanta med
+                tvattmaskin, torktumlare och laddning tills timmen ar slut.
+
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Just nu
+            heading_style: title
+            icon: mdi:cash-clock
+
+          - type: tile
+            entity: sensor.hemopt_total_price
+            name: Elpris
+            icon: mdi:cash
+
+          - type: tile
+            entity: sensor.hemopt_planned_power
+            name: Planerad effekt
+            icon: mdi:flash
+
+          - type: tile
+            entity: sensor.hemopt_hour_headroom
+            name: Kvar denna timme
+            icon: mdi:speedometer
+
+          - type: tile
+            entity: switch.hemopt_control_enabled
+            name: Styr varmen
+            icon: mdi:robot
+
+          - type: heading
+            heading: Status
+            heading_style: subtitle
+            icon: mdi:information-outline
+
+          - type: tile
+            entity: binary_sensor.hemopt_heating_blocked
+            name: Uppvarmning pausad
+            color: orange
+
+          - type: tile
+            entity: binary_sensor.hemopt_preheating
+            name: Forvarmer
+            color: red
+
+          - type: tile
+            entity: binary_sensor.hemopt_peak_guard
+            name: Effektvakt
+            color: red
+
+          - type: tile
+            entity: binary_sensor.hemopt_in_peak_window
+            name: Inom effektfonster
+            color: purple
+
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Effekttoppar
+            heading_style: title
+            icon: mdi:transmission-tower
+
+          - type: glance
+            grid_options:
+              columns: full
+            show_name: true
+            show_state: true
+            entities:
+              - entity: sensor.hemopt_peak_threshold
+                name: Troskel
+              - entity: sensor.hemopt_peak_average
+                name: Manadens snitt
+              - entity: sensor.hemopt_peak_cost
+                name: Prognos avgift
+              - entity: sensor.hemopt_planned_saving
+                name: Besparing
+
+          - type: history-graph
+            grid_options:
+              columns: full
+            title: Effekt och troskel senaste dygnet
+            hours_to_show: 24
+            entities:
+              - entity: sensor.hemopt_planned_power
+                name: Planerad effekt
+              - entity: sensor.hemopt_peak_threshold
+                name: Effekttroskel
+              - entity: sensor.hemopt_hour_headroom
+                name: Kvar denna timme
+
+          - type: heading
+            heading: Elpris
+            heading_style: title
+            icon: mdi:chart-line
+
+          - type: history-graph
+            grid_options:
+              columns: full
+            hours_to_show: 48
+            entities:
+              - entity: sensor.hemopt_total_price
+                name: Totalpris
+
+          - type: glance
+            grid_options:
+              columns: full
+            show_name: true
+            show_state: true
+            entities:
+              - entity: sensor.hemopt_cheapest_hour
+                name: Billigast
+              - entity: sensor.hemopt_most_expensive_hour
+                name: Dyrast
+              - entity: sensor.hemopt_plan_status
+                name: Planstatus
+
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Prioritet per rum
+            heading_style: title
+            icon: mdi:priority-high
+
+          - type: markdown
+            grid_options:
+              columns: full
+            content: >-
+              **5 = hall temperaturen.** Rummet skyddas och varms forst.
+
+
+              **1 = far svaja.** Rummet bar lastflytten och kyls ner nar elen
+              ar dyr eller nar effekttoppen narmar sig.
+
+          - type: entities
+            title: Overvaning
+            grid_options:
+              columns: 18
+            entities:
+              - entity: number.hemopt_priority_vardagsrum
+                name: Vardagsrum
+              - entity: number.hemopt_priority_sovrum
+                name: Sovrum
+              - entity: number.hemopt_priority_badrum
+                name: Badrum
+              - entity: number.hemopt_priority_kontor
+                name: Kontor
+              - entity: number.hemopt_priority_pysselrum
+                name: Pysselrum
+
+          - type: entities
+            title: Bottenvaning
+            grid_options:
+              columns: 18
+            entities:
+              - entity: number.hemopt_priority_salong
+                name: Salong
+              - entity: number.hemopt_priority_lekrum
+                name: Lekrum
+              - entity: number.hemopt_priority_entre
+                name: Entre
+              - entity: number.hemopt_priority_tvattstuga
+                name: Tvattstuga
+
+          - type: heading
+            heading: Planerade borvarden
+            heading_style: subtitle
+            icon: mdi:thermostat
+
+          - type: history-graph
+            grid_options:
+              columns: full
+            hours_to_show: 24
+            entities:
+              - entity: sensor.hemopt_setpoint_vardagsrum
+                name: Vardagsrum
+              - entity: sensor.hemopt_setpoint_sovrum
+                name: Sovrum
+              - entity: sensor.hemopt_setpoint_badrum
+                name: Badrum
+              - entity: sensor.hemopt_setpoint_kontor
+                name: Kontor
+              - entity: sensor.hemopt_setpoint_salong
+                name: Salong
+              - entity: sensor.hemopt_setpoint_entre
+                name: Entre
+
+          - type: heading
+            heading: Uppmatt troghet
+            heading_style: subtitle
+            icon: mdi:timer-sand
+
+          - type: glance
+            grid_options:
+              columns: full
+            show_name: true
+            show_state: true
+            columns: 5
+            entities:
+              - entity: sensor.hemopt_inertia_vardagsrum
+                name: Vardagsrum
+              - entity: sensor.hemopt_inertia_sovrum
+                name: Sovrum
+              - entity: sensor.hemopt_inertia_badrum
+                name: Badrum
+              - entity: sensor.hemopt_inertia_kontor
+                name: Kontor
+              - entity: sensor.hemopt_inertia_pysselrum
+                name: Pysselrum
+              - entity: sensor.hemopt_inertia_salong
+                name: Salong
+              - entity: sensor.hemopt_inertia_lekrum
+                name: Lekrum
+              - entity: sensor.hemopt_inertia_entre
+                name: Entre
+              - entity: sensor.hemopt_inertia_tvattstuga
+                name: Tvattstuga

@@ -1,0 +1,292 @@
+# Husdata H60/H66 -> Home Assistant via MQTT
+#
+# Anvand ANTINGEN det har paketet ELLER H66:ns auto-discovery (MQTT_DISCOV=1),
+# aldrig bada samtidigt. Da far du dubbletter av varje entitet.
+#
+# For det har paketet, satt i H66 (Config):
+#   MQTT_SRVR   = IP till Home Assistant
+#   MQTT_PORT   = 1883
+#   MQTT_USER / MQTT_PASS = samma som i Mosquitto-addonet
+#   MQTT_DISCOV = 0
+#   MQTT_PUBALL = 20
+#
+# Topicen "+/HP/0001" anvander wildcard for H66:ns MAC-adress, sa du slipper
+# skriva in den. Har du flera gateways: byt ut "+" mot MAC-adressen.
+#
+# Alla register finns inte i alla varmepumpar. Ta bort de rader som visar
+# "unknown" for just din modell (H66:ns startsida listar dina giltiga IDX).
+
+mqtt:
+  sensor:
+    - name: "Radiator return"
+      object_id: hp_radiator_return
+      unique_id: husdata_h66_0001
+      state_topic: "+/HP/0001"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: &h66_device
+        identifiers: husdata_h66
+        name: "Varmepump"
+        manufacturer: Husdata
+        model: "H66 Gateway"
+
+    - name: "Radiator forward"
+      object_id: hp_radiator_forward
+      unique_id: husdata_h66_0002
+      state_topic: "+/HP/0002"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Heat carrier return"
+      object_id: hp_heat_carrier_return
+      unique_id: husdata_h66_0003
+      state_topic: "+/HP/0003"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Heat carrier forward"
+      object_id: hp_heat_carrier_forward
+      unique_id: husdata_h66_0004
+      state_topic: "+/HP/0004"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Brine in / Evaporator"
+      object_id: hp_brine_in
+      unique_id: husdata_h66_0005
+      state_topic: "+/HP/0005"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Brine out / Condenser"
+      object_id: hp_brine_out
+      unique_id: husdata_h66_0006
+      state_topic: "+/HP/0006"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Outdoor"
+      object_id: hp_outdoor
+      unique_id: husdata_h66_0007
+      state_topic: "+/HP/0007"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Indoor"
+      object_id: hp_indoor
+      unique_id: husdata_h66_0008
+      state_topic: "+/HP/0008"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Warm water 1 / Top"
+      object_id: hp_warm_water_top
+      unique_id: husdata_h66_0009
+      state_topic: "+/HP/0009"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Warm water 2 / Mid"
+      object_id: hp_warm_water_mid
+      unique_id: husdata_h66_000A
+      state_topic: "+/HP/000A"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Hot gas / Compressor"
+      object_id: hp_hot_gas
+      unique_id: husdata_h66_000B
+      state_topic: "+/HP/000B"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Heating setpoint"
+      object_id: hp_heating_setpoint
+      unique_id: husdata_h66_0107
+      state_topic: "+/HP/0107"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Warm water setpoint"
+      object_id: hp_warm_water_setpoint
+      unique_id: husdata_h66_0111
+      state_topic: "+/HP/0111"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Add heat status"
+      object_id: hp_add_heat
+      unique_id: husdata_h66_3104
+      state_topic: "+/HP/3104"
+      unit_of_measurement: "%"
+      state_class: measurement
+      icon: mdi:flash
+      device: *h66_device
+
+    # Installningar som lases av for matarna. Vill du kunna andra dem fran
+    # Home Assistant, se "number"-blocket langst ner i filen.
+    - name: "Room temp target"
+      object_id: hp_room_temp_target
+      unique_id: husdata_h66_0203
+      state_topic: "+/HP/0203"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      device: *h66_device
+
+    - name: "Curve"
+      object_id: hp_curve
+      unique_id: husdata_h66_2205
+      state_topic: "+/HP/2205"
+      state_class: measurement
+      icon: mdi:chart-bell-curve-cumulative
+      device: *h66_device
+
+    - name: "Curve fine"
+      object_id: hp_curve_fine
+      unique_id: husdata_h66_0207
+      state_topic: "+/HP/0207"
+      state_class: measurement
+      icon: mdi:tune-vertical
+      device: *h66_device
+
+  binary_sensor:
+    - name: "Compressor"
+      object_id: hp_compressor
+      unique_id: husdata_h66_1A01
+      state_topic: "+/HP/1A01"
+      payload_on: "1"
+      payload_off: "0"
+      icon: mdi:air-conditioner
+      device: *h66_device
+
+    - name: "Add heat step 1"
+      object_id: hp_add_heat_step_1
+      unique_id: husdata_h66_1A02
+      state_topic: "+/HP/1A02"
+      payload_on: "1"
+      payload_off: "0"
+      icon: mdi:radiator
+      device: *h66_device
+
+    - name: "Add heat step 2"
+      object_id: hp_add_heat_step_2
+      unique_id: husdata_h66_1A03
+      state_topic: "+/HP/1A03"
+      payload_on: "1"
+      payload_off: "0"
+      icon: mdi:radiator
+      device: *h66_device
+
+    - name: "Brine pump"
+      object_id: hp_brine_pump
+      unique_id: husdata_h66_1A04
+      state_topic: "+/HP/1A04"
+      payload_on: "1"
+      payload_off: "0"
+      icon: mdi:pump
+      device: *h66_device
+
+    - name: "Heat carrier pump"
+      object_id: hp_heat_carrier_pump
+      unique_id: husdata_h66_1A05
+      state_topic: "+/HP/1A05"
+      payload_on: "1"
+      payload_off: "0"
+      icon: mdi:pump
+      device: *h66_device
+
+    - name: "Radiator pump"
+      object_id: hp_radiator_pump
+      unique_id: husdata_h66_1A06
+      state_topic: "+/HP/1A06"
+      payload_on: "1"
+      payload_off: "0"
+      icon: mdi:pump
+      device: *h66_device
+
+    - name: "Switch valve"
+      object_id: hp_switch_valve
+      unique_id: husdata_h66_1A07
+      state_topic: "+/HP/1A07"
+      payload_on: "1"
+      payload_off: "0"
+      icon: mdi:valve
+      device: *h66_device
+
+    - name: "Alarm"
+      object_id: hp_alarm
+      unique_id: husdata_h66_1A20
+      state_topic: "+/HP/1A20"
+      payload_on: "1"
+      payload_off: "0"
+      device_class: problem
+      device: *h66_device
+
+# Skrivbara installningar.
+#
+# SET-topicen kan inte anvanda wildcard, sa har maste H66:ns MAC-adress in.
+# Gor sa har for att aktivera:
+#   1. Satt MQTT_SUBS = 1 i H66 och starta om den.
+#   2. Byt ut MAC nedan mot din MAC (utan kolon, se H66:ns startsida).
+#   3. Avkommentera blocket och ta bort motsvarande sensorer ovan
+#      (hp_room_temp_target, hp_curve, hp_curve_fine), annars krockar namnen.
+#   4. Peka om matarna i dashboards/heatpump.yaml till number.* i stallet.
+#
+#  number:
+#    - name: "Room temp target"
+#      object_id: hp_room_temp_target
+#      unique_id: husdata_h66_set_0203
+#      state_topic: "+/HP/0203"
+#      command_topic: "c4dee219efa0/HP/SET/0203"
+#      unit_of_measurement: "°C"
+#      device_class: temperature
+#      min: 10
+#      max: 30
+#      step: 0.5
+#      device: *h66_device
+#
+#    - name: "Curve"
+#      object_id: hp_curve
+#      unique_id: husdata_h66_set_2205
+#      state_topic: "+/HP/2205"
+#      command_topic: "c4dee219efa0/HP/SET/2205"
+#      min: 0
+#      max: 10
+#      step: 0.1
+#      device: *h66_device
+#
+#    - name: "Curve fine"
+#      object_id: hp_curve_fine
+#      unique_id: husdata_h66_set_0207
+#      state_topic: "+/HP/0207"
+#      command_topic: "c4dee219efa0/HP/SET/0207"
+#      min: -10
+#      max: 10
+#      step: 0.1
+#      device: *h66_device

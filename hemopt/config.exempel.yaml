@@ -1,0 +1,286 @@
+# hemopt - konfiguration for huset med IVT Rego 1000, Husdata H66 och LK Arc
+#
+# Kopiera till config.yaml och fyll i token. Kor sedan
+#
+#     uv run hemopt -c config.yaml doctor
+#
+# som kontrollerar att varenda entitet nedan finns i Home Assistant och
+# foreslar rattningar for dem som inte gor det. Gissade entiteter ar markta
+# med KONTROLLERA.
+
+site:
+  price_area: SE3
+  timezone: Europe/Stockholm
+  # Fran fakturan: Enkeltariff E4, 25 A, elomrade 3, omrades-ID DRV.
+  main_fuse_amps: 25
+  # KONTROLLERA. Utan vaderprognos antar planeraren att det ar lika varmt om
+  # 36 timmar som just nu, vilket felbedomer all forvarmning.
+  weather_entity: weather.forecast_home
+
+home_assistant:
+  base_url: http://homeassistant.local:8123
+  token: KLISTRA_IN_LANGLIVAD_TOKEN
+  history_days: 21
+
+mqtt:
+  enabled: true
+  host: homeassistant.local
+  port: 1883
+  username: mqtt_user
+  password: BYT_MIG
+
+# ---------------------------------------------------------------------------
+# Pris. Siffrorna nedan ar rimliga for SE3 men ar inte dina. Ta dem fran
+# elnatsfakturan respektive elhandelsavtalet.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Pris. Siffrorna nedan ar hamtade ur fakturan for augusti 2026 och ar
+# exklusive moms, precis som fakturan redovisar dem.
+# ---------------------------------------------------------------------------
+energy_price:
+  # "Rorligt Elpris" hos Vattenfall ar manadsmedelspot: varje kWh debiteras
+  # till manadens medelpris. Da ger lastflytt ingenting pa energidelen.
+  # Radgivningen papekar detta; byt till hourly nar avtalet ar bytt.
+  contract: monthly
+  vat_rate: 0.25
+  supplier_markup_ore: 7.00      # Fast paslag spot
+  certificate_ore: 1.40          # Fast paslag elcertifikat
+  balancing_ore: 5.76            # Rorliga kostnader, varierar per manad
+  energy_tax_ore: 36.00          # Energiskatt 2026
+  # Enkeltariff: samma overforingsavgift dygnet runt, sa det finns inget att
+  # tjana pa natsidan genom att flytta last. Bada varden ar darfor lika.
+  transfer_fee_high_ore: 35.60
+  transfer_fee_normal_ore: 35.60
+  grid_subscription_sek_per_year: 8100.0   # Abonnemang, Enkeltariff E4 25 A
+  supplier_fee_sek_per_year: 432.0         # Arsavgift elhandel
+
+# ---------------------------------------------------------------------------
+# Radgivning om sjalva avtalen.
+#
+# Kontrollera abonnemangspriserna nedan mot natbolagets aktuella prislista
+# innan du agerar pa ett sakringsrad; bara 25 A-raden ar hamtad ur fakturan.
+# ---------------------------------------------------------------------------
+advice:
+  enabled: true
+  min_annual_saving_sek: 200
+  fuse_margin_kw: 2.0
+  min_history_days: 30
+  flexible_share: 0.5
+  grid_tariffs:
+    - name: Enkeltariff E4 (25 A)
+      fuse_amps: 25
+      subscription_sek_per_year: 8100.0
+      transfer_ore: 35.60
+    - name: Enkeltariff E3 (20 A)
+      fuse_amps: 20
+      subscription_sek_per_year: 5900.0   # KONTROLLERA mot prislistan
+      transfer_ore: 35.60
+    - name: Enkeltariff E2 (16 A)
+      fuse_amps: 16
+      subscription_sek_per_year: 4200.0   # KONTROLLERA mot prislistan
+      transfer_ore: 35.60
+  supplier_offers: []
+
+# ---------------------------------------------------------------------------
+# Effektavgift.
+#
+# Avstangd som default eftersom Vattenfall Eldistribution pausade
+# breddinforandet efter regeringens besked i mars 2026. Kolla elnatsfakturan.
+# Nar en effektavgift dyker upp dar: satt enabled: true och stall in siffrorna
+# efter din prislista. Alla natbolag ska ha infort en senast 2027-01-01.
+#
+# Modellen nedan ar Vattenfalls: snittet av de fem hogsta timmedeleffekterna
+# pa olika dygn, matt helgfria vardagar 07-21 under november till mars.
+# ---------------------------------------------------------------------------
+peak_tariff:
+  enabled: false
+  n_peaks: 5
+  price_per_kw_sek: 67.5
+  window:
+    months: [1, 2, 3, 11, 12]
+    hour_start: 7
+    hour_end: 21
+    weekdays_only: true
+    exclude_holidays: true
+
+heat_pump:
+  max_thermal_kw: 9.0
+  max_electrical_kw: 3.2
+  cop_at_minus_5: 3.1
+  cop_at_plus_10: 4.6
+  outdoor_entity: sensor.h66_hpoutdoor
+  power_entity: sensor.h66_hppower_consumption
+
+hot_water:
+  enabled: true
+  top_temperature_entity: sensor.h66_hpwarm_water_1_top
+  tank_litres: 180
+  min_temperature: 42
+  target_temperature: 52
+  max_temperature: 58
+  reheat_power_kw: 3.0
+  legionella_weekday: 6      # sondag, 0 = mandag. null stanger av
+  legionella_temperature: 62
+
+base_load:
+  # KONTROLLERA. Utan en matare pa hela huset ser planeraren bara
+  # varmepumpen, och da ar effekttoppsdelen blind for spis, tvatt och bil.
+  # Lamna tom om du inte har nagon, sa anvands default_kw i stallet.
+  total_power_entity: sensor.house_total_power
+  default_kw: 0.7
+  learn_profile: true
+
+# ---------------------------------------------------------------------------
+# EXT-kabeln. Avstangd tills du vet vad portarna ar konfigurerade att gora i
+# Rego 1000, under Extern ingang 1 och 2. En aktiverad EXT-signal stoppar
+# funktionen direkt, sa slå inte på detta pa gissning.
+# ---------------------------------------------------------------------------
+ext_control:
+  enabled: false
+  block_heating_entity: climate.h66_hpext_control_port_1
+  max_block_minutes: 120
+  min_release_minutes: 15
+  min_room_temperature: 18.0
+
+optimiser:
+  horizon_hours: 36
+  step_minutes: 15
+  run_interval_minutes: 15
+  apply_controls: false      # slås på i webbpanelen nar du litar pa planen
+
+# ---------------------------------------------------------------------------
+# Rum.
+#
+# priority 5 = hall temperaturen, 1 = far svaja och bar lastflytten.
+# heat_share ar rummets andel av varmeeffekten, ungefar proportionell mot
+# golvytan. Bara forhallandet mellan rummen spelar roll.
+#
+# climate_entity ar gissad ur LK-integrationens namnsattning och maste
+# kontrolleras. Utan den kan hemopt lasa rummet men inte styra det, och
+# tröghetsmodellen faller tillbaka pa standardvarden.
+# ---------------------------------------------------------------------------
+rooms:
+  # --- Overvaning ---
+  - key: vardagsrum
+    name: Vardagsrum
+    floor: Overvaning
+    priority: 5
+    temperature_entity: sensor.fa_6a_ee_c8_9a_63_temperature
+    humidity_entity: sensor.fa_6a_ee_c8_9a_63_humidity
+    climate_entity: climate.fa_6a_ee_c8_9a_63      # KONTROLLERA
+    comfort_min: 21.0
+    comfort_max: 22.5
+    heat_share: 2.2
+
+  - key: badrum
+    name: Badrum
+    floor: Overvaning
+    priority: 5
+    temperature_entity: sensor.f7_d4_23_14_49_da_temperature
+    humidity_entity: sensor.f7_d4_23_14_49_da_humidity
+    climate_entity: climate.f7_d4_23_14_49_da      # KONTROLLERA
+    comfort_min: 22.0
+    comfort_max: 23.5
+    heat_share: 1.0
+
+  - key: rios_rum
+    name: Rios rum
+    floor: Overvaning
+    priority: 5
+    temperature_entity: sensor.e6_5e_d9_54_a8_e7_temperature
+    humidity_entity: sensor.e6_5e_d9_54_a8_e7_humidity
+    climate_entity: climate.e6_5e_d9_54_a8_e7      # KONTROLLERA
+    comfort_min: 20.0
+    comfort_max: 21.5
+    heat_share: 1.2
+
+  - key: sovrum
+    name: Sovrum
+    floor: Overvaning
+    priority: 4
+    temperature_entity: sensor.c8_1b_04_e0_7e_90_temperature
+    humidity_entity: sensor.c8_1b_04_e0_7e_90_humidity
+    climate_entity: climate.c8_1b_04_e0_7e_90      # KONTROLLERA
+    comfort_min: 18.5
+    comfort_max: 20.5
+    heat_share: 1.4
+
+  - key: kontor
+    name: Kontor
+    floor: Overvaning
+    priority: 3
+    temperature_entity: sensor.d0_f5_31_05_49_9d_temperature
+    humidity_entity: sensor.d0_f5_31_05_49_9d_humidity
+    climate_entity: climate.d0_f5_31_05_49_9d      # KONTROLLERA
+    comfort_min: 20.0
+    comfort_max: 22.0
+    heat_share: 1.2
+
+  - key: pysselrum
+    name: Pysselrum
+    floor: Overvaning
+    priority: 2
+    temperature_entity: sensor.e3_09_14_3f_f0_f0_temperature
+    humidity_entity: sensor.e3_09_14_3f_f0_f0_humidity
+    climate_entity: climate.e3_09_14_3f_f0_f0      # KONTROLLERA
+    comfort_min: 19.0
+    comfort_max: 21.5
+    heat_share: 1.0
+
+  - key: garderob
+    name: Garderob
+    floor: Overvaning
+    priority: 1
+    temperature_entity: sensor.d5_ba_fd_c1_0c_c1_temperature
+    humidity_entity: sensor.d5_ba_fd_c1_0c_c1_humidity
+    climate_entity: climate.d5_ba_fd_c1_0c_c1      # KONTROLLERA
+    comfort_min: 18.0
+    comfort_max: 21.0
+    heat_share: 0.5
+
+  # --- Bottenvaning ---
+  - key: salong
+    name: Salong
+    floor: Bottenvaning
+    priority: 3
+    temperature_entity: sensor.e9_bd_23_4a_e9_a8_temperature
+    humidity_entity: sensor.e9_bd_23_4a_e9_a8_humidity
+    climate_entity: climate.e9_bd_23_4a_e9_a8      # KONTROLLERA
+    comfort_min: 20.5
+    comfort_max: 22.0
+    heat_share: 1.8
+
+  - key: lekrum
+    name: Lekrum
+    floor: Bottenvaning
+    priority: 3
+    temperature_entity: sensor.ce_9f_90_cd_bf_74_temperature
+    humidity_entity: sensor.ce_9f_90_cd_bf_74_humidity
+    climate_entity: climate.ce_9f_90_cd_bf_74      # KONTROLLERA
+    comfort_min: 20.0
+    comfort_max: 22.0
+    heat_share: 1.3
+
+  - key: entre
+    name: Entre
+    floor: Bottenvaning
+    priority: 1
+    temperature_entity: sensor.ca_97_f7_ba_7d_23_temperature
+    humidity_entity: sensor.ca_97_f7_ba_7d_23_humidity
+    climate_entity: climate.ca_97_f7_ba_7d_23      # KONTROLLERA
+    comfort_min: 18.0
+    comfort_max: 21.0
+    heat_share: 0.9
+
+  - key: tvattstuga
+    name: Tvattstuga
+    floor: Bottenvaning
+    priority: 1
+    temperature_entity: sensor.e0_ec_2c_c8_5e_2c_temperature
+    humidity_entity: sensor.e0_ec_2c_c8_5e_2c_humidity
+    climate_entity: climate.e0_ec_2c_c8_5e_2c      # KONTROLLERA
+    comfort_min: 18.0
+    comfort_max: 21.0
+    heat_share: 0.8
+
+database_path: hemopt.db
