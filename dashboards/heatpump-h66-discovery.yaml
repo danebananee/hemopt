@@ -393,6 +393,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.e0_ec_2c_c8_5e_2c
+                name: Borvarde
               - entity: sensor.e0_ec_2c_c8_5e_2c_temperature
                 name: Temperatur
               - entity: sensor.e0_ec_2c_c8_5e_2c_humidity
@@ -405,6 +407,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.e9_bd_23_4a_e9_a8
+                name: Borvarde
               - entity: sensor.e9_bd_23_4a_e9_a8_temperature
                 name: Temperatur
               - entity: sensor.e9_bd_23_4a_e9_a8_humidity
@@ -417,6 +421,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.ce_9f_90_cd_bf_74
+                name: Borvarde
               - entity: sensor.ce_9f_90_cd_bf_74_temperature
                 name: Temperatur
               - entity: sensor.ce_9f_90_cd_bf_74_humidity
@@ -429,6 +435,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.ca_97_f7_ba_7d_23
+                name: Borvarde
               - entity: sensor.ca_97_f7_ba_7d_23_temperature
                 name: Temperatur
               - entity: sensor.ca_97_f7_ba_7d_23_humidity
@@ -476,6 +484,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.d5_ba_fd_c1_0c_c1
+                name: Borvarde
               - entity: sensor.d5_ba_fd_c1_0c_c1_temperature
                 name: Temperatur
               - entity: sensor.d5_ba_fd_c1_0c_c1_humidity
@@ -488,6 +498,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.c8_1b_04_e0_7e_90
+                name: Borvarde
               - entity: sensor.c8_1b_04_e0_7e_90_temperature
                 name: Temperatur
               - entity: sensor.c8_1b_04_e0_7e_90_humidity
@@ -500,6 +512,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.fa_6a_ee_c8_9a_63
+                name: Borvarde
               - entity: sensor.fa_6a_ee_c8_9a_63_temperature
                 name: Temperatur
               - entity: sensor.fa_6a_ee_c8_9a_63_humidity
@@ -512,6 +526,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.f7_d4_23_14_49_da
+                name: Borvarde
               - entity: sensor.f7_d4_23_14_49_da_temperature
                 name: Temperatur
               - entity: sensor.f7_d4_23_14_49_da_humidity
@@ -524,6 +540,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.e3_09_14_3f_f0_f0
+                name: Borvarde
               - entity: sensor.e3_09_14_3f_f0_f0_temperature
                 name: Temperatur
               - entity: sensor.e3_09_14_3f_f0_f0_humidity
@@ -536,6 +554,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.e6_5e_d9_54_a8_e7
+                name: Borvarde
               - entity: sensor.e6_5e_d9_54_a8_e7_temperature
                 name: Temperatur
               - entity: sensor.e6_5e_d9_54_a8_e7_humidity
@@ -548,6 +568,8 @@ views:
             grid_options:
               columns: 12
             entities:
+              - entity: climate.d0_f5_31_05_49_9d
+                name: Borvarde
               - entity: sensor.d0_f5_31_05_49_9d_temperature
                 name: Temperatur
               - entity: sensor.d0_f5_31_05_49_9d_humidity
