@@ -164,7 +164,8 @@ All husbeskrivning samlas i **`/homeassistant/hemopt.yaml`**.
 | **hemopt.yaml** | Rum, VP, varmvatten, braskamin, säkringsabonnemang, detaljerade nätpriser |
 
 Under **Vad gör modellen** i panelen (och `sensor.hemopt_model_action` i HA)
-syns meningar som «Laddar varmvatten inför dyrare period».
+syns meningar som «Laddar varmvatten inför dyrare period». Texterna är skrivna
+för slutkund (svenska med kommatecken) och varnar om elpriset snart sjunker.
 
 **Besparingsåtgärder** föreslår byte av avräkning och eventuell sänkning av
 huvudsäkring (25 → 20 → 16 A) när det finns tillräckligt med mätdata — annars
