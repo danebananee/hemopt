@@ -1966,8 +1966,8 @@ function renderChrome() {
   const subtitle = document.getElementById("plan-subtitle");
   if (state.plan) {
     subtitle.textContent =
-      `Planen gäller ${fmt(status.horizon_hours, 0)} timmar framåt (ingen historik här — se «Användning och besparing»)` +
-      ` · energikostnad ${fmt(status.energy_cost_sek, 0)} kr, effektavgift ${fmt(status.peak_cost_sek, 0)} kr`;
+      `${fmt(status.horizon_hours, 0)} timmar framåt · energikostnad ${fmt(status.energy_cost_sek, 0)} kr` +
+      `, effektavgift ${fmt(status.peak_cost_sek, 0)} kr. Historik finns under «Förbrukning».`;
   }
 
   const dhwSubtitle = document.getElementById("dhw-subtitle");
@@ -1980,6 +1980,42 @@ function renderChrome() {
         status.last_sample ? clockLabel(status.last_sample) : "—"
       }`
     : "Väntar på första planen";
+
+  renderSummary();
+}
+
+function renderSummary() {
+  const line = document.getElementById("summary-line");
+  if (!line) return;
+  const status = state.status || {};
+  const prices = state.prices || {};
+  const peaks = state.peaks || {};
+
+  if (!state.plan) {
+    line.textContent = status.starting
+      ? "Räknar fram den första planen — det tar några minuter första gången."
+      : "Ingen plan ännu. Kontrollera att elpris och rumsgivare finns.";
+    return;
+  }
+
+  const price = prices.current_total_sek ?? status.current_price_sek;
+  const headline = status.model_action || "Håller en lugn kurva";
+  const parts = [];
+  if (price != null) parts.push(`Elen kostar ${fmt(price, 2)} kr/kWh just nu`);
+  parts.push(headline.charAt(0).toLowerCase() + headline.slice(1));
+  if (status.savings_sek != null) {
+    parts.push(
+      `planen sparar ${fmt(status.savings_sek, 0)} kr på ${fmt(status.horizon_hours, 0)} timmar`,
+    );
+  }
+  if (peaks.enabled && peaks.threshold_kw) {
+    parts.push(`håller effekten under ${fmt(peaks.threshold_kw, 1)} kW`);
+  }
+  let text = `${parts.join(" · ")}.`;
+  if (!status.control_enabled) {
+    text += " Styrningen är av, så det här är bara en plan.";
+  }
+  line.textContent = text;
 }
 
 function renderAll() {
@@ -2001,6 +2037,42 @@ function renderAll() {
   renderRooms();
   renderNotes();
   renderErrors();
+}
+
+/* ------------------------------------------------------------------ tabs */
+
+function activeTab() {
+  try {
+    return localStorage.getItem("hemopt.tab") || "overview";
+  } catch {
+    return "overview";
+  }
+}
+
+function showTab(name) {
+  for (const panel of document.querySelectorAll(".tab-panel")) {
+    panel.hidden = panel.dataset.tab !== name;
+  }
+  for (const button of document.querySelectorAll(".tab-btn")) {
+    button.classList.toggle("active", button.dataset.tab === name);
+  }
+  try {
+    localStorage.setItem("hemopt.tab", name);
+  } catch {
+    /* private mode */
+  }
+  // Charts measure their host, which is zero-width while hidden.
+  renderAll();
+}
+
+function setupTabs() {
+  const nav = document.getElementById("tab-nav");
+  if (!nav) return;
+  nav.addEventListener("click", (event) => {
+    const button = event.target.closest(".tab-btn");
+    if (button) showTab(button.dataset.tab);
+  });
+  showTab(activeTab());
 }
 
 /* ------------------------------------------------------------------ boot */
@@ -2038,7 +2110,7 @@ async function refresh() {
 document.getElementById("replan-btn").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
-  button.textContent = "Planerar…";
+  button.textContent = "Räknar…";
   try {
     await postJSON("/api/replan");
     await refresh();
@@ -2046,7 +2118,7 @@ document.getElementById("replan-btn").addEventListener("click", async (event) =>
     console.error(error);
   } finally {
     button.disabled = false;
-    button.textContent = "Planera om";
+    button.textContent = "Räkna om planen";
   }
 });
 
@@ -2096,5 +2168,6 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(renderAll, 150);
 });
 
+setupTabs();
 refresh();
 setInterval(refresh, REFRESH_MS);

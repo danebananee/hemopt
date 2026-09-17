@@ -172,3 +172,14 @@ async def test_train_endpoint_returns_model_summary(client):
 
     assert len(body["models"]) == 9
     assert body["hot_water_kwh_per_day"] >= 0
+
+
+async def test_panel_groups_views_into_tabs(client):
+    """The dashboard is task-oriented: one tab per question a household asks."""
+    http, _ = client
+    body = (await http.get("/")).text
+
+    for tab in ("overview", "price", "usage", "comfort", "save", "system"):
+        assert f'data-tab="{tab}"' in body
+    assert 'id="summary-line"' in body
+    assert "Vad händer just nu" in body
