@@ -90,10 +90,15 @@
             <span class="key key-price">Elpris</span>
             <span class="key key-power">Planerad total effekt</span>
             <span class="key key-pump">Värmepump</span>
-            <span class="key key-hourly">Timmedel (debiteras)</span>
-            <span class="key key-threshold">Effekttak (undvik)</span>
+            <span class="key key-hourly">Timmedel (det som debiteras)</span>
+            <span class="key key-threshold">Effekttak (håll under)</span>
           </div>
         </div>
+        <p class="muted chart-help">
+          Timmedel är genomsnittet under en hel klocktimme. Effektavgiften räknas
+          på timmedel — en kort spik kostar inget så länge timmen som helhet håller
+          sig under taket.
+        </p>
         <div class="chart-host" id="plan-chart"></div>
         <div id="plan-notes" class="notes"></div>
       </section>
@@ -178,7 +183,8 @@
           <div>
             <h2>Jämför elavtal</h2>
             <p class="muted" id="advice-subtitle">
-              Vad andra avräkningsformer hade kostat — med och utan styrning.
+              Vad din förbrukning hade kostat med olika avräkning — per år, med och
+              utan hemopts styrning.
             </p>
           </div>
           <button type="button" class="btn" id="advice-btn">Räkna om</button>

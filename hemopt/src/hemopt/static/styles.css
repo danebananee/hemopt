@@ -869,6 +869,28 @@ footer {
   font-size: 0.8rem;
 }
 
+.chart-help {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.key-live::before {
+  background: #8aa0b8;
+}
+
+.key-peaklines::before {
+  background: #ffb454;
+}
+
 .period-controls {
   display: flex;
   flex-wrap: wrap;

@@ -483,7 +483,11 @@ def _advise_single_rate_grid(
         ),
         annual_saving_sek=saving,
         confidence=_confidence_for_span(report.measured_days, config.advice),
-        action="Elnatstariff byter du hos natbolaget, inte hos elhandlaren.",
+        action=(
+            "Elnatstariff byter du hos natbolaget (t.ex. Vattenfall Eldistribution): "
+            "ring kundtjanst eller anvand deras webbformular och be om tariffen ovan. "
+            "Sakringen sitter kvar — bara abonnemanget andras."
+        ),
         caveat="Natbolag tar ibland ut en avgift for tariffbyte, och kan ha bindningstid.",
     )
 
@@ -656,7 +660,11 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
         ),
         annual_saving_sek=saving,
         confidence=confidence,
-        action="Sakringsbyte bestaller du hos natbolaget; en elektriker byter den.",
+        action=(
+            "Sa byter du sakring: 1) begar lagre sakringsabonnemang hos natbolaget, "
+            "2) de skickar en bekraftelse och ny tariff, 3) en behorig elektriker byter "
+            "sakringarna i elcentralen. Har du 25 A i dag ar nasta steg 20 A."
+        ),
         caveat=(
             "Matdata maste tacka en vinter for att vara rattvisande. "
             "Elbilsladdning och laddbox som startar samtidigt som varmepumpen "

@@ -86,11 +86,32 @@ def history_payload(engine, days: int = 14, resolution: str = "hour") -> dict[st
     mean_kw = total_kwh / hours if hours else 0.0
     peak_hour = max(raw, key=lambda item: item[1]) if raw else None
 
+    # Momentary readings from the house meter, so a household can see the
+    # difference between a short burst and the hourly mean that is billed.
+    live: list[dict[str, Any]] = []
+    meter = engine.config.base_load.total_power_entity
+    if meter and resolution == "hour":
+        for moment, value in engine.store.samples(meter, since):
+            kw = value / 1000.0 if value > 100 else value
+            live.append({"t": moment.isoformat(), "kw": round(kw, 3)})
+
+    state = engine.peaks
+    tariff = engine.config.peak_tariff
+    counted = [
+        {
+            "day": peak.day.date().isoformat(),
+            "hour": peak.hour,
+            "kw": round(peak.kw, 3),
+        }
+        for peak in (state.counted if state else [])
+    ]
+
     plan = engine.plan
     return {
         "days": days,
         "resolution": resolution,
         "points": points,
+        "live_points": live,
         "sample_count": hours,
         "hours_measured": hours,
         "measured_days": round(hours / 24.0, 2),
@@ -99,6 +120,11 @@ def history_payload(engine, days: int = 14, resolution: str = "hour") -> dict[st
         "kwh_per_day": round(total_kwh / (hours / 24.0), 2) if hours >= 1 else None,
         "peak_hour_kw": round(peak_hour[1], 3) if peak_hour else None,
         "peak_hour_at": peak_hour[0].isoformat() if peak_hour else None,
+        "peak_enabled": tariff.enabled,
+        "peak_n": tariff.n_peaks,
+        "peak_threshold_kw": round(state.threshold_kw, 3) if state else None,
+        "peak_average_kw": round(state.average_kw, 3) if state else None,
+        "peak_counted": counted,
         "plan_hours": (
             round(len(plan.times) * plan.step_minutes / 60.0, 1) if plan and plan.times else None
         ),

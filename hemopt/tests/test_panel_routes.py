@@ -118,3 +118,23 @@ def test_apply_peak_settings_rejects_empty_months(tmp_path):
     engine = DemoEngine(config)
     with pytest.raises(HTTPException):
         apply_peak_settings(engine, PeakSettingsUpdate(months=[]))
+
+
+async def test_history_includes_peak_lines_and_live_power(client):
+    """The chart needs the counted peaks and the momentary meter trace."""
+    http, engine = client
+    now = datetime.now(TZ).replace(minute=0, second=0, microsecond=0)
+    for hour in range(30):
+        engine.store.record_hourly_power(now - timedelta(hours=hour), 1.0 + (hour % 4) * 0.5)
+    meter = engine.config.base_load.total_power_entity
+    engine.store.record_samples(
+        [(meter, now - timedelta(minutes=minute), 2400.0) for minute in range(0, 120, 5)]
+    )
+
+    body = (await http.get("/api/history?days=3")).json()
+
+    assert body["peak_threshold_kw"] is not None
+    assert isinstance(body["peak_counted"], list)
+    assert body["peak_n"] >= 1
+    assert len(body["live_points"]) >= 10
+    assert body["live_points"][0]["kw"] == pytest.approx(2.4)

@@ -342,7 +342,6 @@ function renderHotWater(host, plan) {
   const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
   const root = el("g", { transform: `translate(${margin.left},${margin.top})` });
   svg.appendChild(root);
-
   const barWidth = Math.max(innerW / charge.length, 1);
   charge.forEach((value, i) => {
     if (value <= 0.02) return;
@@ -368,6 +367,9 @@ function renderHotWater(host, plan) {
       ]),
     );
   }
+  axis.appendChild(
+    el("text", { x: -7, y: -2, "text-anchor": "end" }, [document.createTextNode("°C")]),
+  );
 
   root.appendChild(
     el("path", {
@@ -1061,7 +1063,7 @@ function renderHistory() {
       html("p", "empty", "Ingen förbrukning sparad ännu — den fylls på när elmätaren är kopplad."),
     );
   } else {
-    renderPowerHistory(host, points);
+    renderPowerHistory(host, points, history);
   }
 
   const cards = html("div", "history-kpis");
@@ -1171,32 +1173,42 @@ async function refreshPrices() {
   renderPriceChart();
 }
 
-function renderPowerHistory(host, points) {
+function renderPowerHistory(host, points, history) {
   const width = host.clientWidth || 480;
-  const height = 180;
-  const pad = { top: 12, right: 12, bottom: 24, left: 42 };
+  const height = 220;
+  const pad = { top: 14, right: 14, bottom: 30, left: 46 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const times = points.map((p) => new Date(p.t).getTime());
-  const values = points.map((p) => p.kw);
-  const max = Math.max(...values, 1);
-  const x = scaleLinear([times[0], times[times.length - 1]], [0, innerW]);
+  const live = (history && history.live_points) || [];
+  const liveTimes = live.map((p) => new Date(p.t).getTime());
+  const peakLines = (history && history.peak_counted) || [];
+  const threshold = history ? history.peak_threshold_kw : null;
+
+  const max =
+    Math.max(
+      ...points.map((p) => p.kw),
+      ...live.map((p) => p.kw),
+      threshold || 0,
+      ...peakLines.map((p) => p.kw),
+      1,
+    ) * 1.1;
+  const t0 = Math.min(times[0], ...(liveTimes.length ? [liveTimes[0]] : [times[0]]));
+  const t1 = Math.max(
+    times[times.length - 1],
+    ...(liveTimes.length ? [liveTimes[liveTimes.length - 1]] : [times[times.length - 1]]),
+  );
+  const x = scaleLinear([t0, t1], [0, innerW]);
   const y = scaleLinear([0, max], [innerH, 0]);
 
   const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height: String(height) });
   const g = el("g", { transform: `translate(${pad.left},${pad.top})` });
+
   for (let i = 0; i <= 4; i += 1) {
     const value = (max / 4) * i;
     const yy = y(value);
     g.appendChild(
-      el("line", {
-        x1: 0,
-        x2: innerW,
-        y1: yy,
-        y2: yy,
-        stroke: "currentColor",
-        "stroke-opacity": "0.12",
-      }),
+      el("line", { x1: 0, x2: innerW, y1: yy, y2: yy, stroke: "currentColor", "stroke-opacity": "0.12" }),
     );
     g.appendChild(
       el("text", { x: -6, y: yy + 3.5, "text-anchor": "end", class: "axis" }, [
@@ -1209,30 +1221,90 @@ function renderPowerHistory(host, points) {
       document.createTextNode("kW"),
     ]),
   );
+
+  // Momentary meter readings: spiky, and NOT what the grid bills.
+  if (live.length > 1) {
+    g.appendChild(
+      el("path", {
+        d: linePath(live.map((p, i) => [x(liveTimes[i]), y(p.kw)])),
+        fill: "none",
+        stroke: "#8aa0b8",
+        "stroke-width": "0.9",
+        "stroke-opacity": "0.75",
+      }),
+    );
+  }
+
+  // Hourly means as a step line — this is the billed quantity.
+  const steps = [];
+  points.forEach((p, i) => {
+    const start = times[i];
+    const end = i + 1 < times.length ? times[i + 1] : start + 3600000;
+    steps.push([x(start), y(p.kw)], [x(end), y(p.kw)]);
+  });
   g.appendChild(
-    el("path", {
-      d: linePath(points.map((p, i) => [x(times[i]), y(p.kw)])),
-      fill: "none",
-      stroke: "#4da3ff",
-      "stroke-width": "1.5",
-    }),
+    el("path", { d: linePath(steps), fill: "none", stroke: "#4da3ff", "stroke-width": "1.8" }),
   );
-  const first = new Date(times[0]);
-  const last = new Date(times[times.length - 1]);
-  const dayLabel = (d) =>
-    d.toLocaleDateString("sv-SE", { day: "numeric", month: "short" });
+
+  // The peaks that are actually counted this month, drawn where they land.
+  for (const peak of peakLines) {
+    const yy = y(peak.kw);
+    g.appendChild(
+      el("line", {
+        x1: 0,
+        x2: innerW,
+        y1: yy,
+        y2: yy,
+        stroke: "#ffb454",
+        "stroke-width": "1",
+        "stroke-dasharray": "3 5",
+        "stroke-opacity": "0.8",
+      }),
+    );
+  }
+  if (threshold) {
+    const yy = y(threshold);
+    g.appendChild(
+      el("line", {
+        x1: 0,
+        x2: innerW,
+        y1: yy,
+        y2: yy,
+        stroke: "#ff5f56",
+        "stroke-width": "1.6",
+        "stroke-dasharray": "6 4",
+      }),
+    );
+    g.appendChild(
+      el("text", { x: innerW, y: yy - 4, "text-anchor": "end", class: "axis" }, [
+        document.createTextNode(`tröskel ${fmt(threshold, 1)} kW`),
+      ]),
+    );
+  }
+
+  const dayLabel = (ms) =>
+    new Date(ms).toLocaleDateString("sv-SE", { day: "numeric", month: "short" });
   g.appendChild(
-    el("text", { x: 0, y: innerH + 16, class: "axis" }, [
-      document.createTextNode(dayLabel(first)),
-    ]),
+    el("text", { x: 0, y: innerH + 18, class: "axis" }, [document.createTextNode(dayLabel(t0))]),
   );
   g.appendChild(
-    el("text", { x: innerW, y: innerH + 16, "text-anchor": "end", class: "axis" }, [
-      document.createTextNode(dayLabel(last)),
+    el("text", { x: innerW, y: innerH + 18, "text-anchor": "end", class: "axis" }, [
+      document.createTextNode(dayLabel(t1)),
     ]),
   );
   svg.appendChild(g);
   host.appendChild(svg);
+
+  const legend = html("div", "chart-legend");
+  legend.appendChild(html("span", "key key-hourly", "Timmedel (debiteras)"));
+  if (live.length > 1) legend.appendChild(html("span", "key key-live", "Momentan effekt"));
+  if (peakLines.length) {
+    legend.appendChild(
+      html("span", "key key-peaklines", `${peakLines.length} högsta timmar denna månad`),
+    );
+  }
+  if (threshold) legend.appendChild(html("span", "key key-threshold", "Tröskel att hålla under"));
+  host.appendChild(legend);
 }
 
 function renderWoodStove() {
@@ -1440,12 +1512,24 @@ function renderAdvice() {
 
   const scenarios = advice.scenarios || [];
   if (scenarios.length) {
-    const intro = html(
-      "p",
-      "muted advice-intro",
-      "Kolumnen «Mot dig» är årsprognos jämfört med ditt avtal utan styrning. " +
-        "Positivt tal = billigare. «Med styrning» antar att ungefär hälften av " +
-        "förbrukningen kan flyttas till billiga timmar (övre gräns).",
+    const intro = html("div", "advice-intro");
+    intro.appendChild(
+      html(
+        "p",
+        "muted",
+        "Tabellen visar vad ett helt år skulle kosta med din uppmätta förbrukning. " +
+          "«Utan styrning» är som du använder el i dag. «Med styrning» antar att hemopt " +
+          "får flytta cirka hälften av förbrukningen till billiga timmar (bästa fall).",
+      ),
+    );
+    intro.appendChild(
+      html(
+        "p",
+        "muted",
+        "«Skillnad mot ditt avtal» är plus när alternativet är billigare. " +
+          "Skillnaderna är små eftersom det mesta av elräkningen är fasta avgifter, " +
+          "energiskatt och nätöverföring — bara spotdelen påverkas av när du använder el.",
+      ),
     );
     host.appendChild(intro);
 
@@ -1455,8 +1539,8 @@ function renderAdvice() {
       "Avtal",
       "Utan styrning",
       "Med styrning",
-      "Mot dig (utan)",
-      "Mot dig (med)",
+      "Skillnad mot ditt (utan)",
+      "Skillnad mot ditt (med)",
     ]) {
       head.appendChild(html("th", null, label));
     }
@@ -1887,7 +1971,9 @@ function renderChrome() {
   }
 
   const dhwSubtitle = document.getElementById("dhw-subtitle");
-  dhwSubtitle.textContent = `Beräknad förbrukning ${fmt(status.hot_water_kwh_per_day, 1)} kWh/dygn`;
+  dhwSubtitle.textContent =
+    `Planerad tanktemperatur (°C) kommande dygnet · orange staplar = när tanken laddas · ` +
+    `hushållet använder cirka ${fmt(status.hot_water_kwh_per_day, 1)} kWh/dygn`;
 
   document.getElementById("footer-status").textContent = status.last_plan
     ? `Senaste plan ${clockLabel(status.last_plan)} · senaste mätning ${
