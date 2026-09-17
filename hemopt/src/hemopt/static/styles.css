@@ -908,6 +908,10 @@ footer {
   gap: 18px;
 }
 
+.tab-panel[hidden] {
+  display: none;
+}
+
 .summary-card {
   padding: 1.1rem 1.25rem;
 }
