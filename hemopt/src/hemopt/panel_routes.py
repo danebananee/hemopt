@@ -79,12 +79,29 @@ def history_payload(engine, days: int = 14, resolution: str = "hour") -> dict[st
     hourly = engine.store.all_hourly_power(since=since)
     raw = sorted(hourly.items())
     points = _aggregate_power_points(raw, resolution)
+
+    # Each stored value is the mean power over one clock hour, so kWh == kW·1 h.
+    total_kwh = sum(kw for _, kw in raw)
+    hours = len(raw)
+    mean_kw = total_kwh / hours if hours else 0.0
+    peak_hour = max(raw, key=lambda item: item[1]) if raw else None
+
     plan = engine.plan
     return {
         "days": days,
         "resolution": resolution,
         "points": points,
-        "sample_count": len(raw),
+        "sample_count": hours,
+        "hours_measured": hours,
+        "measured_days": round(hours / 24.0, 2),
+        "total_kwh": round(total_kwh, 2),
+        "mean_kw": round(mean_kw, 3),
+        "kwh_per_day": round(total_kwh / (hours / 24.0), 2) if hours >= 1 else None,
+        "peak_hour_kw": round(peak_hour[1], 3) if peak_hour else None,
+        "peak_hour_at": peak_hour[0].isoformat() if peak_hour else None,
+        "plan_hours": (
+            round(len(plan.times) * plan.step_minutes / 60.0, 1) if plan and plan.times else None
+        ),
         "savings_sek": round(plan.savings_sek, 2) if plan else None,
         "baseline_cost_sek": (
             round(plan.baseline_energy_cost_sek + plan.baseline_peak_cost_sek, 2) if plan else None
@@ -96,9 +113,15 @@ def history_payload(engine, days: int = 14, resolution: str = "hour") -> dict[st
 def _aggregate_power_points(
     raw: list[tuple[datetime, float]], resolution: str
 ) -> list[dict[str, Any]]:
-    """Average hourly kW into coarser buckets for the history chart."""
+    """Bucket hourly means into coarser periods.
+
+    `kw` is the mean power in the bucket, `kwh` the energy it represents. One
+    stored sample is one clock hour, so energy is simply the sum of the means.
+    """
     if resolution == "hour" or not raw:
-        return [{"t": moment.isoformat(), "kw": round(kw, 3)} for moment, kw in raw]
+        return [
+            {"t": moment.isoformat(), "kw": round(kw, 3), "kwh": round(kw, 3)} for moment, kw in raw
+        ]
 
     buckets: dict[datetime, list[float]] = {}
     for moment, kw in raw:
@@ -115,7 +138,12 @@ def _aggregate_power_points(
         buckets.setdefault(key, []).append(kw)
 
     return [
-        {"t": key.isoformat(), "kw": round(sum(values) / len(values), 3)}
+        {
+            "t": key.isoformat(),
+            "kw": round(sum(values) / len(values), 3),
+            "kwh": round(sum(values), 2),
+            "hours": len(values),
+        }
         for key, values in sorted(buckets.items())
     ]
 

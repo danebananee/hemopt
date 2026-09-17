@@ -85,6 +85,23 @@ async def test_history_can_aggregate_by_day(client):
     assert body["sample_count"] >= 48
 
 
+async def test_history_reports_energy_and_peak(client):
+    """The panel needs kWh and the billed hourly mean, not only a curve."""
+    http, engine = client
+    now = datetime.now(TZ).replace(minute=0, second=0, microsecond=0)
+    for hour in range(24):
+        engine.store.record_hourly_power(now - timedelta(hours=hour), 1.0)
+    engine.store.record_hourly_power(now - timedelta(hours=25), 4.0)
+
+    body = (await http.get("/api/history?days=3")).json()
+    assert body["total_kwh"] >= 28.0
+    assert body["peak_hour_kw"] >= 4.0
+    assert body["peak_hour_at"] is not None
+    assert body["kwh_per_day"] > 0
+    assert body["hours_measured"] >= 25
+    assert body["points"][0]["kwh"] is not None
+
+
 async def test_prices_endpoint_returns_current_and_series(client):
     http, _engine = client
     body = (await http.get("/api/prices")).json()

@@ -555,10 +555,10 @@ function renderKpis() {
       tone: "",
     },
     {
-      label: "Besparing planperiod",
+      label: "Besparing i planen",
       value: fmt(status.savings_sek, 0),
       unit: "SEK",
-      note: `${fmt(status.total_cost_sek, 0)} mot ${fmt(status.baseline_cost_sek, 0)} SEK utan styrning`,
+      note: `Kommande ${fmt(status.horizon_hours, 0)} h: ${fmt(status.total_cost_sek, 0)} kr i stället för ${fmt(status.baseline_cost_sek, 0)} kr`,
       tone: "good",
     },
     {
@@ -1051,7 +1051,9 @@ function renderHistory() {
     quarter: "kvartal",
   }[history.resolution || state.historyResolution] || history.resolution;
   if (subtitle) {
-    subtitle.textContent = `Senaste ${history.days} dygnen · visat per ${resLabel} (${history.sample_count || 0} timmar sparade)`;
+    subtitle.textContent =
+      `Uppmätt förbrukning · visat per ${resLabel} · ` +
+      `${fmt(history.hours_measured || 0, 0)} timmar sparade (${fmt(history.measured_days || 0, 1)} dygn)`;
   }
   const points = history.points || [];
   if (!points.length) {
@@ -1063,19 +1065,47 @@ function renderHistory() {
   }
 
   const cards = html("div", "history-kpis");
+  const planHours = history.plan_hours ? `${fmt(history.plan_hours, 0)} h` : "planen";
   const items = [
-    ["Planerad besparing", history.savings_sek, "kr mot utan styrning"],
-    ["Kostnad med styrning", history.optimised_cost_sek, "kr i planperioden"],
-    ["Kostnad utan styrning", history.baseline_cost_sek, "kr i planperioden"],
+    [
+      "Förbrukning totalt",
+      history.total_kwh == null ? "—" : `${fmt(history.total_kwh, 1)} kWh`,
+      "energi i valda perioden",
+    ],
+    [
+      "Snitt per dygn",
+      history.kwh_per_day == null ? "—" : `${fmt(history.kwh_per_day, 1)} kWh`,
+      "utifrån sparade timmar",
+    ],
+    [
+      "Högsta timme",
+      history.peak_hour_kw == null ? "—" : `${fmt(history.peak_hour_kw, 2)} kW`,
+      history.peak_hour_at
+        ? `timmedel ${clockLabel(history.peak_hour_at)} — det här debiteras`
+        : "timmedeleffekt",
+    ],
+    [
+      "Besparing i planen",
+      history.savings_sek == null ? "—" : `${fmt(history.savings_sek, 0)} kr`,
+      `gäller kommande ${planHours}, inte hela perioden`,
+    ],
   ];
   for (const [label, value, note] of items) {
     const card = html("div", "history-kpi");
     card.appendChild(html("div", "label", label));
-    card.appendChild(html("div", "value", value == null ? "—" : `${fmt(value, 0)} kr`));
+    card.appendChild(html("div", "value", value));
     card.appendChild(html("div", "muted", note));
     cards.appendChild(card);
   }
   summary.appendChild(cards);
+  summary.appendChild(
+    html(
+      "p",
+      "muted",
+      "kW är effekt (hur snabbt el dras just då). kWh är energi (hur mycket som gått åt). " +
+        "Effektavgiften räknas på timmedel i kW.",
+    ),
+  );
 }
 
 function renderHistoryControls(host) {
@@ -1144,7 +1174,7 @@ async function refreshPrices() {
 function renderPowerHistory(host, points) {
   const width = host.clientWidth || 480;
   const height = 180;
-  const pad = { top: 12, right: 12, bottom: 24, left: 36 };
+  const pad = { top: 12, right: 12, bottom: 24, left: 42 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const times = points.map((p) => new Date(p.t).getTime());
@@ -1168,7 +1198,17 @@ function renderPowerHistory(host, points) {
         "stroke-opacity": "0.12",
       }),
     );
+    g.appendChild(
+      el("text", { x: -6, y: yy + 3.5, "text-anchor": "end", class: "axis" }, [
+        document.createTextNode(fmt(value, 1)),
+      ]),
+    );
   }
+  g.appendChild(
+    el("text", { x: -6, y: -2, "text-anchor": "end", class: "axis" }, [
+      document.createTextNode("kW"),
+    ]),
+  );
   g.appendChild(
     el("path", {
       d: linePath(points.map((p, i) => [x(times[i]), y(p.kw)])),
@@ -1176,6 +1216,20 @@ function renderPowerHistory(host, points) {
       stroke: "#4da3ff",
       "stroke-width": "1.5",
     }),
+  );
+  const first = new Date(times[0]);
+  const last = new Date(times[times.length - 1]);
+  const dayLabel = (d) =>
+    d.toLocaleDateString("sv-SE", { day: "numeric", month: "short" });
+  g.appendChild(
+    el("text", { x: 0, y: innerH + 16, class: "axis" }, [
+      document.createTextNode(dayLabel(first)),
+    ]),
+  );
+  g.appendChild(
+    el("text", { x: innerW, y: innerH + 16, "text-anchor": "end", class: "axis" }, [
+      document.createTextNode(dayLabel(last)),
+    ]),
   );
   svg.appendChild(g);
   host.appendChild(svg);
@@ -1507,7 +1561,7 @@ function renderAdvice() {
         "p",
         "empty",
         advice.measured_days != null
-          ? `Har ${fmt(advice.measured_days, 0)} dygn sparade — avtalsjämförelse behöver minst två dygn med elmätardata (timmedeleffekt).`
+          ? `Har ${fmt(advice.measured_days, 1)} dygn (${fmt((advice.measured_days || 0) * 24, 0)} timmar) sparade — avtalsjämförelsen behöver minst två dygn med elmätardata.`
           : "Behöver mer mätdata innan avtalsjämförelsen blir meningsfull (minst två dygn).",
       ),
     );
@@ -1828,7 +1882,7 @@ function renderChrome() {
   const subtitle = document.getElementById("plan-subtitle");
   if (state.plan) {
     subtitle.textContent =
-      `${fmt(status.horizon_hours, 0)} timmar framåt · löst på ${fmt(status.solve_seconds, 2)} s` +
+      `Planen gäller ${fmt(status.horizon_hours, 0)} timmar framåt (ingen historik här — se «Användning och besparing»)` +
       ` · energikostnad ${fmt(status.energy_cost_sek, 0)} kr, effektavgift ${fmt(status.peak_cost_sek, 0)} kr`;
   }
 

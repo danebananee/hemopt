@@ -574,16 +574,26 @@ class Engine:
         a burst of requests to the price feed.
         """
         history = self.store.all_hourly_power()
-        if len(history) < 48:
+        measured_days = _measured_days(history)
+        if len(history) < 24:
             self.advice = AdviceReport(
-                notes=["For lite matdata an; radgivningen behover minst tva dygn."]
+                measured_days=measured_days,
+                current_contract=self.config.energy_price.contract,
+                notes=[
+                    f"For lite matdata an: {len(history)} timmar sparade "
+                    f"({measured_days:.1f} dygn). Radgivningen behover minst ett dygn."
+                ],
             )
             return self.advice
 
         load = samples_from_hourly(history)
         spot = await self._historical_spot([sample.start for sample in load])
         if spot is None:
-            self.advice = AdviceReport(notes=["Historiska spotpriser kunde inte hamtas."])
+            self.advice = AdviceReport(
+                measured_days=measured_days,
+                current_contract=self.config.energy_price.contract,
+                notes=["Historiska spotpriser kunde inte hamtas."],
+            )
             return self.advice
 
         self.advice = build_advice(
@@ -1165,6 +1175,15 @@ def _heat_fraction(
         return 0.0
     error = setpoint - indoor
     return max(0.0, min(1.0, error / 0.5))
+
+
+def _measured_days(history: dict[datetime, float]) -> float:
+    """Calendar span covered by the stored hourly means."""
+    if len(history) < 2:
+        return len(history) / 24.0
+    moments = sorted(history)
+    span = moments[-1] - moments[0]
+    return (span.total_seconds() + 3600.0) / 86400.0
 
 
 def _hourly_prices(plan: Plan) -> list[tuple[datetime, float]]:

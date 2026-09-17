@@ -215,6 +215,20 @@ Det här är **inte** del av styrningen och kan tas bort senare
 samlas — ju mer börvärdena skiljer sig mellan rummen, desto tydligare
 blir matrisen.
 
+## Användning och besparing (panelen)
+
+Kortet visar **uppmätt** förbrukning (timmedel från elmätaren) med valbar
+period och skala. Siffrorna under grafen är förbrukning totalt (kWh), snitt per
+dygn, högsta timme (kW — det är den som debiteras) och besparingen i den
+aktuella planen.
+
+**kW** är effekt (hur snabbt el dras just då). **kWh** är energi (hur mycket
+som gått åt). Effektavgiften räknas på **timmedel i kW**, inte på en kort topp.
+
+**Plan för kommande dygnet** är alltid framåt i tiden — historik finns bara i
+kortet ovan. «Besparing i planen» gäller planens horisont (36 h), inte hela
+tiden sedan installation.
+
 ## Felsök
 
 Det finns **ingen** Info-toggle «Allow Home Assistant API». Tillägget har

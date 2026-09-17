@@ -431,3 +431,29 @@ def test_hourly_power_converts_to_load_samples():
 
     assert [s.kwh for s in samples] == [0.0, 1.0, 2.0]
     assert samples[0].start == START
+
+
+async def test_refresh_advice_reports_measured_days_when_data_is_thin(tmp_path, monkeypatch):
+    """47 stored hours must not read as «0 dygn sparade»."""
+    from hemopt.demo import DemoEngine, demo_config
+
+    config = demo_config(database_path=str(tmp_path / "advice.db"))
+    engine = DemoEngine(config)
+    now = datetime.now(TZ).replace(minute=0, second=0, microsecond=0)
+    thin = {now - timedelta(hours=hour): 1.2 for hour in range(6)}
+    monkeypatch.setattr(engine.store, "all_hourly_power", lambda since=None: thin)
+
+    report = await engine.refresh_advice()
+
+    assert report.measured_days == pytest.approx(6 / 24, rel=0.2)
+    assert any("timmar sparade" in note for note in report.notes)
+    assert report.current_contract == config.energy_price.contract
+
+
+def test_measured_days_counts_the_span_not_the_samples():
+    from hemopt.engine import _measured_days
+
+    now = datetime.now(TZ).replace(minute=0, second=0, microsecond=0)
+    history = {now - timedelta(hours=hour): 1.0 for hour in range(47)}
+
+    assert _measured_days(history) == pytest.approx(2.0, rel=0.05)
