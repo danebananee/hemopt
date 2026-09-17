@@ -57,10 +57,8 @@
           <div>
             <h2>Vad som styrs</h2>
             <p class="muted">
-              Planen omfattar värmepump, varmvatten och rumssensorer. Utan
-              termostat per rum skrivs husbörvärdet via H66
-              (<code>room_setpoint_entity</code>). Slå på «Styr värmen» för att
-              skriva börvärden.
+              Planen omfattar värmepump, varmvatten och rum. Slå på «Styr värmen»
+              för att hemopt ska skriva temperaturerna till huset.
             </p>
           </div>
         </div>
@@ -71,13 +69,14 @@
         <div class="card-head">
           <div>
             <h2>Elpris</h2>
-            <p class="muted" id="price-subtitle">Spotpris igår, idag och imorgon — dra i grafen</p>
+            <p class="muted" id="price-subtitle">Spotpris — välj period och dra i grafen</p>
           </div>
           <div class="legend">
             <span class="key key-price">Spot (exkl. moms)</span>
             <span class="key key-power">Totalt med påslag</span>
           </div>
         </div>
+        <div id="price-controls" class="period-controls"></div>
         <div class="chart-host" id="price-chart"></div>
       </section>
 
@@ -92,7 +91,7 @@
             <span class="key key-power">Planerad total effekt</span>
             <span class="key key-pump">Värmepump</span>
             <span class="key key-hourly">Timmedel (debiteras)</span>
-            <span class="key key-threshold">Effekttak</span>
+            <span class="key key-threshold">Effekttak (undvik)</span>
           </div>
         </div>
         <div class="chart-host" id="plan-chart"></div>
@@ -126,9 +125,10 @@
           <div class="card-head">
             <div>
               <h2>Användning och besparing</h2>
-              <p class="muted" id="history-subtitle">Senaste två veckorna</p>
+              <p class="muted" id="history-subtitle">Välj period och skala</p>
             </div>
           </div>
+          <div id="history-controls" class="period-controls"></div>
           <div class="chart-host small" id="history-chart"></div>
           <div id="history-summary" class="history-summary"></div>
         </section>

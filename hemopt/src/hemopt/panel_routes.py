@@ -69,18 +69,22 @@ def apply_peak_settings(engine, update: PeakSettingsUpdate) -> dict[str, Any]:
     return peak_settings_payload(engine)
 
 
-def history_payload(engine, days: int = 14) -> dict[str, Any]:
-    days = max(1, min(days, 90))
+def history_payload(engine, days: int = 14, resolution: str = "hour") -> dict[str, Any]:
+    days = max(1, min(int(days), 366))
+    resolution = (resolution or "hour").lower()
+    if resolution not in {"hour", "day", "week", "month", "quarter"}:
+        resolution = "hour"
     now = engine._now()  # noqa: SLF001
     since = now - timedelta(days=days)
     hourly = engine.store.all_hourly_power(since=since)
-    points = [
-        {"t": moment.isoformat(), "kw": round(kw, 3)} for moment, kw in sorted(hourly.items())
-    ]
+    raw = sorted(hourly.items())
+    points = _aggregate_power_points(raw, resolution)
     plan = engine.plan
     return {
         "days": days,
+        "resolution": resolution,
         "points": points,
+        "sample_count": len(raw),
         "savings_sek": round(plan.savings_sek, 2) if plan else None,
         "baseline_cost_sek": (
             round(plan.baseline_energy_cost_sek + plan.baseline_peak_cost_sek, 2) if plan else None
@@ -89,10 +93,40 @@ def history_payload(engine, days: int = 14) -> dict[str, Any]:
     }
 
 
-async def prices_payload(engine) -> dict[str, Any]:
-    """Current spot plus yesterday/today/tomorrow — works without Home Assistant."""
+def _aggregate_power_points(
+    raw: list[tuple[datetime, float]], resolution: str
+) -> list[dict[str, Any]]:
+    """Average hourly kW into coarser buckets for the history chart."""
+    if resolution == "hour" or not raw:
+        return [{"t": moment.isoformat(), "kw": round(kw, 3)} for moment, kw in raw]
+
+    buckets: dict[datetime, list[float]] = {}
+    for moment, kw in raw:
+        if resolution == "day":
+            key = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif resolution == "week":
+            day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+            key = day - timedelta(days=day.weekday())
+        elif resolution == "month":
+            key = moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:  # quarter
+            month = ((moment.month - 1) // 3) * 3 + 1
+            key = moment.replace(month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        buckets.setdefault(key, []).append(kw)
+
+    return [
+        {"t": key.isoformat(), "kw": round(sum(values) / len(values), 3)}
+        for key, values in sorted(buckets.items())
+    ]
+
+
+async def prices_payload(engine, days_back: int = 1, days_forward: int = 1) -> dict[str, Any]:
+    """Spot plus surrounding days — works without Home Assistant."""
     from .prices import PriceClient
     from .timeutil import is_high_load_energy
+
+    days_back = max(0, min(int(days_back), 31))
+    days_forward = max(0, min(int(days_forward), 2))
 
     now = engine._now()  # noqa: SLF001
     tz = ZoneInfo(engine.config.site.timezone)
@@ -100,7 +134,11 @@ async def prices_payload(engine) -> dict[str, Any]:
     energy = engine.config.energy_price
     window = engine.config.peak_tariff.window
 
-    days = [now.date() - timedelta(days=1), now.date(), now.date() + timedelta(days=1)]
+    days = (
+        [now.date() - timedelta(days=offset) for offset in range(days_back, 0, -1)]
+        + [now.date()]
+        + [now.date() + timedelta(days=offset) for offset in range(1, days_forward + 1)]
+    )
     points: list[dict[str, Any]] = []
     async with PriceClient(area, energy, window, client=engine._http) as client:
         for day in days:
@@ -139,7 +177,6 @@ async def prices_payload(engine) -> dict[str, Any]:
             current_total = point["total"]
             break
 
-    # Prefer the live optimiser series when a plan already exists.
     if current_total is None and engine.prices is not None and engine.prices.times:
         series = engine.prices
         index = 0
@@ -156,6 +193,8 @@ async def prices_payload(engine) -> dict[str, Any]:
         "now": now.isoformat(),
         "current_spot_sek": current_spot,
         "current_total_sek": current_total,
+        "days_back": days_back,
+        "days_forward": days_forward,
         "points": points,
         "available": bool(points) or current_total is not None,
     }
@@ -174,9 +213,11 @@ def register_panel_routes(app: FastAPI, require_engine: Callable[[], Any]) -> No
         return payload
 
     @app.get("/api/history")
-    async def usage_history(days: int = 14) -> dict[str, Any]:
-        return history_payload(require_engine(), days=days)
+    async def usage_history(days: int = 14, resolution: str = "hour") -> dict[str, Any]:
+        return history_payload(require_engine(), days=days, resolution=resolution)
 
     @app.get("/api/prices")
-    async def spot_prices() -> dict[str, Any]:
-        return await prices_payload(require_engine())
+    async def spot_prices(days_back: int = 1, days_forward: int = 1) -> dict[str, Any]:
+        return await prices_payload(
+            require_engine(), days_back=days_back, days_forward=days_forward
+        )

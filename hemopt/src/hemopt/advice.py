@@ -326,14 +326,16 @@ def _confidence_for_span(days: float, settings: AdviceConfig) -> str:
 
 
 def _settlement_action_need_data(config: Config, measured_days: float) -> SavingAction:
-    needed = max(2, config.advice.min_history_days)
+    # Avtalsjämförelse behöver ungefär två dygn. Säkringsråd kräver längre
+    # historik (advice.min_history_days) och hanteras separat.
+    needed = 2
     return SavingAction(
         key="settlement",
-        title="Elavtal (avrakning)",
+        title="Elavtal (avräkning)",
         status="need_data",
         summary=(
-            f"Mer matdata behoves innan avtalet kan bedomas "
-            f"({measured_days:.0f} av minst {needed:.0f} dygn)."
+            f"Mer mätdata behövs innan avtalet kan bedömas "
+            f"({measured_days:.0f} av minst {needed:.0f} dygn med elmätare)."
         ),
         meta={
             "current_contract": config.energy_price.contract,

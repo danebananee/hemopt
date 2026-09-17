@@ -68,8 +68,21 @@ async def test_history_endpoint_returns_points(client):
 
     body = (await http.get("/api/history?days=2")).json()
     assert body["days"] == 2
+    assert body["resolution"] == "hour"
     assert len(body["points"]) >= 24
     assert body["savings_sek"] is not None
+
+
+async def test_history_can_aggregate_by_day(client):
+    http, engine = client
+    now = datetime.now(TZ).replace(minute=0, second=0, microsecond=0)
+    for hour in range(48):
+        engine.store.record_hourly_power(now - timedelta(hours=hour), 2.0)
+
+    body = (await http.get("/api/history?days=3&resolution=day")).json()
+    assert body["resolution"] == "day"
+    assert 1 <= len(body["points"]) <= 4
+    assert body["sample_count"] >= 48
 
 
 async def test_prices_endpoint_returns_current_and_series(client):

@@ -46,6 +46,31 @@ def _upcoming_price_rise(plan: Plan, index: int, hours: float = 6.0) -> tuple[bo
     return peak_later >= now_price * 1.15 + 0.05, now_price, peak_later
 
 
+def _upcoming_price_drop(
+    plan: Plan, index: int, hours: float = 2.0
+) -> tuple[bool, float, float, int]:
+    """Whether a clearly cheaper slot arrives soon (e.g. within ~30–120 min).
+
+    Returns (dropping, now_price, cheaper_price, minutes_until).
+    """
+    steps = max(1, int(round(hours * 60 / max(plan.step_minutes, 1))))
+    end = min(len(plan.price_sek_per_kwh), index + steps + 1)
+    if end <= index + 1:
+        now_price = plan.price_sek_per_kwh[index]
+        return False, now_price, now_price, 0
+    now_price = plan.price_sek_per_kwh[index]
+    best_i = index + 1
+    best = plan.price_sek_per_kwh[best_i]
+    for i in range(index + 1, end):
+        if plan.price_sek_per_kwh[i] < best:
+            best = plan.price_sek_per_kwh[i]
+            best_i = i
+    # Meaningful drop: at least 15% and 20 öre cheaper.
+    dropping = best <= now_price * 0.85 - 0.05 or best <= now_price - 0.20
+    minutes = max(plan.step_minutes, (best_i - index) * plan.step_minutes)
+    return dropping, now_price, best, minutes
+
+
 def explain_plan(
     plan: Plan | None,
     index: int,
@@ -61,8 +86,8 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="no_plan",
-                title="Ingen plan an",
-                detail="Vantar pa forsta berakningen. Spotpris och rumsgivare maste finnas.",
+                title="Ingen plan än",
+                detail="Väntar på första beräkningen. Spotpris och rumsgivare måste finnas.",
                 kind="warn",
             )
         )
@@ -72,6 +97,7 @@ def explain_plan(
     price = plan.price_sek_per_kwh[index]
     pump = plan.heat_pump_kw[index]
     rising, now_p, later_p = _upcoming_price_rise(plan, index)
+    dropping, drop_now, drop_later, drop_minutes = _upcoming_price_drop(plan, index)
 
     if not control_enabled:
         actions.append(
@@ -79,8 +105,8 @@ def explain_plan(
                 key="observe",
                 title="Planerar utan att styra",
                 detail=(
-                    "Styr varmepumpen ar av — planen syns men borvarden skrivs inte. "
-                    "Slå pa «Styr varmen» nar du litar pa kurvan."
+                    "Styr värmen är av — du ser planen men hemopt skriver inga "
+                    "temperaturer till huset. Slå på «Styr värmen» när du litar på kurvan."
                 ),
                 kind="info",
             )
@@ -90,20 +116,37 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="peak_guard",
-                title="Effektvakten begransar just nu",
+                title="Håller nere effekten just nu",
                 detail=guard_reason
-                or "Uttaget narmar sig manadens debiterbara topp — varmepumpen halls tillbaka.",
+                or (
+                    "Uttaget närmar sig månadens debiterbara toppar — "
+                    "värmepumpen hålls tillbaka så tröskeln inte höjs."
+                ),
                 kind="warn",
             )
         )
 
     dhw = plan.hot_water
-    if dhw is not None and dhw.charge_fraction[index] > 0.05:
-        if rising:
+    charging = dhw is not None and dhw.charge_fraction[index] > 0.05
+    if charging:
+        if dropping and not rising:
+            actions.append(
+                ModelAction(
+                    key="dhw_charge_wait",
+                    title="Varmvatten — bättre att vänta",
+                    detail=(
+                        f"Nu {drop_now:.2f} kr/kWh, men om cirka {drop_minutes} min "
+                        f"sjunker priset mot {drop_later:.2f} kr/kWh. "
+                        "Fyll tanken hellre då om du kan."
+                    ),
+                    kind="warn",
+                )
+            )
+        elif rising:
             actions.append(
                 ModelAction(
                     key="dhw_precharge",
-                    title="Laddar varmvatten infor dyrare period",
+                    title="Laddar varmvatten inför dyrare el",
                     detail=(
                         f"Tanken fylls nu ({now_p:.2f} kr/kWh) innan priset stiger "
                         f"mot cirka {later_p:.2f} kr/kWh."
@@ -116,12 +159,26 @@ def explain_plan(
                 ModelAction(
                     key="dhw_charge",
                     title="Laddar varmvatten",
-                    detail=f"Elpriset ar {price:.2f} kr/kWh — bra lage att fylla tanken.",
+                    detail=(
+                        f"Elpriset är {price:.2f} kr/kWh — ett bra tillfälle att fylla tanken."
+                    ),
                     kind="active",
                 )
             )
+    elif dhw is not None and dropping:
+        actions.append(
+            ModelAction(
+                key="dhw_wait_cheap",
+                title="Väntar på billigare el till varmvattnet",
+                detail=(
+                    f"Om cirka {drop_minutes} min är priset omkring {drop_later:.2f} kr/kWh "
+                    f"(nu {drop_now:.2f}). Då är det läge att fylla tanken."
+                ),
+                kind="tip",
+                when="soon",
+            )
+        )
     elif dhw is not None and rising:
-        # Look ahead: will we charge before the spike?
         steps = max(1, int(round(4 * 60 / max(plan.step_minutes, 1))))
         end = min(len(dhw.charge_fraction), index + steps)
         if any(f > 0.05 for f in dhw.charge_fraction[index:end]):
@@ -130,7 +187,7 @@ def explain_plan(
                     key="dhw_soon",
                     title="Varmvatten laddas innan priset toppar",
                     detail=(
-                        f"Inom nagra timmar fylls tanken innan elen ga upp mot "
+                        f"Inom några timmar fylls tanken innan elen går upp mot "
                         f"{later_p:.2f} kr/kWh."
                     ),
                     kind="tip",
@@ -155,9 +212,9 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="preheat",
-                title="Forvarmer rum",
+                title="Förvärmer rum",
                 detail=(
-                    "Bankar varme i "
+                    "Sparar värme i "
                     + ", ".join(preheating[:4])
                     + (" …" if len(preheating) > 4 else "")
                     + " innan dyrare timmar."
@@ -169,11 +226,12 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="setback",
-                title="Sanjer borvarde i lagprio-rum",
+                title="Sänker värmen i rum som får svaja",
                 detail=(
                     ", ".join(setback[:4])
                     + (" …" if len(setback) > 4 else "")
-                    + " far svaja sa att dyr el undviks."
+                    + " får lite svalare temp så dyr el undviks. "
+                    "Rum med hög prioritet hålls varmare."
                 ),
                 kind="active",
             )
@@ -182,8 +240,8 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="hold",
-                title="Haller temperatur i prio 1",
-                detail=", ".join(holding[:4]) + " halls inom komfortbandet.",
+                title="Håller temperaturen i viktiga rum",
+                detail=", ".join(holding[:4]) + " hålls inom komfortbandet.",
                 kind="info",
             )
         )
@@ -192,10 +250,10 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="coast",
-                title="Pausar varmepumpen — kor pa lagrad varme",
+                title="Pausar värmepumpen — kör på lagrad värme",
                 detail=(
-                    f"Ute {plan.outdoor_c[index]:.0f} C men VP nara noll. "
-                    "Huset rullar pa troghet och eventuell brasvarme."
+                    f"Ute {plan.outdoor_c[index]:.0f} °C men värmepumpen nära noll. "
+                    "Huset rullar på tröghet och eventuell brasvärme."
                 ),
                 kind="active",
             )
@@ -204,7 +262,7 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="heat_hard",
-                title=f"Varmepumpen gar hart ({pump:.1f} kW)",
+                title=f"Värmepumpen går hårt ({pump:.1f} kW)",
                 detail=f"Elpris just nu {price:.2f} kr/kWh.",
                 kind="info",
             )
@@ -215,8 +273,8 @@ def explain_plan(
             actions.append(
                 ModelAction(
                     key="stove_lit",
-                    title=f"{wood_stove.name} ar tand",
-                    detail=wood_stove.summary or "Brasbidraget minskar behovet av VP.",
+                    title=f"{wood_stove.name} är tänd",
+                    detail=wood_stove.summary or "Brasbidraget minskar behovet av värmepump.",
                     kind="active",
                 )
             )
@@ -225,11 +283,11 @@ def explain_plan(
             actions.append(
                 ModelAction(
                     key="stove_tip",
-                    title="Bra lage att tanda brasan",
+                    title="Bra läge att tända brasan",
                     detail=(
-                        f"Foreslaget fonster {window.start.strftime('%H:%M')}–"
+                        f"Föreslaget fönster {window.start.strftime('%H:%M')}–"
                         f"{window.end.strftime('%H:%M')} "
-                        f"({window.mean_price_sek:.2f} kr/kWh, ute {window.mean_outdoor_c:.0f} C)."
+                        f"({window.mean_price_sek:.2f} kr/kWh, ute {window.mean_outdoor_c:.0f} °C)."
                     ),
                     kind="tip",
                     when="soon",
@@ -240,8 +298,8 @@ def explain_plan(
         actions.append(
             ModelAction(
                 key="steady",
-                title="Haller en lugn kurva",
-                detail=f"Pris {price:.2f} kr/kWh, planerad VP {pump:.1f} kW.",
+                title="Håller en lugn kurva",
+                detail=f"Pris {price:.2f} kr/kWh, planerad värmepump {pump:.1f} kW.",
                 kind="info",
             )
         )
@@ -265,7 +323,6 @@ def explain_upcoming(plan: Plan, index: int, *, limit: int = 4) -> list[ModelAct
     end = min(len(plan.times), index + steps * 3)
     items: list[ModelAction] = []
 
-    # Find next DHW charge burst.
     if plan.hot_water is not None:
         for i in range(index + 1, end):
             if plan.hot_water.charge_fraction[i] > 0.15:
@@ -282,7 +339,6 @@ def explain_upcoming(plan: Plan, index: int, *, limit: int = 4) -> list[ModelAct
                     )
                     break
 
-    # Find next high pump + high price combo.
     for i in range(index + 1, end):
         if (
             plan.heat_pump_kw[i] > 2.0
@@ -292,10 +348,10 @@ def explain_upcoming(plan: Plan, index: int, *, limit: int = 4) -> list[ModelAct
             items.append(
                 ModelAction(
                     key=f"soon_expensive_heat_{i}",
-                    title="Dyr uppvarmning i sikte",
+                    title="Dyr uppvärmning i sikte",
                     detail=(
                         f"Runt {t.strftime('%H:%M')}: {plan.price_sek_per_kwh[i]:.2f} kr/kWh "
-                        f"och {plan.heat_pump_kw[i]:.1f} kW — forvarmning eller brasa lönar sig."
+                        f"och {plan.heat_pump_kw[i]:.1f} kW — förvärmning eller brasa lönar sig."
                     ),
                     kind="tip",
                     when="soon",

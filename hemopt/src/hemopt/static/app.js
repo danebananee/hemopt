@@ -12,6 +12,10 @@ const state = {
   advice: null,
   woodStove: null,
   prices: null,
+  historyDays: 14,
+  historyResolution: "hour",
+  priceDaysBack: 1,
+  priceDaysForward: 1,
 };
 
 
@@ -474,51 +478,49 @@ function renderSystems() {
   const draw =
     dhw && dhw.expected_draw_kwh ? dhw.expected_draw_kwh[index] : null;
 
+  let roomsText = "Inga rum konfigurerade ännu";
+  if (status.rooms_configured) {
+    if (status.rooms_with_climate > 0) {
+      roomsText = `${status.rooms_configured} rum med egna termostater`;
+    } else if (status.room_setpoint_entity) {
+      roomsText = `${status.rooms_configured} rum · ett gemensamt husbörvärde`;
+    } else {
+      roomsText = `${status.rooms_configured} rum mäts, men ingen termostat är kopplad ännu`;
+    }
+  }
+
+  let dhwText = "Inte konfigurerat";
+  if (status.hot_water_enabled) {
+    dhwText = `Vanlig förbrukning cirka ${fmt(status.hot_water_kwh_per_day, 1)} kWh/dygn`;
+    if (charging != null) dhwText += charging ? " · laddar tanken nu" : " · håller temperaturen";
+    if (draw != null && draw > 0.01) dhwText += ` · förväntat uttag ${fmt(draw, 2)} kWh`;
+    if (!status.hot_water_setpoint_entity) {
+      dhwText += " · planen syns men skrivs inte till värmepumpen än";
+    }
+  }
+
   const rows = [
     [
       "Värmepump",
-      status.heat_pump_power_entity
-        ? `Planerad effekt nu ${fmt(pumpKw, 2)} kW · ${status.heat_pump_power_entity}`
-        : "Ingen power-entitet — läggs in via husconfig (H66)",
+      pumpKw != null
+        ? `Planerad effekt nu ${fmt(pumpKw, 2)} kW`
+        : "Väntar på plan",
     ],
+    ["Varmvatten", dhwText],
+    ["Rum", roomsText],
     [
-      "Varmvatten",
-      status.hot_water_enabled
-        ? `Mönster ${fmt(status.hot_water_kwh_per_day, 1)} kWh/dygn` +
-          (charging == null
-            ? ""
-            : charging
-              ? " · laddar tanken nu"
-              : " · håller temp nu") +
-          (draw != null && draw > 0.01 ? ` · förväntat uttag ${fmt(draw, 2)} kWh` : "") +
-          (status.hot_water_setpoint_entity
-            ? ` · styr ${status.hot_water_setpoint_entity}`
-            : " · saknar setpoint_entity (planeras men skrivs inte till VP)")
-        : "Inte konfigurerat",
-    ],
-    [
-      "Rum",
-      status.rooms_configured
-        ? status.rooms_with_climate > 0
-          ? `${status.rooms_configured} rum · börvärden via climate per rum`
-          : status.room_setpoint_entity
-            ? `${status.rooms_configured} rum (sensorer) · husbörvärde ${status.room_setpoint_entity}`
-            : `${status.rooms_configured} rum · saknar room_setpoint_entity (läses men styrs inte)`
-        : "Inga rum",
-    ],
-    [
-      "MQTT",
+      "Koppling till Home Assistant",
       status.mqtt_online
-        ? "Ansluten — publicerar plan/status till Home Assistant"
+        ? "Ansluten — status syns även som entiteter i Home Assistant"
         : status.mqtt_configured
-          ? "Konfigurerad men offline — kolla användare/lösenord i Configuration"
-          : "Sätt mqtt_host=core-mosquitto (+ user/lösen) under Configuration",
+          ? "Konfigurerad men offline — kolla MQTT under Configuration"
+          : "MQTT saknas — sätt mqtt_host under Configuration",
     ],
     [
       "Aktiv styrning",
       status.control_enabled
-        ? "På — skriver börvärden till HA"
-        : "Av — planen syns men inget skrivs (slå på Styr värmen)",
+        ? "På — hemopt skriver temperaturer till huset"
+        : "Av — du ser bara planen (slå på Styr värmen för att styra)",
     ],
   ];
 
@@ -560,7 +562,7 @@ function renderKpis() {
       tone: "good",
     },
     {
-      label: "Effekttak att slå",
+      label: "Effekttak att hålla under",
       value: fmt(peaks.threshold_kw, 1),
       unit: "kW",
       note:
@@ -573,7 +575,7 @@ function renderKpis() {
       label: "Prognos effektavgift",
       value: fmt(peaks.projected_cost_sek, 0),
       unit: "SEK/mån",
-      note: `Snitt av ${peaks.n_peaks || 5} toppar: ${fmt(peaks.average_kw, 1)} kW`,
+      note: `Medel av ${peaks.n_peaks || 5} högsta timmedlen: ${fmt(peaks.average_kw, 1)} kW`,
       tone: "violet",
     },
   ];
@@ -598,14 +600,14 @@ function renderPeaks() {
   const subtitle = document.getElementById("peak-subtitle");
   const w = peaks.window || {};
   subtitle.textContent = peaks.enabled
-    ? `Snitt av ${peaks.n_peaks} toppar på olika dygn, ${String(w.hour_start).padStart(2, "0")}–${String(w.hour_end).padStart(2, "0")} vardagar`
+    ? `Medel av de ${peaks.n_peaks} högsta timmedeleffekterna på olika dygn, ${String(w.hour_start).padStart(2, "0")}–${String(w.hour_end).padStart(2, "0")} vardagar — inte en kort momentantopp`
     : "Effektavgift är avstängd — aktivera under Configuration";
 
   const summary = html("div", "peak-summary");
   const figures = [
-    [`${fmt(peaks.average_kw, 2)} kW`, "Månadens snitt"],
-    [`${fmt(peaks.threshold_kw, 2)} kW`, "Tröskel att slå"],
-    [`${fmt(peaks.marginal_sek_per_kw, 0)} kr/kW`, "Marginalkostnad"],
+    [`${fmt(peaks.average_kw, 2)} kW`, "Månadens medel"],
+    [`${fmt(peaks.threshold_kw, 2)} kW`, "Tröskel att hålla under"],
+    [`${fmt(peaks.marginal_sek_per_kw, 0)} kr/kW`, "Kostnad om tröskeln höjs"],
   ];
   for (const [value, label] of figures) {
     const figure = html("div", "peak-figure");
@@ -710,10 +712,44 @@ const MONTH_LABELS = [
 function renderPriceChart() {
   const host = document.getElementById("price-chart");
   const subtitle = document.getElementById("price-subtitle");
+  const controls = document.getElementById("price-controls");
   host.textContent = "";
+  if (controls) {
+    controls.textContent = "";
+    controls.appendChild(
+      periodToolbar(
+        "Bakåt",
+        [
+          [1, "1 d"],
+          [7, "1 v"],
+          [30, "1 mån"],
+        ],
+        state.priceDaysBack,
+        (days) => {
+          state.priceDaysBack = days;
+          refreshPrices();
+        },
+      ),
+    );
+    controls.appendChild(
+      periodToolbar(
+        "Framåt",
+        [
+          [0, "I dag"],
+          [1, "+1 d"],
+        ],
+        state.priceDaysForward,
+        (days) => {
+          state.priceDaysForward = days;
+          refreshPrices();
+        },
+      ),
+    );
+  }
+
   const prices = state.prices;
   if (!prices || !prices.points || !prices.points.length) {
-    subtitle.textContent = "Spotpris igår, idag och imorgon — dra i grafen för exakt pris";
+    subtitle.textContent = "Spotpris — välj period ovan och dra i grafen";
     host.appendChild(
       html(
         "p",
@@ -995,19 +1031,32 @@ function renderHistory() {
   const host = document.getElementById("history-chart");
   const summary = document.getElementById("history-summary");
   const subtitle = document.getElementById("history-subtitle");
+  const controls = document.getElementById("history-controls");
   host.textContent = "";
   summary.textContent = "";
+  if (controls) renderHistoryControls(controls);
+
   const history = state.history;
   if (!history) {
+    if (subtitle) subtitle.textContent = "Hämtar historik…";
     host.appendChild(html("p", "empty", "Ingen historik ännu."));
     return;
   }
 
-  subtitle.textContent = `Senaste ${history.days} dygnen`;
+  const resLabel = {
+    hour: "timme",
+    day: "dygn",
+    week: "vecka",
+    month: "månad",
+    quarter: "kvartal",
+  }[history.resolution || state.historyResolution] || history.resolution;
+  if (subtitle) {
+    subtitle.textContent = `Senaste ${history.days} dygnen · visat per ${resLabel} (${history.sample_count || 0} timmar sparade)`;
+  }
   const points = history.points || [];
   if (!points.length) {
     host.appendChild(
-      html("p", "empty", "Ingen timdata sparad ännu — den fylls på när elmätaren är kopplad."),
+      html("p", "empty", "Ingen förbrukning sparad ännu — den fylls på när elmätaren är kopplad."),
     );
   } else {
     renderPowerHistory(host, points);
@@ -1027,6 +1076,69 @@ function renderHistory() {
     cards.appendChild(card);
   }
   summary.appendChild(cards);
+}
+
+function renderHistoryControls(host) {
+  host.textContent = "";
+  const dayChoices = [
+    [2, "2 d"],
+    [7, "1 v"],
+    [14, "2 v"],
+    [30, "1 mån"],
+    [90, "3 mån"],
+    [365, "1 år"],
+  ];
+  const resChoices = [
+    ["hour", "Timme"],
+    ["day", "Dygn"],
+    ["week", "Vecka"],
+    ["month", "Månad"],
+    ["quarter", "Kvartal"],
+  ];
+  host.appendChild(periodToolbar("Period", dayChoices, state.historyDays, (days) => {
+    state.historyDays = days;
+    refreshHistory();
+  }));
+  host.appendChild(
+    periodToolbar("Skala", resChoices, state.historyResolution, (resolution) => {
+      state.historyResolution = resolution;
+      refreshHistory();
+    }),
+  );
+}
+
+function periodToolbar(label, choices, current, onPick) {
+  const bar = html("div", "period-toolbar");
+  bar.appendChild(html("span", "period-label", label));
+  for (const [value, text] of choices) {
+    const btn = html("button", `period-chip${value === current ? " active" : ""}`, text);
+    btn.type = "button";
+    btn.addEventListener("click", () => onPick(value));
+    bar.appendChild(btn);
+  }
+  return bar;
+}
+
+async function refreshHistory() {
+  try {
+    state.history = await getJSON(
+      `/api/history?days=${state.historyDays}&resolution=${state.historyResolution}`,
+    );
+  } catch {
+    state.history = null;
+  }
+  renderHistory();
+}
+
+async function refreshPrices() {
+  try {
+    state.prices = await getJSON(
+      `/api/prices?days_back=${state.priceDaysBack}&days_forward=${state.priceDaysForward}`,
+    );
+  } catch {
+    state.prices = null;
+  }
+  renderPriceChart();
 }
 
 function renderPowerHistory(host, points) {
@@ -1190,7 +1302,7 @@ function renderActions() {
       html(
         "p",
         "empty",
-        "Behöver mer mätdata innan åtgärder kan föreslås (minst två dygn med elmätare).",
+        "Behöver mer mätdata innan åtgärder kan föreslås. Avtalsjämförelse kräver minst två dygn med elmätare; säkringsråd behöver längre historik (ofta cirka 30 dygn).",
       ),
     );
     return;
@@ -1394,7 +1506,9 @@ function renderAdvice() {
       html(
         "p",
         "empty",
-        "Behöver mer mätdata innan avtalsjämförelsen blir meningsfull (minst två dygn).",
+        advice.measured_days != null
+          ? `Har ${fmt(advice.measured_days, 0)} dygn sparade — avtalsjämförelse behöver minst två dygn med elmätardata (timmedeleffekt).`
+          : "Behöver mer mätdata innan avtalsjämförelsen blir meningsfull (minst två dygn).",
       ),
     );
   }
@@ -1759,9 +1873,13 @@ async function refresh() {
       getJSON("/api/rooms").catch(() => []),
       getJSON("/api/meters").catch(() => null),
       getJSON("/api/settings/peaks").catch(() => null),
-      getJSON("/api/history?days=14").catch(() => null),
+      getJSON(
+        `/api/history?days=${state.historyDays}&resolution=${state.historyResolution}`,
+      ).catch(() => null),
       getJSON("/api/advice").catch(() => null),
-      getJSON("/api/prices").catch(() => null),
+      getJSON(
+        `/api/prices?days_back=${state.priceDaysBack}&days_forward=${state.priceDaysForward}`,
+      ).catch(() => null),
       getJSON("/api/wood-stove").catch(() => null),
     ]);
   state.status = status;
