@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 
 class PriorityUpdate(BaseModel):
@@ -55,6 +55,16 @@ class PeakSettingsUpdate(BaseModel):
     hour_end: int | None = Field(default=None, ge=1, le=24)
     weekdays_only: bool | None = None
     months: list[int] | None = None
+
+
+def _asset_hash(name: str) -> str:
+    """Short content hash of a static file, for cache busting."""
+    import hashlib
+
+    try:
+        return hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
+    except OSError:
+        return VERSION
 
 
 def _finite(value: float) -> float | None:
@@ -489,7 +499,14 @@ def register_panel_routes(
         prefix = request.headers.get("X-Ingress-Path", "").rstrip("/")
         markup = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         markup = markup.replace('<base href="./" />', f'<base href="{prefix}/" />')
-        return HTMLResponse(markup)
+        # Browsers and the ingress proxy keep serving a cached stylesheet and
+        # script after an update, which pairs new markup with old code and
+        # leaves the panel dead. A content hash in each asset URL forces a
+        # fresh copy whenever the file changes, and the page itself is never
+        # cached.
+        for asset in ("styles.css", "app.js"):
+            markup = markup.replace(f"static/{asset}", f"static/{asset}?v={_asset_hash(asset)}")
+        return HTMLResponse(markup, headers={"Cache-Control": "no-cache, no-store"})
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:

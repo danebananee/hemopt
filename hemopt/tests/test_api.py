@@ -199,3 +199,12 @@ async def test_rooms_report_floor_type_and_model_quality(client):
     assert {room["floor_type"] for room in rooms} <= {"concrete", "light"}
     assert all("tau_slab_hours" in room["model"] for room in rooms)
     assert all("rmse_4h" in room["model"] for room in rooms)
+
+
+async def test_assets_are_cache_busted(client):
+    """An update must never pair new markup with a cached old script."""
+    http, _ = client
+    response = await http.get("/")
+    assert "static/app.js?v=" in response.text
+    assert "static/styles.css?v=" in response.text
+    assert "no-store" in response.headers["cache-control"]
