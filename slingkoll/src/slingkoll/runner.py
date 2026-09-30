@@ -61,6 +61,8 @@ class Runner:
         self.analyse_every_s = ANALYSE_EVERY_S
         self.found: dict[str, Any] | None = None
         self._cold_since: float | None = None
+        self._last_status: dict[str, Any] | None = None
+        self.background = True
 
     # --- persistence ------------------------------------------------------
     def _load_json(self, name: str) -> Any:
@@ -238,7 +240,12 @@ class Runner:
                 f"{len(self.run['design'])} faser à {settings.phase_hours:g} h."
             )
             self._save_run()
-        self.tick()
+        # Writing eleven setpoints through LK's cloud takes a while; answer
+        # the panel now and let the first tick do it in the background.
+        if self.background:
+            threading.Thread(target=self.tick, daemon=True).start()
+        else:
+            self.tick()
         return self.status()
 
     def stop_test(self, *, analyse_now: bool = True) -> dict[str, Any]:
@@ -586,54 +593,64 @@ class Runner:
 
     # --- for the panel ------------------------------------------------------
     def status(self) -> dict[str, Any]:
-        with self.lock:
-            run = self.run
-            payload: dict[str, Any] = {
-                "settings": self.settings.as_dict(),
-                "error": self.error,
-                "live": self.live,
-                "run": None,
-                "now": self.ha.now(),
+        # A tick holds the lock while it writes setpoints through LK's cloud.
+        # Rather than leave the panel hanging, show the last known status.
+        if not self.lock.acquire(timeout=2.0):
+            if self._last_status is not None:
+                return self._last_status
+            self.lock.acquire()
+        try:
+            self._last_status = self._status()
+            return self._last_status
+        finally:
+            self.lock.release()
+
+    def _status(self) -> dict[str, Any]:
+        run = self.run
+        payload: dict[str, Any] = {
+            "settings": self.settings.as_dict(),
+            "error": self.error,
+            "live": self.live,
+            "run": None,
+            "now": self.ha.now(),
+        }
+        if run:
+            phases = len(run["design"])
+            done = min(phases, run["phase"]) + (
+                run["phase_active_s"] / run["phase_s"] if run["phase"] < phases else 0
+            )
+            remaining_s = max(0.0, (phases - done) * run["phase_s"])
+            payload["run"] = {
+                key: run.get(key)
+                for key in (
+                    "id",
+                    "status",
+                    "started",
+                    "ended",
+                    "blocks",
+                    "phase",
+                    "pause",
+                    "overrides",
+                    "result",
+                    "thermostats",
+                    "extra",
+                    "hp",
+                    "tolerated",
+                )
             }
-            if run:
-                phases = len(run["design"])
-                done = min(phases, run["phase"]) + (
-                    run["phase_active_s"] / run["phase_s"] if run["phase"] < phases else 0
-                )
-                remaining_s = max(0.0, (phases - done) * run["phase_s"])
-                payload["run"] = {
-                    key: run.get(key)
-                    for key in (
-                        "id",
-                        "status",
-                        "started",
-                        "ended",
-                        "blocks",
-                        "phase",
-                        "pause",
-                        "overrides",
-                        "result",
-                        "thermostats",
-                        "extra",
-                        "hp",
-                        "tolerated",
-                    )
+            payload["run"].update(
+                {
+                    "phases": phases,
+                    "progress": done / phases if phases else 0,
+                    "remaining_s": remaining_s,
+                    "phase_hours": run["phase_s"] / 3600,
+                    "events": list(reversed(run.get("events", [])))[:40],
+                    "commands": {t["entity_id"]: self._command(t["entity_id"]) for t in run["thermostats"]}
+                    if run["status"] == "running"
+                    else {},
                 }
-                payload["run"].update(
-                    {
-                        "phases": phases,
-                        "progress": done / phases if phases else 0,
-                        "remaining_s": remaining_s,
-                        "phase_hours": run["phase_s"] / 3600,
-                        "events": list(reversed(run.get("events", [])))[:40],
-                        "commands": {
-                            t["entity_id"]: self._command(t["entity_id"]) for t in run["thermostats"]
-                        }
-                        if run["status"] == "running"
-                        else {},
-                    }
-                )
-            return payload
+            )
+        return payload
 
     def series(self, step_s: float = 600.0) -> dict[str, Any]:
         """Readings of the current test, thinned out for the charts."""

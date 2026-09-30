@@ -109,6 +109,7 @@ def runner(tmp_path):
     ha = SimHA(demo_house(start=START), history_days=2)
     r = Runner(ha, tmp_path)
     r.analyse_every_s = 3 * 3600
+    r.background = False
     r.start()
     # Sovrum BV runs cold in the simulated house: its loop heats the hall.
     r.update_settings({"min_temp": 15, "max_temp": 27})

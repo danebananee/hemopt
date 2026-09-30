@@ -1,5 +1,10 @@
 # Ändringar
 
+## 0.1.4
+
+- Starta/avsluta frågar på sidan i stället för i en ruta som Home
+  Assistant-appen blockerar. Starten svarar direkt.
+
 ## 0.1.3
 
 - Rättar «401: Unauthorized»: nyckeln till Home Assistant lästes inte.

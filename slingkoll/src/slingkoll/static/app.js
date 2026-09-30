@@ -561,15 +561,44 @@ async function quickCheck() {
 
 // --- actions -------------------------------------------------------------------
 
+// The Home Assistant app blocks confirm() inside add-on pages, so questions
+// are asked on the page itself, right under the button that was pressed.
+function ask(button, text, yesLabel) {
+  document.querySelectorAll(".ask").forEach((node) => node.remove());
+  return new Promise((resolve) => {
+    const finish = (answer) => {
+      box.remove();
+      resolve(answer);
+    };
+    const box = el(
+      "div",
+      { class: "ask banner warn", role: "alertdialog" },
+      el("p", { text }),
+      el(
+        "div",
+        { class: "actions" },
+        el("button", { type: "button", class: "btn primary", text: yesLabel, onclick: () => finish(true) }),
+        el("button", { type: "button", class: "btn ghost", text: "Nej", onclick: () => finish(false) }),
+      ),
+    );
+    button.closest(".actions").after(box);
+    box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+}
+
 async function startTest() {
   const s = state.status.settings;
-  const ok = confirm(
-    `Starta testet med ${s.thermostats.length} termostater? Termostaterna styrs av Slingkoll ` +
-      "i ett till tre dygn och återställs när testet är klart.",
+  const button = $("start-btn");
+  const ok = await ask(
+    button,
+    `Starta testet med ${s.thermostats.length} termostater? Slingkoll styr termostaterna ` +
+      "i ett till tre dygn och återställer dem när testet är klart.",
+    "Ja, starta",
   );
   if (!ok) return;
   state.busy = true;
-  $("start-btn").disabled = true;
+  button.disabled = true;
+  button.textContent = "Startar…";
   try {
     await api("api/test/start", { method: "POST", body: {} });
     state.series = null;
@@ -579,20 +608,25 @@ async function startTest() {
     toast(error.message);
   } finally {
     state.busy = false;
+    button.textContent = "Starta testet";
     await refresh();
   }
 }
 
 async function stopTest(analyse) {
+  const button = analyse ? $("finish-btn") : $("abort-btn");
   const text = analyse
     ? "Avsluta testet nu? Termostaterna återställs och du får det resultat som finns hittills."
     : "Avbryta testet? Termostaterna återställs och inget resultat sparas.";
-  if (!confirm(text)) return;
+  if (!(await ask(button, text, analyse ? "Ja, avsluta" : "Ja, avbryt"))) return;
+  button.disabled = true;
   try {
     await api("api/test/stop", { method: "POST", body: { analyse } });
     toast("Termostaterna är återställda.");
   } catch (error) {
     toast(error.message);
+  } finally {
+    button.disabled = false;
   }
   await refresh();
 }

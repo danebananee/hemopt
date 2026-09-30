@@ -14,7 +14,7 @@ from .ha import HAError
 from .runner import Runner
 
 _LOGGER = logging.getLogger(__name__)
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}
 
 
