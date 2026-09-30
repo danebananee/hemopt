@@ -1,0 +1,17 @@
+[project]
+name = "slingkoll"
+version = "0.1.0"
+description = "Finds out which floor-heating loop each thermostat really controls"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

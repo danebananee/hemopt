@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <base href="./" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Slingkoll</title>
+    <link rel="stylesheet" href="static/styles.css?v=__V__" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23c4452b'/><path d='M8 10h14a4 4 0 0 1 0 8H10a4 4 0 0 0 0 8h14' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round'/></svg>"
+    />
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="masthead-row">
+        <div>
+          <h1>Slingkoll</h1>
+          <p class="sub">Styr varje termostat golvvärmeslingan i sitt eget rum?</p>
+        </div>
+        <span class="pill" id="status-pill">Läser in…</span>
+      </div>
+    </header>
+
+    <main>
+      <div class="banner bad" id="error-banner" hidden></div>
+      <div class="banner" id="demo-banner" hidden>
+        Demoläge: ett simulerat hus där ett dygn går på ett par minuter. Inget i ditt hem påverkas.
+      </div>
+
+      <!-- Pågående test ------------------------------------------------------>
+      <section id="running" hidden>
+        <article class="card">
+          <header class="card-head">
+            <div>
+              <h2 id="run-title">Testet pågår</h2>
+              <p class="muted" id="run-sub"></p>
+            </div>
+            <div class="actions">
+              <button type="button" class="btn" id="finish-btn">Avsluta nu och visa resultat</button>
+              <button type="button" class="btn ghost" id="abort-btn">Avbryt och återställ</button>
+            </div>
+          </header>
+          <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
+          <div class="banner warn" id="pause-banner" hidden></div>
+          <div class="rooms-grid" id="live-rooms"></div>
+          <p class="muted small">
+            Varje ruta visar rummets temperatur under testet. Skuggat = termostaten i rummet har
+            sin slinga öppen. Stiger temperaturen inte i takt med skuggningen är slingan kopplad
+            någon annanstans.
+          </p>
+        </article>
+      </section>
+
+      <!-- Resultat ----------------------------------------------------------->
+      <section id="result" hidden>
+        <article class="card">
+          <header class="card-head">
+            <div>
+              <h2 id="result-title">Resultat</h2>
+              <p class="muted" id="result-sub"></p>
+            </div>
+          </header>
+          <div id="fixes"></div>
+          <ul class="verdicts" id="verdicts"></ul>
+          <ul class="notes" id="result-notes"></ul>
+          <details class="more">
+            <summary>Hur säkert är det? Visa hela tabellen</summary>
+            <p class="muted small">
+              Grader per timme som varje termostats slinga ger varje rum när den är helt öppen.
+              Den mörkaste rutan i en rad är rummet slingan ligger i. Inramad ruta = termostatens
+              eget rum.
+            </p>
+            <div class="matrix-wrap" id="matrix"></div>
+          </details>
+        </article>
+      </section>
+
+      <!-- Kom igång ---------------------------------------------------------->
+      <section id="setup">
+        <article class="card step">
+          <span class="step-no">1</span>
+          <div class="step-body">
+            <header class="card-head">
+              <div>
+                <h2>Termostater och givare</h2>
+                <p class="muted" id="setup-summary">—</p>
+              </div>
+              <button type="button" class="btn ghost" id="edit-btn">Ändra</button>
+            </header>
+            <form id="settings-form" class="settings" hidden></form>
+          </div>
+        </article>
+
+        <article class="card step">
+          <span class="step-no">2</span>
+          <div class="step-body">
+            <header class="card-head">
+              <div>
+                <h2>Snabbkoll i historiken</h2>
+                <p class="muted">
+                  Valfritt och ändrar ingenting. Letar efter typiska tecken på förväxlade slingor
+                  i det Home Assistant har sparat.
+                </p>
+              </div>
+              <button type="button" class="btn ghost" id="quick-btn">Titta på senaste veckan</button>
+            </header>
+            <div id="quick"></div>
+          </div>
+        </article>
+
+        <article class="card step">
+          <span class="step-no">3</span>
+          <div class="step-body">
+            <header class="card-head">
+              <div>
+                <h2>Testa slingorna</h2>
+                <p class="muted">Säkert besked, men tar ett till tre dygn.</p>
+              </div>
+            </header>
+            <ul class="how" id="how"></ul>
+            <div class="actions">
+              <button type="button" class="btn primary" id="start-btn">Starta testet</button>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <article class="card" id="log-card" hidden>
+        <details>
+          <summary>Händelser</summary>
+          <ol class="log" id="log"></ol>
+        </details>
+      </article>
+    </main>
+
+    <footer class="foot"><span id="foot">Slingkoll</span></footer>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <script src="static/app.js?v=__V__"></script>
+  </body>
+</html>

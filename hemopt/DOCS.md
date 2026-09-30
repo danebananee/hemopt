@@ -135,5 +135,5 @@ in den under tilläggets **Configuration → HA-token**, **Save**, **Restart**.
 - Har huset LK Systems golvvärme installerar tillägget LK Arc Climate så att
   varje rum får en termostat. Det görs bara om LK Systems-integrationen finns.
 - Hur modellen och besparingskalkylen fungerar beskrivs i `README.md`.
-- `GET /api/loop-mapping` är en tillfällig diagnostik för golvvärmeslingor
-  som misstänks vara kopplade till fel termostat. Den rör aldrig styrningen.
+- Misstänker du att golvvärmeslingorna är kopplade till fel termostat: använd
+  tillägget **Slingkoll** från samma repo, som testar och visar hur du rättar.

@@ -22,11 +22,30 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q
 
+  slingkoll:
+    name: Lint and test slingkoll
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: slingkoll
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy pytest ruff
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
   addon:
     name: Validate add-on manifest
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        addon: [hemopt, slingkoll]
     steps:
       - uses: actions/checkout@v4
       - uses: frenck/action-addon-linter@v2
         with:
-          path: ./hemopt
+          path: ./${{ matrix.addon }}

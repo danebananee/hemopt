@@ -1,0 +1,22 @@
+name: Slingkoll
+version: "0.1.0"
+slug: slingkoll
+description: >-
+  Kontrollerar att varje termostat styr golvvärmeslingan i sitt eget rum, och
+  talar om hur du rättar det som är fel kopplat.
+url: https://github.com/danebananee/hemopt
+arch:
+  - aarch64
+  - amd64
+init: false
+
+ingress: true
+panel_icon: mdi:heating-coil
+panel_title: Slingkoll
+
+homeassistant_api: true
+
+options:
+  log_level: info
+schema:
+  log_level: list(debug|info|warning|error)

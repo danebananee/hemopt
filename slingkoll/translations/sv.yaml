@@ -1,0 +1,4 @@
+configuration:
+  log_level:
+    name: Loggnivå
+    description: Hur mycket som skrivs i tilläggets logg. «info» räcker nästan alltid.
