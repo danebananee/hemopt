@@ -208,7 +208,7 @@ def build_advice(
         return report
 
     if len(load) < 2:
-        report.notes.append("Ingen matdata an; radgivningen vantar pa historik.")
+        report.notes.append("Ingen mätdata än; rådgivningen väntar på historik.")
         report.actions = [
             _settlement_action_need_data(config, report.measured_days),
             _fuse_action_need_data(config, report.measured_days, peak_kw, reason="load"),
@@ -220,8 +220,8 @@ def build_advice(
 
     if config.energy_price.contract in {"monthly", "daily", "fixed"}:
         report.notes.append(
-            "Med dygns- eller manadsmedel sparar lastflytt noll pa energidelen — "
-            "byt till tim- eller kvartsavrakning for att fa ut varde av styrningen."
+            "Med dygns- eller månadsmedel sparar lastflytt noll på energidelen — "
+            "byt till tim- eller kvartsavräkning för att få ut värde av styrningen."
         )
 
     settlement_action = _settlement_action(config, report, load, spot)
@@ -391,13 +391,13 @@ def _settlement_action(
     if best_contract == current or saving < config.advice.min_annual_saving_sek:
         return SavingAction(
             key="settlement",
-            title="Elavtal (avrakning)",
+            title="Elavtal (avräkning)",
             status="ok",
-            summary=f"Du ligger ratt pa {current_name} — inget byte lönar sig just nu.",
+            summary=f"Du ligger rätt på {current_name} — inget byte lönar sig just nu.",
             detail=(
-                f"Med din uppmatta forbrukning (och rimlig lastflytt) ar "
+                f"Med din uppmätta förbrukning (och rimlig lastflytt) är "
                 f"{current_name} redan det billigaste alternativet bland "
-                f"manad/dygn/timme/kvart."
+                f"månad/dygn/timme/kvart."
             ),
             confidence=confidence,
             meta=meta,
@@ -406,32 +406,32 @@ def _settlement_action(
     averaging = current in {"monthly", "daily", "fixed"}
     if averaging:
         detail = (
-            f"Du har {current_name}, dar varje kWh debiteras till periodens "
+            f"Du har {current_name}, där varje kWh debiteras till periodens "
             f"medelpris. Att flytta last till en billig timme sanker darfor "
             f"inte kostnaden med en krona. Med {best_name} och aktiv styrning "
             f"hade perioden kostat {_kr(optimised[best_contract].total_sek)} kr "
-            f"i stallet for {_kr(as_used.total_sek)} kr."
+            f"i stället för {_kr(as_used.total_sek)} kr."
         )
         caveat = (
-            "Vinsten forutsatter att styrningen far flytta last. Utan den ar "
+            "Vinsten förutsätter att styrningen får flytta last. Utan den är "
             "medelpris ofta billigare."
         )
     else:
         detail = (
-            f"{best_name} ger finare upplosning an {current_name}, vilket ger "
+            f"{best_name} ger finare upplösning än {current_name}, vilket ger "
             f"styrningen mer att arbeta med."
         )
-        caveat = "Skillnaden mellan tim och kvart ar liten om lasten redan ar utjamnad."
+        caveat = "Skillnaden mellan tim och kvart är liten om lasten redan är utjämnad."
 
     return SavingAction(
         key="settlement",
         title=f"Byt till {best_name}",
         status="change",
-        summary=f"Byt avrakning till {best_name} — cirka {_kr(saving)} kr/ar.",
+        summary=f"Byt avräkning till {best_name} — cirka {_kr(saving)} kr/år.",
         detail=detail,
         annual_saving_sek=saving,
         confidence=confidence,
-        action="Kontakta elhandlaren och begar byte av avrakningsform.",
+        action="Kontakta elhandlaren och begär byte av avräkningsform.",
         caveat=caveat,
         meta=meta,
     )
@@ -478,17 +478,17 @@ def _advise_single_rate_grid(
         key="grid_tariff",
         title=f"Byt elnatstariff till {best_option.name}",
         detail=(
-            f"Med din uppmatta forbrukningsprofil ar {best_option.name} billigare "
-            f"an den tariff du ligger pa, utan att du behover andra sakringen."
+            f"Med din uppmätta förbrukningsprofil är {best_option.name} billigare "
+            f"än den tariff du ligger på, utan att du behöver ändra säkringen."
         ),
         annual_saving_sek=saving,
         confidence=_confidence_for_span(report.measured_days, config.advice),
         action=(
-            "Elnatstariff byter du hos natbolaget (t.ex. Vattenfall Eldistribution): "
-            "ring kundtjanst eller anvand deras webbformular och be om tariffen ovan. "
-            "Sakringen sitter kvar — bara abonnemanget andras."
+            "Elnätstariff byter du hos nätbolaget (t.ex. Vattenfall Eldistribution): "
+            "ring kundtjänst eller använd deras webbformulär och be om tariffen ovan. "
+            "Säkringen sitter kvar — bara abonnemanget ändras."
         ),
-        caveat="Natbolag tar ibland ut en avgift for tariffbyte, och kan ha bindningstid.",
+        caveat="Nätbolag tar ibland ut en avgift för tariffbyte, och kan ha bindningstid.",
     )
 
 
@@ -503,17 +503,17 @@ def _fuse_action_need_data(
     current_amps = config.site.main_fuse_amps
     if reason == "tariffs":
         summary = (
-            "Lagg in natbolagets sakringsabonnemang under advice.grid_tariffs "
-            "i hemopt.yaml (16/20/25 A) sa sakringen kan bedomas."
+            "Lägg in nätbolagets säkringsabonnemang under advice.grid_tariffs "
+            "i hemopt.yaml (16/20/25 A) så säkringen kan bedömas."
         )
     elif reason == "peak":
         summary = (
-            "Sakringsradet vantar pa en uppmatt effekttopp fran elmataren "
-            f"({measured_days:.0f} dygn finns, men ingen topp an)."
+            "Säkringsrådet väntar på en uppmätt effekttopp från elmätaren "
+            f"({measured_days:.0f} dygn finns, men ingen topp än)."
         )
     else:
         summary = (
-            f"Mer matdata behoves for sakringsrad "
+            f"Mer mätdata behövs för säkringsråd "
             f"({measured_days:.0f} av minst {settings.min_history_days} dygn)."
         )
     return SavingAction(
@@ -522,8 +522,8 @@ def _fuse_action_need_data(
         status="need_data",
         summary=summary,
         detail=(
-            f"Du har {current_amps} A i dag. Nar det finns tillrackligt med "
-            f"historik jamfors 16 A och 20 A mot hogsta uppmatta effekt "
+            f"Du har {current_amps} A i dag. När det finns tillräckligt med "
+            f"historik jämförs 16 A och 20 A mot högsta uppmätta effekt "
             f"(plus {settings.fuse_margin_kw:.0f} kW marginal)."
         ),
         meta={
@@ -610,7 +610,7 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
                 f"kraver {row['required_kw']:.1f} kW"
             )
         detail = (
-            f"Hogsta uppmatta effekt pa {report.measured_days:.0f} dygn ar "
+            f"Högsta uppmätta effekt på {report.measured_days:.0f} dygn är "
             f"{peak_kw:.1f} kW. "
             + ("; ".join(parts) + ". " if parts else "")
             + f"Behall {current_amps} A."
@@ -619,12 +619,12 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
             key="fuse",
             title="Huvudsakring",
             status="ok",
-            summary=f"Du ligger ratt pa {current_amps} A — mindre sakring tar for snavt.",
+            summary=f"Du ligger rätt på {current_amps} A — mindre säkring tar för snävt.",
             detail=detail,
             confidence=confidence,
             caveat=(
-                "Radet blir sakrare nar historiken tacker en vinter. "
-                "Elbilsladdning + varmepump samtidigt ar det som slar ut en mindre sakring."
+                "Rådet blir säkrare när historiken täcker en vinter. "
+                "Elbilsladdning + värmepump samtidigt är det som slår ut en mindre säkring."
             ),
             meta=meta,
         )
@@ -643,32 +643,32 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
     also = [row for row in smaller_ok if row["amps"] != best["amps"]]
     also_txt = ""
     if also:
-        also_txt = " Aven " + " och ".join(f"{r['amps']} A" for r in also) + " klarar toppen."
+        also_txt = " Även " + " och ".join(f"{r['amps']} A" for r in also) + " klarar toppen."
 
     return SavingAction(
         key="fuse",
-        title=f"Sank huvudsakringen till {best['amps']} A",
+        title=f"Sänk huvudsäkringen till {best['amps']} A",
         status="change",
         summary=(
-            f"Du klarar dig pa {best['amps']} A (nu {current_amps} A) — "
-            f"cirka {_kr(saving)} kr/ar i abonnemang."
+            f"Du klarar dig på {best['amps']} A (nu {current_amps} A) — "
+            f"cirka {_kr(saving)} kr/år i abonnemang."
         ),
         detail=(
-            f"Hogsta uppmatta effekt pa {report.measured_days:.0f} dygn ar "
+            f"Högsta uppmätta effekt på {report.measured_days:.0f} dygn är "
             f"{peak_kw:.1f} kW. {best['amps']} A klarar {best['capacity_kw']:.1f} kW "
             f"({best['headroom_kw']:.1f} kW marginal).{also_txt}"
         ),
         annual_saving_sek=saving,
         confidence=confidence,
         action=(
-            "Sa byter du sakring: 1) begar lagre sakringsabonnemang hos natbolaget, "
+            "Så byter du säkring: 1) begär lägre säkringsabonnemang hos nätbolaget, "
             "2) de skickar en bekraftelse och ny tariff, 3) en behorig elektriker byter "
-            "sakringarna i elcentralen. Har du 25 A i dag ar nasta steg 20 A."
+            "säkringarna i elcentralen. Har du 25 A i dag är nästa steg 20 A."
         ),
         caveat=(
-            "Matdata maste tacka en vinter for att vara rattvisande. "
+            "Mätdata måste täcka en vinter för att vara rättvisande. "
             "Elbilsladdning och laddbox som startar samtidigt som varmepumpen "
-            "ar det som slar ut en mindre sakring."
+            "är det som slår ut en mindre säkring."
         ),
         meta=meta,
     )
@@ -713,14 +713,14 @@ def _advise_supplier(
         title=f"Byt elhandlare till {best_offer.name}",
         detail=(
             f"Du betalar {current_markup:.2f} ore/kWh i paslag plus "
-            f"{pricing.supplier_fee_sek_per_year:.0f} kr/ar i arsavgift. "
+            f"{pricing.supplier_fee_sek_per_year:.0f} kr/år i årsavgift. "
             f"{best_offer.name} tar {offer_markup:.2f} ore/kWh och "
-            f"{best_offer.yearly_fee_sek:.0f} kr/ar."
+            f"{best_offer.yearly_fee_sek:.0f} kr/år."
         ),
         annual_saving_sek=saving,
         confidence=_confidence_for_span(report.measured_days, config.advice),
-        action="Byte av elhandlare ar kostnadsfritt och tar cirka en manad.",
-        caveat="Kontrollera bindningstid och om paslaget ar en kampanjniva.",
+        action="Byte av elhandlare är kostnadsfritt och tar cirka en månad.",
+        caveat="Kontrollera bindningstid och om påslaget är en kampanjnivå.",
     )
 
 

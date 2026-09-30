@@ -9,7 +9,7 @@ most heat-pump work.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .config import WoodStoveConfig
 
@@ -45,6 +45,9 @@ class WoodStoveWindow:
     mean_outdoor_c: float
     mean_heat_pump_kw: float
     score: float
+    # Heat pump electricity a fire in this stretch would save, in SEK. Only
+    # known once the stove's effect has been learnt.
+    saving_sek: float | None = None
 
 
 @dataclass(slots=True)
@@ -101,6 +104,9 @@ class WoodStoveReport:
                     "mean_outdoor_c": round(window.mean_outdoor_c, 1),
                     "mean_heat_pump_kw": round(window.mean_heat_pump_kw, 2),
                     "score": round(window.score, 2),
+                    "saving_sek": None
+                    if window.saving_sek is None
+                    else round(window.saving_sek, 1),
                 }
                 for window in self.windows
             ],
@@ -140,23 +146,52 @@ def recommend_windows(
     step_minutes: int,
     min_hours: float = 2.0,
     top_n: int = 3,
+    stove_kw: float | None = None,
+    displaceable_kw: list[float] | None = None,
+    cop: list[float] | None = None,
+    awake_hours: tuple[int, int] = (7, 23),
 ) -> list[WoodStoveWindow]:
     """Pick the plan stretches where a fire displaces the most expensive heat.
 
-    Score per step: price × heat-pump demand × coldness factor. Contiguous
-    high-scoring steps are merged into windows; the best few are returned.
+    Once the stove's effect is known (`stove_kw`, in heat pump kW it can
+    replace) and the plan says how much heat the stove's rooms will get
+    (`displaceable_kw`), each step is worth what the heat pump would have
+    paid for the heat the fire replaces: min(stove, planned) / COP × price.
+    Before that, a heuristic of price, cold and heat pump demand ranks them.
+    Contiguous high-scoring steps are merged into windows; the best few are
+    returned. Only `awake_hours` count: nobody lights a fire at three in the
+    morning, however cold and expensive it is.
     """
     if not times or len(times) != len(price_sek):
         return []
 
+    dt = step_minutes / 60.0
+    learnt = (
+        stove_kw is not None
+        and stove_kw > 0
+        and displaceable_kw is not None
+        and cop is not None
+        and len(displaceable_kw) == len(times)
+        and len(cop) == len(times)
+    )
     scores: list[float] = []
-    for price, outdoor, pump in zip(price_sek, outdoor_c, heat_pump_kw, strict=True):
-        cold = max(0.0, 5.0 - outdoor) / 10.0  # 0 at +5 C, 1 at -5 C
-        demand = max(0.0, pump)
-        scores.append(price * (0.4 + 0.6 * cold) * (0.3 + 0.7 * min(demand / 3.0, 1.0)))
-
-    if not scores:
-        return []
+    savings: list[float] = []
+    for index, (price, outdoor, pump) in enumerate(
+        zip(price_sek, outdoor_c, heat_pump_kw, strict=True)
+    ):
+        if not awake_hours[0] <= times[index].hour < awake_hours[1]:
+            scores.append(0.0)
+            savings.append(0.0)
+            continue
+        if learnt:
+            displaced = min(stove_kw, max(displaceable_kw[index], 0.0))  # type: ignore[index,type-var]
+            saving = displaced / max(cop[index], 1e-6) * price * dt  # type: ignore[index]
+            savings.append(saving)
+            scores.append(saving / dt)
+        else:
+            cold = max(0.0, 5.0 - outdoor) / 10.0  # 0 at +5 °C, 1 at -5 °C
+            demand = max(0.0, pump)
+            scores.append(price * (0.4 + 0.6 * cold) * (0.3 + 0.7 * min(demand / 3.0, 1.0)))
 
     peak = max(scores)
     if peak <= 0:
@@ -177,19 +212,17 @@ def recommend_windows(
         end = index
         if end - start < min_steps:
             continue
-        slice_price = price_sek[start:end]
-        slice_out = outdoor_c[start:end]
-        slice_pump = heat_pump_kw[start:end]
-        slice_score = scores[start:end]
-        end_time = times[end - 1]
+        span = slice(start, end)
+        count = end - start
         windows.append(
             WoodStoveWindow(
                 start=times[start],
-                end=end_time,
-                mean_price_sek=sum(slice_price) / len(slice_price),
-                mean_outdoor_c=sum(slice_out) / len(slice_out),
-                mean_heat_pump_kw=sum(slice_pump) / len(slice_pump),
-                score=sum(slice_score) / len(slice_score),
+                end=times[end - 1] + timedelta(minutes=step_minutes),
+                mean_price_sek=sum(price_sek[span]) / count,
+                mean_outdoor_c=sum(outdoor_c[span]) / count,
+                mean_heat_pump_kw=sum(heat_pump_kw[span]) / count,
+                score=sum(scores[span]) / count,
+                saving_sek=sum(savings[span]) if learnt else None,
             )
         )
 
@@ -219,77 +252,66 @@ def build_report(
 
     if not config.enabled:
         report.status = "disabled"
-        report.summary = "Braskaminen ar avstangd i konfigurationen."
+        report.summary = "Braskaminen är avstängd i konfigurationen."
         return report
 
     if not report.configured:
         report.status = "need_sensor"
-        report.summary = "Koppla en givare for att detektera nar brasan ar tand."
+        report.summary = "Koppla en givare så att hemopt ser när brasan brinner."
         report.detail = (
-            "Lagg temperature_entity (yta/nara brasans) eller binary_entity i "
-            "wood_stove i hemopt.yaml. Utan detektion kan bidraget inte laras."
+            "Ange temperature_entity (en givare på eller nära kaminen) eller "
+            "binary_entity under wood_stove i hemopt.yaml. Utan den går det inte "
+            "att lära sig hur mycket brasan värmer."
         )
         return report
+
+    learnt = [e for e in effects if e.k_stove_per_hour > 0.02]
 
     if reading.lit:
-        effect_txt = ""
-        if effects:
-            parts = [
-                f"{e.room_name} +{e.k_stove_per_hour:.2f} K/h"
-                for e in effects
-                if e.k_stove_per_hour > 0.02
-            ]
-            if parts:
-                effect_txt = " Larnt bidrag: " + ", ".join(parts) + "."
         report.status = "lit"
-        report.summary = f"{config.name} verkar vara tand just nu."
-        report.detail = (
-            f"Sensor {reading.sensor_c:.1f} C." if reading.sensor_c is not None else ""
-        ) + effect_txt
+        report.summary = f"{config.name} brinner."
+        parts = [f"{e.room_name} +{e.k_stove_per_hour:.2f} °C/h" for e in learnt]
+        sensor = ""
+        if reading.sensor_c is not None:
+            sensor = f"Givaren visar {reading.sensor_c:.0f} °C. "
+        learnt_text = "Uppmätt värme från brasan: " + ", ".join(parts) + "." if parts else ""
+        report.detail = (sensor + learnt_text).strip()
         return report
 
-    if hours_lit_observed < 4 or not effects:
+    if hours_lit_observed < 4 or not learnt:
         report.status = "need_data"
-        report.summary = (
-            f"Mer braseldning behovs for att lara inverkan "
-            f"({hours_lit_observed:.0f} h observerat, helst minst 4–8 h)."
-        )
+        report.summary = "hemopt lär sig fortfarande hur mycket brasan värmer."
         report.detail = (
-            "Nar brasan varit tand i nagra sessioner far varje rum ett "
-            "bidrag i K/h och en upppskattad VP-ekvivalent. Tradigheten "
-            "(tau) rattas samtidigt sa att brasvarme inte blandas ihop med "
-            "golvvarmen."
+            f"{hours_lit_observed:.0f} timmar med brasa observerade, helst 4–8 timmar "
+            "fördelat på några kvällar. Därefter får varje rum ett uppmätt bidrag och "
+            "tipsen nedan en uppskattad besparing i kronor."
         )
-        if windows:
-            first = windows[0]
-            report.detail += (
-                f" Tills vidare: dyraste kallaste fonstret i planen ar "
-                f"{first.start.strftime('%a %H:%M')}–{first.end.strftime('%H:%M')}."
-            )
         return report
 
     if windows:
         first = windows[0]
-        eq = sum(e.equivalent_kw or 0.0 for e in effects)
         report.status = "recommend"
-        report.summary = (
-            f"Bra lage att tanda kring {first.start.strftime('%H:%M')}–"
-            f"{first.end.strftime('%H:%M')} "
-            f"(pris {first.mean_price_sek:.2f} kr/kWh, ute {first.mean_outdoor_c:.0f} C)."
+        saving = (
+            f", sparar omkring {first.saving_sek:.0f} kr värmepumpsel"
+            if first.saving_sek is not None and first.saving_sek >= 1
+            else ""
         )
+        report.summary = (
+            f"Tänd gärna {first.start.strftime('%H:%M')}–{first.end.strftime('%H:%M')}{saving}."
+        )
+        eq = sum(e.equivalent_kw or 0.0 for e in learnt)
+        rooms = ", ".join(e.room_name for e in learnt)
         report.detail = (
-            f"Larnt brasbidrag ca {eq:.1f} kW VP-ekvivalent i "
-            + ", ".join(e.room_name for e in effects if (e.equivalent_kw or 0) > 0.05)
-            + ". Tand da planen annars vill kora varmepumpen dyrt."
-            if eq > 0.05
-            else "Tand nar elpriset och VP-behovet toppar samtidigt."
+            f"Då är elen dyr ({first.mean_price_sek * 100:.0f} öre/kWh) och det är "
+            f"{first.mean_outdoor_c:.0f} °C ute. Brasan ersätter ungefär {eq:.1f} kW "
+            f"golvvärme i {rooms}."
         )
         return report
 
     report.status = "quiet"
-    report.summary = "Ingen stark tandrekommendation i narmaste planfonster."
+    report.summary = "Ingen kväll sticker ut just nu."
     report.detail = (
-        "Priserna ar jamna eller VP-behovet lagt — brasan ger da mindre "
-        "ekonomisk utdelning an en kall dyr kvall."
+        "Elpriset är jämnt eller värmebehovet lågt de närmaste 36 timmarna, så en brasa "
+        "sparar inte mycket. Tänd för mysets skull."
     )
     return report

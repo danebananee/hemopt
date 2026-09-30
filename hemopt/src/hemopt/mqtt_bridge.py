@@ -193,7 +193,7 @@ class MqttBridge:
             ("guard_reason", "Effektvaktens skal", {"icon": "mdi:shield-search"}),
             (
                 "advice_saving",
-                "Mojlig besparing avtal",
+                "Möjlig besparing avtal",
                 {
                     "unit_of_measurement": "SEK",
                     "device_class": "monetary",
@@ -261,7 +261,7 @@ class MqttBridge:
                     "value_template": f"{{{{ value_json.priority_{room.key} }}}}",
                     "command_topic": self._topic(f"cmd/priority_{room.key}"),
                     "min": 1,
-                    "max": 5,
+                    "max": 3,
                     "step": 1,
                     "mode": "slider",
                     "icon": "mdi:priority-high",

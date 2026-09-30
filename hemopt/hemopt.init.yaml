@@ -218,6 +218,7 @@ rooms:
   - key: vardagsrum
     name: Vardagsrum
     floor: Overvaning
+    floor_type: light
     priority: 1
     temperature_entity: sensor.fa_6a_ee_c8_9a_63_temperature
     humidity_entity: sensor.fa_6a_ee_c8_9a_63_humidity
@@ -229,6 +230,7 @@ rooms:
   - key: badrum
     name: Badrum
     floor: Overvaning
+    floor_type: light
     priority: 1
     temperature_entity: sensor.f7_d4_23_14_49_da_temperature
     humidity_entity: sensor.f7_d4_23_14_49_da_humidity
@@ -240,6 +242,7 @@ rooms:
   - key: rios_rum
     name: Rios rum
     floor: Overvaning
+    floor_type: light
     priority: 1
     temperature_entity: sensor.e6_5e_d9_54_a8_e7_temperature
     humidity_entity: sensor.e6_5e_d9_54_a8_e7_humidity
@@ -251,6 +254,7 @@ rooms:
   - key: sovrum
     name: Sovrum
     floor: Overvaning
+    floor_type: light
     priority: 1
     temperature_entity: sensor.c8_1b_04_e0_7e_90_temperature
     humidity_entity: sensor.c8_1b_04_e0_7e_90_humidity
@@ -262,6 +266,7 @@ rooms:
   - key: kontor
     name: Kontor
     floor: Overvaning
+    floor_type: light
     priority: 1
     temperature_entity: sensor.d0_f5_31_05_49_9d_temperature
     humidity_entity: sensor.d0_f5_31_05_49_9d_humidity
@@ -273,6 +278,7 @@ rooms:
   - key: pysselrum
     name: Pysselrum
     floor: Overvaning
+    floor_type: light
     priority: 1
     temperature_entity: sensor.e3_09_14_3f_f0_f0_temperature
     humidity_entity: sensor.e3_09_14_3f_f0_f0_humidity
@@ -284,6 +290,7 @@ rooms:
   - key: garderob
     name: Garderob
     floor: Overvaning
+    floor_type: light
     priority: 1
     temperature_entity: sensor.d5_ba_fd_c1_0c_c1_temperature
     humidity_entity: sensor.d5_ba_fd_c1_0c_c1_humidity
@@ -296,6 +303,7 @@ rooms:
   - key: salong
     name: Salong
     floor: Bottenvaning
+    floor_type: concrete
     priority: 1
     temperature_entity: sensor.e9_bd_23_4a_e9_a8_temperature
     humidity_entity: sensor.e9_bd_23_4a_e9_a8_humidity
@@ -307,6 +315,7 @@ rooms:
   - key: lekrum
     name: Lekrum
     floor: Bottenvaning
+    floor_type: concrete
     priority: 1
     temperature_entity: sensor.ce_9f_90_cd_bf_74_temperature
     humidity_entity: sensor.ce_9f_90_cd_bf_74_humidity
@@ -318,6 +327,7 @@ rooms:
   - key: entre
     name: Entre
     floor: Bottenvaning
+    floor_type: concrete
     priority: 1
     temperature_entity: sensor.ca_97_f7_ba_7d_23_temperature
     humidity_entity: sensor.ca_97_f7_ba_7d_23_humidity
@@ -329,6 +339,7 @@ rooms:
   - key: tvattstuga
     name: Tvattstuga
     floor: Bottenvaning
+    floor_type: concrete
     priority: 1
     temperature_entity: sensor.e0_ec_2c_c8_5e_2c_temperature
     humidity_entity: sensor.e0_ec_2c_c8_5e_2c_humidity

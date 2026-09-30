@@ -102,9 +102,9 @@ async def run_doctor(config: Config) -> Report:
 
         value = states[entity_id]
         if value in {"unavailable", "unknown"}:
-            report.add(WARN, label, f"{entity_id} ar {value}")
+            report.add(WARN, label, f"{entity_id} är {value}")
         elif numeric and parse_numeric(value) is None:
-            report.add(WARN, label, f"{entity_id} ar inte numerisk: {value!r}")
+            report.add(WARN, label, f"{entity_id} är inte numerisk: {value!r}")
         else:
             report.add(OK, label, f"{entity_id} = {value}")
 
@@ -223,7 +223,7 @@ async def run_doctor(config: Config) -> Report:
             "inga climate per rum och ingen heat_pump.room_setpoint_entity — "
             "planen laser sensorer men skriver inget inomhusborvarde. "
             "Med LK Arc: sat room_setpoint_entity till climate.h66_hproom_temp_setpoint "
-            "(kraver ofta ROOM_CTRL=1 pa H66)",
+            "(kräver ofta ROOM_CTRL=1 på H66)",
         )
 
     if config.peak_tariff.enabled and not config.base_load.total_power_entity:
@@ -233,7 +233,7 @@ async def run_doctor(config: Config) -> Report:
         report.add(
             WARN,
             "Effektavgift",
-            "paslagen utan matare pa hela huset, sa toppvakten ser bara varmepumpen",
+            "påslagen utan mätare på hela huset, så toppvakten ser bara värmepumpen",
             suggestions[:5],
         )
     elif not config.base_load.total_power_entity:

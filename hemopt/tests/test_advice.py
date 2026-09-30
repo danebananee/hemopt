@@ -207,7 +207,7 @@ def test_fuse_advice_waits_for_enough_history():
     assert find(report, "fuse") is None
     fuse = next(a for a in report.actions if a.key == "fuse")
     assert fuse.status == "need_data"
-    assert "matdata" in fuse.summary.lower() or "dygn" in fuse.summary.lower()
+    assert "mätdata" in fuse.summary.lower() or "dygn" in fuse.summary.lower()
 
 
 def test_actions_always_include_settlement_and_fuse():
@@ -226,7 +226,7 @@ def test_fuse_action_says_ok_when_smaller_fuses_do_not_fit():
     fuse = next(a for a in report.actions if a.key == "fuse")
 
     assert fuse.status == "ok"
-    assert "25" in fuse.summary or "ratt" in fuse.summary
+    assert "25" in fuse.summary or "rätt" in fuse.summary
     assert {o["amps"] for o in fuse.meta["options"]} >= {16, 20, 25}
     assert not any(o["ok"] and o["amps"] < 25 for o in fuse.meta["options"])
 
@@ -250,7 +250,7 @@ def test_settlement_action_ok_when_already_cheapest():
     settlement = next(a for a in report.actions if a.key == "settlement")
 
     assert settlement.status == "ok"
-    assert "ratt" in settlement.summary
+    assert "rätt" in settlement.summary
 
 
 def test_empty_load_still_emits_need_data_actions():
@@ -380,7 +380,7 @@ def test_no_measurements_yields_a_note_rather_than_a_crash():
     report = build_advice(make_config(), [], [])
 
     assert report.recommendations == []
-    assert any("Ingen matdata" in note for note in report.notes)
+    assert any("Ingen mätdata" in note for note in report.notes)
 
 
 def test_the_report_serialises_for_the_api():

@@ -104,29 +104,70 @@ class HourAccumulator:
     energy_kwh: float = 0.0
     last_sample: datetime | None = None
     samples: int = 0
+    covered_hours: float = 0.0
     _history: list[tuple[datetime, float]] = field(default_factory=list, repr=False)
 
-    def add_sample(self, moment: datetime, power_kw: float) -> None:
-        """Integrate a power reading using the interval since the last sample."""
+    def add_sample(self, moment: datetime, power_kw: float) -> tuple[datetime, float] | None:
+        """Integrate a power reading using the interval since the last sample.
+
+        When the reading belongs to a new clock hour, the stretch up to the
+        hour boundary is booked to the hour that just ended, and that hour's
+        mean power is returned as ``(hour_start, mean_kw)`` so the caller can
+        store it. The hour is then reset.
+        """
+        closed: tuple[datetime, float] | None = None
         hour_start = moment.replace(minute=0, second=0, microsecond=0)
         if hour_start != self.hour_start:
+            boundary_kw: float | None = None
+            if self.last_sample is not None and hour_start - self.hour_start == timedelta(hours=1):
+                previous_kw = self._history[-1][1] if self._history else power_kw
+                span = (moment - self.last_sample).total_seconds()
+                share = (hour_start - self.last_sample).total_seconds() / span if span > 0 else 1.0
+                boundary_kw = previous_kw + (power_kw - previous_kw) * share
+                self._integrate(previous_kw, boundary_kw, self.last_sample, hour_start)
+            closed = self.closed_mean()
             self.reset(hour_start)
+            if boundary_kw is not None:
+                # The slice since the boundary belongs to the new hour.
+                self.last_sample = hour_start
+                self._history.append((hour_start, boundary_kw))
 
         if self.last_sample is not None:
-            elapsed_h = (moment - self.last_sample).total_seconds() / 3600.0
-            if 0 < elapsed_h <= 1.0:
-                previous = self._history[-1][1] if self._history else power_kw
-                self.energy_kwh += 0.5 * (previous + power_kw) * elapsed_h
+            previous_kw = self._history[-1][1] if self._history else power_kw
+            self._integrate(previous_kw, power_kw, self.last_sample, moment)
 
         self.last_sample = moment
         self.samples += 1
         self._history.append((moment, power_kw))
+        return closed
+
+    def _integrate(
+        self, previous_kw: float, current_kw: float, since: datetime, until: datetime
+    ) -> None:
+        """Trapezoid between two readings; gaps over an hour are not bridged."""
+        elapsed_h = (until - since).total_seconds() / 3600.0
+        if not 0 < elapsed_h <= 1.0:
+            return
+        self.energy_kwh += 0.5 * (previous_kw + current_kw) * elapsed_h
+        self.covered_hours += elapsed_h
+
+    def closed_mean(self) -> tuple[datetime, float] | None:
+        """Mean power over the part of the hour actually observed.
+
+        After a restart mid-hour only part of it was seen. The mean over that
+        part is the best estimate of the whole hour; a quarter of an hour is
+        the least worth reporting.
+        """
+        if self.covered_hours < 0.25:
+            return None
+        return self.hour_start, self.energy_kwh / min(self.covered_hours, 1.0)
 
     def reset(self, hour_start: datetime) -> None:
         self.hour_start = hour_start
         self.energy_kwh = 0.0
         self.last_sample = None
         self.samples = 0
+        self.covered_hours = 0.0
         self._history.clear()
 
     def minutes_remaining(self, now: datetime) -> float:

@@ -11,8 +11,8 @@ termostaterna.
 
 ```
 Nordpool spotpris ─┐
-Home Assistant ────┼─→ [ modeller ] → [ MILP-optimerare ] → börvärden → Home Assistant
-Effekttoppsmätning ┘                                      └→ MQTT-entiteter
+Home Assistant ────┼─→ [ modeller ] → [ LP-optimerare ] → börvärden → Home Assistant
+Effekttoppsmätning ┘                                    └→ MQTT-entiteter
 ```
 
 ## Vad den gör
@@ -31,11 +31,25 @@ röda dagar och sommarhalvåret är gratis.
 räknar tjänsten löpande ut hur mycket energi som är kvar att spendera innan
 timmedelvärdet slår i taket.
 
-**Prioriterar rum.** Varje rum får prioritet 1–5. Höga prioriteter håller sin
-temperatur, låga får svaja och bär lastflytten.
+**Prioriterar rum.** Varje rum får prioritet 1–3: *Håll*, *Normal* eller
+*Flexibel*. Rum som ska hållas rubbas inte, flexibla rum får svaja och bär
+lastflytten.
 
-**Lär sig huset.** Tidskonstanten per rum, uppvärmningstakten och
-varmvattenvanorna identifieras ur Home Assistants historik.
+**Lär sig huset.** Tidskonstanten per rum, uppvärmningstakten, golvets
+fördröjning och varmvattenvanorna identifieras ur Home Assistants historik.
+En betongplatta tar timmar att ladda och fortsätter värma efter att slingan
+stängts; spånskiva under trägolv svarar inom timmen. Modellen lär sig
+skillnaden och redovisar hur väl den förutsäger rummet fyra timmar framåt.
+
+**Räknar fram vad du hade sparat.** Så länge du har dygns- eller månadspris
+ger lastflytt ingenting på energidelen. hemopt bokför därför varje kvart vad
+huset hade kostat med kvartspris, dels med samma förbrukning, dels med
+hemopts styrning, och visar skillnaden per dag under fliken *Besparing*. Se
+[Besparingskalkylen](#besparingskalkylen).
+
+**Tipsar om braskaminen.** Med en givare vid kaminen lär sig hemopt hur många
+grader i timmen brasan ger varje rum, och pekar ut de kvällar då en brasa
+ersätter mest dyr värmepumpsel, med en uppskattning i kronor.
 
 **Planerar mot vädret.** Utetemperaturen hämtas som timprognos från en
 weather-entitet. Utan prognos måste planeraren anta att det är lika varmt om
@@ -194,7 +208,7 @@ Med MQTT påslaget dyker enheten **Kostnadsoptimering** upp via autodiscovery:
 | `binary_sensor.hemopt_peak_guard` | Effektvakten begränsar just nu |
 | `sensor.hemopt_guard_reason` | Varför vakten gör som den gör |
 | `switch.hemopt_control_enabled` | Släpper in styrningen |
-| `number.hemopt_priority_<rum>` | Rummets prioritet, 1–5 |
+| `number.hemopt_priority_<rum>` | Rummets prioritet: 1 håll, 2 normal, 3 flexibel |
 
 Dashboardvyn ligger i `../dashboards/kostnadsoptimering.yaml`.
 
@@ -217,7 +231,7 @@ som behövs för det publiceras redan över MQTT.
 
 ```bash
 sudo apt install -y python3-venv
-git clone <repo> && cd <repo>/optimizer
+git clone https://github.com/danebananee/hemopt && cd hemopt/hemopt
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
@@ -232,7 +246,7 @@ After=network-online.target
 
 [Service]
 User=pi
-WorkingDirectory=/home/pi/hemopt/optimizer
+WorkingDirectory=/home/pi/hemopt/hemopt
 ExecStart=/home/pi/.local/bin/uv run hemopt -c config.yaml serve --host 0.0.0.0 --port 47318
 Restart=always
 RestartSec=10
@@ -247,38 +261,77 @@ sudo systemctl enable --now hemopt
 
 ## Så fungerar optimeringen
 
-Varje rum modelleras som ett RC-nät:
+Varje rum modelleras som ett RC-nät där golvet ligger mellan slingan och
+rumsluften:
 
 ```
-dT/dt = (T_ute - T_inne) / tau + k_värme · u + k_gain
+golv:  ds/dt = (u - s) / tau_golv
+luft:  dT/dt = (T_ute - T_inne) / tau + k_värme · s + k_brasa · brasa + k_gain
 ```
 
-`tau` är trögheten i timmar, `u` hur öppen slingan är och `k_gain` sol- och
-internlaster. Alla tre identifieras med minstakvadratanpassning mot historiken,
-med icke-negativa koefficienter så att en brusig vecka inte kan producera ett
-rum som kyls av att värmas.
+`u` är hur öppen slingan är, `s` hur mycket värme golvet faktiskt avger,
+`tau` rummets tröghet i timmar och `k_gain` sol- och internlaster. Med
+`tau_golv = 0` blir det den vanliga enkla rumsmodellen. För varje tänkbar
+golvfördröjning anpassas resten med minstakvadrat mot historiken, med
+icke-negativa koefficienter så att en brusig vecka inte kan producera ett rum
+som kyls av att värmas. Fördröjningen väljs sedan efter vilken modell som
+bäst förutsäger rummet fyra timmar framåt, eftersom det är den frågan
+planeraren ställer.
 
-Schemat löses som ett linjärprogram över 36 timmar i kvartssteg. Målfunktionen
-är
+Schemat löses över 36 timmar i kvartssteg. Målfunktionen är
 
 ```
 energikostnad + effektavgift + komfortavvikelse − värdet av lagrad värme
 ```
 
 Komfortavvikelsen viktas med rummets prioritet, vilket är det som gör
-prioriteringen till ett ekonomiskt val i stället för en hård regel.
-Terminalvärdet krediteras till horisontens lägsta pris, så det aldrig kan
-motivera ett inköp som inte lönar sig på egen hand.
+prioriteringen till ett ekonomiskt val i stället för en hård regel. Värme som
+finns kvar i rummen, golven och tanken när horisonten tar slut krediteras
+till strax under det billigaste värmepriset i horisonten, elpris delat med
+COP, så att krediten aldrig i sig motiverar ett inköp.
 
 Värmepumpen delar sin kapacitet mellan radiatorer och beredare i stället för
 att låsas till det ena per steg. Det är den korrekta modellen för ett
 kvartssteg, eftersom trevägsventilen hinner växla flera gånger inom steget,
-och det håller problemet linjärt.
+och det håller problemet linjärt. Med `heat_pump.strict_dhw_interlock: true`
+tvingas i stället ett av dem per steg; då blir det ett blandat heltalsproblem
+som tar längre tid att lösa.
+
+## Besparingskalkylen
+
+Två modellhus körs sida vid sida, en kvart i taget:
+
+* **referenshuset** värms som utan hemopt: varje slinga öppnar så mycket som
+  termostatens avvikelse från börvärdet säger, och tanken fylls på i takt med
+  att vatten tappas;
+* **det optimerade huset** följer hemopts plan.
+
+Det verkliga huset är alltid ett av dem, uppmätt på nytt varje kvart, så
+modellfel kan inte växa över veckor. Så länge styrningen är av är det
+verkliga huset referenshuset; när du slår på styrningen blir det det
+optimerade. Det som bärs vidare mellan kvartarna är bara skillnaden mellan
+husen: hur mycket varmare det optimerade husets rum, golv och tank är. Det är
+den värme hemopt har lagrat eller lånat, och den måste betalas tillbaka
+senare, så last som flyttats räknas aldrig som last som försvunnit.
+
+Varje kvart bokförs de två husens värmepumpsel och hela husets uppmätta
+förbrukning. Ur det räknas:
+
+* **avtalseffekten** – samma förbrukning, betald per kvart i stället för till
+  dygnets (eller månadens) medelpris;
+* **styrningseffekten** – hemopt flyttar värmepumpens förbrukning till
+  billigare kvartar, betald per kvart.
+
+Siffrorna gäller energidelen av elräkningen med påslag, energiskatt,
+överföringsavgift och moms. Effektavgiften ingår inte, eftersom den inte
+beror på elhandelsavtalet. Under kalkylen visas också hur många gradtimmar
+under komfortbandet det optimerade huset hade haft, så att du ser vad
+besparingen kostar i komfort.
 
 ## Utveckling
 
 ```bash
-uv run pytest        # 76 tester
+uv run pytest
 uv run ruff check .
 uv run ruff format .
 ```

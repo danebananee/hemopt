@@ -26,13 +26,14 @@ PriceArea = Literal["SE1", "SE2", "SE3", "SE4"]
 # expensive hour to a cheap one saves exactly nothing, which is the first
 # thing the advice engine looks for.
 Contract = Literal["fixed", "monthly", "daily", "hourly", "quarterly"]
+FloorType = Literal["concrete", "light"]
 
 CONTRACT_NAMES: dict[str, str] = {
     "fixed": "Fastpris",
-    "monthly": "Rorligt, manadsmedel",
-    "daily": "Rorligt, dygnsmedel",
-    "hourly": "Rorligt, timpris",
-    "quarterly": "Rorligt, kvartspris",
+    "monthly": "Rörligt, månadsmedel",
+    "daily": "Rörligt, dygnsmedel",
+    "hourly": "Rörligt, timpris",
+    "quarterly": "Rörligt, kvartspris",
 }
 
 
@@ -101,8 +102,12 @@ def seed_default_house(config: Config) -> Config:
 
     merged.save_profile()
     for dest in house_config_candidates():
+        # Only write where the directory already exists. Creating
+        # /homeassistant on a machine that is not Home Assistant would leave a
+        # stray config that every later run then picks up.
+        if not dest.parent.is_dir():
+            continue
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
             # Keep credentials out of the YAML the user may edit.
             payload = merged.model_dump(mode="json")
             payload["home_assistant"]["token"] = ""
@@ -297,6 +302,11 @@ class RoomConfig(BaseModel):
     key: str
     name: str
     floor: str = ""
+    # What the underfloor loops are cast into. "concrete" is a slab on ground
+    # that takes hours to charge; "light" is chipboard or timber joists under
+    # a wooden or tiled floor, which answers within the hour. Only the
+    # starting guess depends on it; the lag is then learnt from history.
+    floor_type: FloorType | None = None
     priority: int = Field(default=1, ge=1, le=3)
     temperature_entity: str
     humidity_entity: str | None = None
@@ -334,7 +344,35 @@ class RoomConfig(BaseModel):
         Priority 1 is expensive enough that the solver will not trade the room
         away for spot-price savings; priority 3 is the first to coast.
         """
-        return {1: 40.0, 2: 8.0, 3: 1.0}[self.priority]
+        return PRIORITY_WEIGHTS[clamp_priority(self.priority)]
+
+    @property
+    def resolved_floor_type(self) -> FloorType:
+        """Floor construction, guessed from the storey name when not set.
+
+        A ground floor in a Swedish house is almost always a slab on ground;
+        upper storeys are joists with chipboard.
+        """
+        if self.floor_type is not None:
+            return self.floor_type
+        storey = self.floor.lower()
+        if any(word in storey for word in ("över", "over", "upp", "vind")):
+            return "light"
+        return "concrete"
+
+
+# SEK per degree-hour outside the comfort band, by priority.
+PRIORITY_WEIGHTS = {1: 40.0, 2: 8.0, 3: 1.0}
+PRIORITY_LEVELS = (1, 2, 3)
+
+
+def clamp_priority(value: object) -> int:
+    """Coerce anything a user or an old config might send onto the 1-3 scale."""
+    try:
+        number = int(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1
+    return max(PRIORITY_LEVELS[0], min(PRIORITY_LEVELS[-1], number))
 
 
 class HotWaterConfig(BaseModel):

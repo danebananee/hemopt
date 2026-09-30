@@ -179,7 +179,23 @@ async def test_panel_groups_views_into_tabs(client):
     http, _ = client
     body = (await http.get("/")).text
 
-    for tab in ("overview", "price", "usage", "comfort", "save", "system"):
+    for tab in ("overview", "savings", "rooms", "energy", "system"):
         assert f'data-tab="{tab}"' in body
     assert 'id="summary-line"' in body
     assert "Vad händer just nu" in body
+
+
+async def test_savings_ledger_is_booked_and_served(client):
+    http, engine = client
+    body = (await http.get("/api/savings?days=7")).json()
+    assert body["contract"] == engine.config.energy_price.contract
+    assert body["days"], "the first replan books one step"
+    assert body["totals"]["measured_days"] > 0
+
+
+async def test_rooms_report_floor_type_and_model_quality(client):
+    http, _ = client
+    rooms = (await http.get("/api/rooms")).json()
+    assert {room["floor_type"] for room in rooms} <= {"concrete", "light"}
+    assert all("tau_slab_hours" in room["model"] for room in rooms)
+    assert all("rmse_4h" in room["model"] for room in rooms)

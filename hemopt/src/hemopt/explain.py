@@ -30,6 +30,11 @@ class ModelAction:
         }
 
 
+def _ore(sek_per_kwh: float) -> str:
+    """Price as households read it on the bill: öre per kWh, no decimals."""
+    return f"{sek_per_kwh * 100:.0f} öre/kWh"
+
+
 def _mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -135,8 +140,8 @@ def explain_plan(
                     key="dhw_charge_wait",
                     title="Varmvatten — bättre att vänta",
                     detail=(
-                        f"Nu {drop_now:.2f} kr/kWh, men om cirka {drop_minutes} min "
-                        f"sjunker priset mot {drop_later:.2f} kr/kWh. "
+                        f"Nu {_ore(drop_now)}, men om cirka {drop_minutes} min "
+                        f"sjunker priset mot {_ore(drop_later)}. "
                         "Fyll tanken hellre då om du kan."
                     ),
                     kind="warn",
@@ -148,8 +153,8 @@ def explain_plan(
                     key="dhw_precharge",
                     title="Laddar varmvatten inför dyrare el",
                     detail=(
-                        f"Tanken fylls nu ({now_p:.2f} kr/kWh) innan priset stiger "
-                        f"mot cirka {later_p:.2f} kr/kWh."
+                        f"Tanken fylls nu ({_ore(now_p)}) innan priset stiger "
+                        f"mot cirka {_ore(later_p)}."
                     ),
                     kind="active",
                 )
@@ -159,9 +164,7 @@ def explain_plan(
                 ModelAction(
                     key="dhw_charge",
                     title="Laddar varmvatten",
-                    detail=(
-                        f"Elpriset är {price:.2f} kr/kWh — ett bra tillfälle att fylla tanken."
-                    ),
+                    detail=(f"Elpriset är {_ore(price)} — ett bra tillfälle att fylla tanken."),
                     kind="active",
                 )
             )
@@ -171,7 +174,7 @@ def explain_plan(
                 key="dhw_wait_cheap",
                 title="Väntar på billigare el till varmvattnet",
                 detail=(
-                    f"Om cirka {drop_minutes} min är priset omkring {drop_later:.2f} kr/kWh "
+                    f"Om cirka {drop_minutes} min är priset omkring {_ore(drop_later)} "
                     f"(nu {drop_now:.2f}). Då är det läge att fylla tanken."
                 ),
                 kind="tip",
@@ -187,8 +190,7 @@ def explain_plan(
                     key="dhw_soon",
                     title="Varmvatten laddas innan priset toppar",
                     detail=(
-                        f"Inom några timmar fylls tanken innan elen går upp mot "
-                        f"{later_p:.2f} kr/kWh."
+                        f"Inom några timmar fylls tanken innan elen går upp mot {_ore(later_p)}."
                     ),
                     kind="tip",
                     when="soon",
@@ -263,7 +265,7 @@ def explain_plan(
             ModelAction(
                 key="heat_hard",
                 title=f"Värmepumpen går hårt ({pump:.1f} kW)",
-                detail=f"Elpris just nu {price:.2f} kr/kWh.",
+                detail=f"Elpris just nu {_ore(price)}.",
                 kind="info",
             )
         )
@@ -287,7 +289,7 @@ def explain_plan(
                     detail=(
                         f"Föreslaget fönster {window.start.strftime('%H:%M')}–"
                         f"{window.end.strftime('%H:%M')} "
-                        f"({window.mean_price_sek:.2f} kr/kWh, ute {window.mean_outdoor_c:.0f} °C)."
+                        f"({_ore(window.mean_price_sek)}, ute {window.mean_outdoor_c:.0f} °C)."
                     ),
                     kind="tip",
                     when="soon",
@@ -299,7 +301,7 @@ def explain_plan(
             ModelAction(
                 key="steady",
                 title="Håller en lugn kurva",
-                detail=f"Pris {price:.2f} kr/kWh, planerad värmepump {pump:.1f} kW.",
+                detail=f"Pris {_ore(price)}, planerad värmepump {pump:.1f} kW.",
                 kind="info",
             )
         )
@@ -350,7 +352,7 @@ def explain_upcoming(plan: Plan, index: int, *, limit: int = 4) -> list[ModelAct
                     key=f"soon_expensive_heat_{i}",
                     title="Dyr uppvärmning i sikte",
                     detail=(
-                        f"Runt {t.strftime('%H:%M')}: {plan.price_sek_per_kwh[i]:.2f} kr/kWh "
+                        f"Runt {t.strftime('%H:%M')}: {_ore(plan.price_sek_per_kwh[i])} "
                         f"och {plan.heat_pump_kw[i]:.1f} kW — förvärmning eller brasa lönar sig."
                     ),
                     kind="tip",

@@ -137,3 +137,76 @@ async def test_ensure_lk_arc_climate_skips_when_present():
     assert result["ok"] is True
     assert result["action"] == "already_present"
     assert result["sample_climate"] == "climate.e0_ec_2c_c8_5e_2c_thermostat"
+
+
+async def test_climate_history_reports_the_setpoint_not_the_mode():
+    """A thermostat's state is 'heat'; the setpoint lives in its attributes."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if "climate.salong" in request.url.params.get("filter_entity_id", ""):
+            return httpx.Response(
+                200,
+                json=[
+                    [
+                        {
+                            "entity_id": "climate.salong",
+                            "state": "heat",
+                            "attributes": {"temperature": 21.0},
+                            "last_changed": "2026-01-12T00:00:00+01:00",
+                            "last_updated": "2026-01-12T00:00:00+01:00",
+                        },
+                        {
+                            "entity_id": "climate.salong",
+                            "state": "heat",
+                            "attributes": {"temperature": 19.5},
+                            "last_changed": "2026-01-12T00:00:00+01:00",
+                            "last_updated": "2026-01-12T06:00:00+01:00",
+                        },
+                    ]
+                ],
+            )
+        return httpx.Response(
+            200,
+            json=[
+                [
+                    {
+                        "entity_id": "sensor.salong",
+                        "state": "20.8",
+                        "last_changed": "2026-01-12T00:00:00+01:00",
+                    }
+                ]
+            ],
+        )
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://ha.local", token="t"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    from datetime import datetime
+
+    async with client:
+        history = await client.history(
+            ["sensor.salong", "climate.salong"], datetime.fromisoformat("2026-01-11T00:00:00+01:00")
+        )
+
+    assert [point.value for point in history["climate.salong"]] == [21.0, 19.5]
+    # The attribute change is dated by last_updated, when it happened.
+    assert history["climate.salong"][1].moment.hour == 6
+    assert [point.value for point in history["sensor.salong"]] == [20.8]
+    climate_request = next(r for r in seen if "climate" in r.url.params["filter_entity_id"])
+    assert "no_attributes" not in climate_request.url.params
+    sensor_request = next(r for r in seen if "sensor" in r.url.params["filter_entity_id"])
+    assert "no_attributes" in sensor_request.url.params
+
+
+def test_setpoints_are_read_from_state_attributes():
+    from hemopt.ha import climate_setpoints
+
+    rows = [
+        {"entity_id": "climate.a", "state": "heat", "attributes": {"temperature": 21.5}},
+        {"entity_id": "climate.b", "state": "off", "attributes": {}},
+        {"entity_id": "sensor.c", "state": "3", "attributes": {"temperature": 9}},
+    ]
+    assert climate_setpoints(rows) == {"climate.a": 21.5}

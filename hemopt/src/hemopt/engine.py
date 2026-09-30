@@ -19,10 +19,16 @@ import httpx
 from . import baseload
 from .advice import AdviceReport, build_advice, samples_from_hourly
 from .climate_ids import repair_room_climate_entities, resolve_climate_entity
-from .config import Config
+from .config import Config, clamp_priority
 from .explain import explain_plan, explain_upcoming, headline
 from .guard import GuardDecision, PeakGuard
-from .ha import HomeAssistantClient, parse_numeric, resample_forecast
+from .ha import (
+    HomeAssistantClient,
+    climate_setpoints,
+    is_climate,
+    parse_numeric,
+    resample_forecast,
+)
 from .hotwater import TankSample, UsageProfile, build_profile, estimate_draws
 from .loop_mapping import (
     LoopMappingReport,
@@ -43,8 +49,25 @@ from .optimizer import (
 )
 from .peaks import HourAccumulator, PeakState, peak_state
 from .prices import PriceClient, PriceSeries
+from .shadow import (
+    LedgerStep,
+    TwinOffset,
+    call_for_heat,
+    cold_degree_hours,
+    next_offset,
+    reference_step,
+    shifted_problem,
+    summarise,
+)
 from .storage import Store
-from .thermal import ThermalModel, ThermalSample, identify
+from .thermal import (
+    ThermalModel,
+    ThermalSample,
+    identify,
+    nearest_value,
+    previous_value,
+    slab_alpha,
+)
 from .timeutil import floor_to_step, is_peak_window
 from .woodstove import (
     WoodStoveEffect,
@@ -93,11 +116,22 @@ class Engine:
             hour_start=self._now().replace(minute=0, second=0, microsecond=0)
         )
         self.guard = PeakGuard(config.ext_control)
-        self.guard_decision = GuardDecision(False, "not evaluated")
+        self.guard_decision = GuardDecision(False, "inte utvärderad ännu")
         self.advice = AdviceReport()
         self.wood_stove = WoodStoveReport()
         self._wood_stove_lit = False
         self._ext_state: dict[str, bool] = {}
+        # Latest thermostat setpoints; a climate entity's state is only its mode.
+        self._setpoints: dict[str, float] = {}
+        # Estimated floor output per room, 0..1, tracked between plans.
+        self._slab: dict[str, float] = {}
+        self._slab_updated: datetime | None = None
+        # Whole-house energy in the current planning step, for the ledger.
+        self._step_start: datetime | None = None
+        self._step_energy_kwh = 0.0
+        self._step_covered_h = 0.0
+        self._step_last: tuple[datetime, float] | None = None
+        self.shadow_offset = TwinOffset.from_dict(self.store.setting("shadow_offset"))
 
         self._mqtt: MqttBridge | None = None
         self._http: httpx.AsyncClient | None = None
@@ -112,11 +146,11 @@ class Engine:
     def _load_persisted(self) -> None:
         for room in self.config.rooms:
             stored = self.store.thermal_model(room.key)
-            self.models[room.key] = stored or ThermalModel.default()
+            self.models[room.key] = stored or ThermalModel.default(room.resolved_floor_type)
             priority = self.store.setting(f"priority_{room.key}")
-            if isinstance(priority, int) and 1 <= priority <= 5:
+            if isinstance(priority, int):
                 # Legacy 4–5 meant "hold"; that is priority 1 on the new scale.
-                room.priority = 1 if priority >= 4 else min(priority, 3)
+                room.priority = 1 if priority >= 4 else clamp_priority(priority)
             comfort = self.store.setting(f"comfort_{room.key}")
             if isinstance(comfort, dict):
                 lo = comfort.get("min")
@@ -179,11 +213,7 @@ class Engine:
 
         if key.startswith("priority_"):
             room_key = key.removeprefix("priority_")
-            try:
-                value = int(float(payload))
-            except ValueError:
-                return
-            value = max(1, min(5, value))
+            value = clamp_priority(payload)
             try:
                 self.config.room(room_key).priority = value
             except KeyError:
@@ -221,7 +251,9 @@ class Engine:
             self.status.home_assistant_online = online
             if not online:
                 return None
-            return await ha.states()
+            rows = await ha.states_full()
+        self._setpoints = climate_setpoints(rows)
+        return {row["entity_id"]: row["state"] for row in rows}
 
     async def fetch_history(self, start: datetime) -> dict[str, list]:
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
@@ -238,12 +270,16 @@ class Engine:
         now = self._now()
         rows = []
         for entity_id in self._tracked_entities():
-            value = parse_numeric(states.get(entity_id))
+            if is_climate(entity_id):
+                value = self._setpoints.get(entity_id)
+            else:
+                value = parse_numeric(states.get(entity_id))
             if value is not None:
                 rows.append((entity_id, now, value))
         self.store.record_samples(rows)
         self.status.last_sample = now
         self._update_wood_stove_reading(states, now)
+        self._update_slab_estimates(states, now)
 
         total_entity = self.config.base_load.total_power_entity
         total_kw = parse_numeric(states.get(total_entity)) if total_entity else None
@@ -257,10 +293,11 @@ class Engine:
         if total_kw > 100:
             total_kw /= 1000.0
 
-        previous_hour = self.accumulator.hour_start
-        self.accumulator.add_sample(now, total_kw)
-        if self.accumulator.hour_start != previous_hour:
-            self.store.record_hourly_power(previous_hour, self.accumulator.energy_kwh)
+        closed = self.accumulator.add_sample(now, total_kw)
+        if closed is not None:
+            self.store.record_hourly_power(*closed)
+        if total_entity:
+            self._book_house_energy(now, total_kw)
 
         self.store.record_hourly_power(
             self.accumulator.hour_start,
@@ -268,6 +305,96 @@ class Engine:
         )
 
         await self._run_guard(now, states)
+
+    def _update_slab_estimates(self, states: dict[str, str], now: datetime) -> None:
+        """Track how much heat each floor is giving off.
+
+        The floor state cannot be measured, but its input can: while hemopt
+        steers, the plan says how open each loop is; otherwise the
+        thermostat's own setpoint error does. Filtering that through the
+        room's learnt floor lag gives the starting point the next plan needs.
+        """
+        elapsed_h = (
+            (now - self._slab_updated).total_seconds() / 3600.0
+            if self._slab_updated is not None
+            else None
+        )
+        self._slab_updated = now
+        outdoor = (
+            parse_numeric(states.get(self.config.heat_pump.outdoor_entity))
+            if self.config.heat_pump.outdoor_entity
+            else None
+        )
+        plan_index = self.plan.step_at(now) if self.plan is not None else None
+        plan_rooms = {room.key: room for room in self.plan.rooms} if self.plan else {}
+
+        for room in self.config.rooms:
+            indoor = parse_numeric(states.get(room.temperature_entity))
+            if indoor is None:
+                continue
+            model = self.models.get(room.key) or ThermalModel.default(room.resolved_floor_type)
+
+            loop: float | None = None
+            if self.status.control_enabled and room.key in plan_rooms and plan_index is not None:
+                loop = plan_rooms[room.key].heat_fraction[plan_index]
+            elif room.climate_entity and room.climate_entity in self._setpoints:
+                loop = call_for_heat(self._setpoints[room.climate_entity], indoor)
+
+            current = self._slab.get(room.key)
+            if current is None or elapsed_h is None or elapsed_h > 6.0:
+                # Nothing to filter from yet: assume the floor is holding the
+                # room steady, which is what a thermostat-run house converges to.
+                self._slab[room.key] = (
+                    model.steady_heat_fraction(indoor, outdoor)
+                    if outdoor is not None
+                    else (loop if loop is not None else 0.5)
+                )
+                continue
+            if loop is None:
+                continue
+            alpha = slab_alpha(model.tau_slab_hours, elapsed_h)
+            self._slab[room.key] = current + alpha * (loop - current)
+
+    def _book_house_energy(self, now: datetime, total_kw: float) -> None:
+        """Integrate whole-house power per planning step for the savings ledger.
+
+        A step is booked when the next one begins, scaled up from the part of
+        it that was observed. Steps seen for less than 80 % are left out
+        rather than guessed.
+        """
+        step_minutes = self.config.optimiser.step_minutes
+        step_h = step_minutes / 60.0
+        step_start = floor_to_step(now, step_minutes)
+        last = self._step_last
+        self._step_last = (now, total_kw)
+
+        if last is None or not 0 < (now - last[0]).total_seconds() <= step_minutes * 60:
+            self._step_start = step_start
+            self._step_energy_kwh = 0.0
+            self._step_covered_h = 0.0
+            return
+
+        previous_moment, previous_kw = last
+        if step_start == self._step_start:
+            elapsed_h = (now - previous_moment).total_seconds() / 3600.0
+            self._step_energy_kwh += 0.5 * (previous_kw + total_kw) * elapsed_h
+            self._step_covered_h += elapsed_h
+            return
+
+        # The interval crosses a step boundary: split it there.
+        span_h = (now - previous_moment).total_seconds() / 3600.0
+        before_h = max((step_start - previous_moment).total_seconds() / 3600.0, 0.0)
+        boundary_kw = previous_kw + (total_kw - previous_kw) * (before_h / span_h)
+        self._step_energy_kwh += 0.5 * (previous_kw + boundary_kw) * before_h
+        self._step_covered_h += before_h
+        if self._step_start is not None and self._step_covered_h >= 0.8 * step_h:
+            self.store.record_house_energy(
+                self._step_start, self._step_energy_kwh * step_h / self._step_covered_h
+            )
+        after_h = span_h - before_h
+        self._step_start = step_start
+        self._step_energy_kwh = 0.5 * (boundary_kw + total_kw) * after_h
+        self._step_covered_h = after_h
 
     async def _run_guard(self, now: datetime, states: dict[str, str]) -> None:
         """Re-evaluate the live peak guard and drive the EXT input."""
@@ -332,18 +459,14 @@ class Engine:
         outdoor_times = sorted(outdoor_series)
 
         stove_on_by_time, stove_times = self._stove_history_series(history)
-        hours_lit = 0.0
-        sessions = 0
         if stove_times:
-            prev = False
+            sessions = 0
+            previous = False
             for moment in stove_times:
-                on = stove_on_by_time.get(moment, 0.0) >= 0.5
-                if on:
-                    hours_lit += 0.25  # history is irregular; approx refined below
-                if on and not prev:
+                lit = stove_on_by_time.get(moment, 0.0) >= 0.5
+                if lit and not previous:
                     sessions += 1
-                prev = on
-            # Better estimate from consecutive deltas.
+                previous = lit
             hours_lit = 0.0
             for earlier, later in zip(stove_times, stove_times[1:], strict=False):
                 if stove_on_by_time.get(earlier, 0.0) >= 0.5:
@@ -366,7 +489,7 @@ class Engine:
 
             samples = []
             for point in indoor:
-                nearest_outdoor = _nearest_value(outdoor_series, outdoor_times, point.moment)
+                nearest_outdoor = nearest_value(outdoor_series, outdoor_times, point.moment)
                 if nearest_outdoor is None:
                     continue
                 heat_fraction = _heat_fraction(
@@ -374,7 +497,7 @@ class Engine:
                 )
                 stove_on = 0.0
                 if room.key in stove_rooms and stove_times:
-                    stove_val = _nearest_value(stove_on_by_time, stove_times, point.moment)
+                    stove_val = nearest_value(stove_on_by_time, stove_times, point.moment)
                     stove_on = 1.0 if stove_val is not None and stove_val >= 0.5 else 0.0
                 samples.append(
                     ThermalSample(
@@ -386,17 +509,24 @@ class Engine:
                     )
                 )
 
-            model = identify(samples, prior=self.models.get(room.key))
+            model = identify(
+                samples,
+                step_minutes=self.config.optimiser.step_minutes,
+                prior=self.models.get(room.key),
+                floor_type=room.resolved_floor_type,
+            )
             if model.fitted:
                 self.models[room.key] = model
                 self.store.save_thermal_model(room.key, model)
                 _LOGGER.info(
-                    "%s: tau %.1f h, heat %.2f K/h, stove %.2f K/h, R2 %.2f",
+                    "%s: tau %.1f h, floor lag %.1f h, heat %.2f K/h, stove %.2f K/h, "
+                    "4 h error %.2f K",
                     room.name,
                     model.tau_hours,
+                    model.tau_slab_hours,
                     model.k_heat_per_hour,
                     model.k_stove_per_hour,
-                    model.r_squared,
+                    model.rmse_4h if model.rmse_4h is not None else float("nan"),
                 )
 
         tank_entity = self.config.hot_water.top_temperature_entity
@@ -410,9 +540,7 @@ class Engine:
                 TankSample(
                     moment=point.moment,
                     top_temperature=point.value,
-                    charging=(
-                        (_nearest_value(pump_by_time, pump_times, point.moment) or 0.0) > 0.3
-                    ),
+                    charging=((nearest_value(pump_by_time, pump_times, point.moment) or 0.0) > 0.3),
                 )
                 for point in history[tank_entity]
             ]
@@ -580,8 +708,8 @@ class Engine:
                 measured_days=measured_days,
                 current_contract=self.config.energy_price.contract,
                 notes=[
-                    f"For lite matdata an: {len(history)} timmar sparade "
-                    f"({measured_days:.1f} dygn). Radgivningen behover minst ett dygn."
+                    f"För lite mätdata än: {len(history)} timmar sparade "
+                    f"({measured_days:.1f} dygn). Rådgivningen behöver minst ett dygn."
                 ],
             )
             return self.advice
@@ -592,7 +720,7 @@ class Engine:
             self.advice = AdviceReport(
                 measured_days=measured_days,
                 current_contract=self.config.energy_price.contract,
-                notes=["Historiska spotpriser kunde inte hamtas."],
+                notes=["Historiska spotpriser kunde inte hämtas."],
             )
             return self.advice
 
@@ -674,9 +802,11 @@ class Engine:
             rooms.append(
                 RoomInput(
                     config=room,
-                    model=self.models.get(room.key, ThermalModel.default()),
+                    model=self.models.get(room.key)
+                    or ThermalModel.default(room.resolved_floor_type),
                     initial_temperature=current,
                     nominal_heat_kw=self._nominal_heat_kw(room.heat_share),
+                    initial_slab=self._slab.get(room.key),
                 )
             )
 
@@ -720,8 +850,15 @@ class Engine:
 
         if prices.is_partly_forecast:
             plan.notes.append(
-                "Morgondagens spotpriser saknas, senare delen av planen bygger pa dagens profil."
+                "Morgondagens spotpriser saknas, senare delen av planen bygger på dagens profil."
             )
+
+        try:
+            await self._book_shadow_step(problem, plan, price_client, prices)
+        except InfeasiblePlan as exc:
+            _LOGGER.info("shadow step skipped: %s", exc)
+        except Exception:  # noqa: BLE001 - the ledger must never stop planning
+            _LOGGER.exception("shadow ledger update failed")
 
         self.plan = plan
         self.status.last_plan = now
@@ -729,6 +866,104 @@ class Engine:
         self.refresh_wood_stove()
         self._publish(plan, now)
         return plan
+
+    async def _book_shadow_step(
+        self,
+        problem: OptimisationInput,
+        plan: Plan,
+        price_client: PriceClient,
+        prices: PriceSeries,
+    ) -> None:
+        """Advance the two model twins one step and book it in the ledger.
+
+        See `hemopt.shadow` for the method. The real house is always one of
+        the twins: the reference twin while hemopt only watches, the optimised
+        twin once it steers. The other is the real house plus or minus the
+        heat hemopt has shifted so far.
+        """
+        step_start = problem.start
+        if self.store.has_shadow_step(step_start):
+            return
+
+        offset = self.shadow_offset
+        if self.status.control_enabled:
+            # The real house follows the plan; the reference twin is the real
+            # house minus the heat hemopt has shifted, run on the setpoints
+            # the household had before handing over control.
+            optimised = plan
+            reference = reference_step(problem, self._manual_setpoints(), offset)
+        else:
+            reference = reference_step(problem, self._thermostat_setpoints())
+            optimised = solve(shifted_problem(problem, offset, +1.0))
+
+        dt = problem.step_hours
+        day_points = await price_client.fetch_day(step_start.date()) or []
+        day_spot = [point.spot_sek_per_kwh for point in day_points]
+        hour = step_start.replace(minute=0, second=0, microsecond=0)
+        hour_spot = [
+            point.spot_sek_per_kwh
+            for point in day_points
+            if point.start.replace(minute=0, second=0, microsecond=0) == hour
+        ]
+        spot = prices.spot[0]
+        vat = (
+            1.0
+            if self.config.energy_price.prices_include_vat
+            else (1.0 + self.config.energy_price.vat_rate)
+        )
+
+        self.store.record_shadow_step(
+            LedgerStep(
+                start=step_start,
+                spot=spot,
+                spot_hour=sum(hour_spot) / len(hour_spot) if hour_spot else spot,
+                spot_day=sum(day_spot) / len(day_spot) if day_spot else spot,
+                adder=prices.total[0] - spot * vat,
+                reference_kwh=reference.electrical_kwh,
+                optimised_kwh=optimised.heat_pump_kw[0] * dt,
+                house_kwh=None,
+                reference_cold_dh=reference.cold_degree_hours,
+                optimised_cold_dh=cold_degree_hours(optimised),
+                control_enabled=self.status.control_enabled,
+            )
+        )
+        self.shadow_offset = next_offset(optimised, reference)
+        self.store.set_setting("shadow_offset", self.shadow_offset.as_dict())
+
+    def _thermostat_setpoints(self) -> dict[str, float | None]:
+        """Each room's current thermostat setpoint, remembered for later.
+
+        While hemopt only watches, these are the household's own settings.
+        They are saved so the reference twin can keep using them once hemopt
+        takes over and starts writing setpoints of its own.
+        """
+        result: dict[str, float | None] = {}
+        for room in self.config.rooms:
+            value = self._setpoints.get(room.climate_entity or "")
+            result[room.key] = value
+        if not self.status.control_enabled and any(v is not None for v in result.values()):
+            self.store.set_setting("manual_setpoints", result)
+        return result
+
+    def _manual_setpoints(self) -> dict[str, float | None]:
+        """The household's own setpoints from before hemopt took control."""
+        stored = self.store.setting("manual_setpoints")
+        result: dict[str, float | None] = {}
+        for room in self.config.rooms:
+            value = stored.get(room.key) if isinstance(stored, dict) else None
+            if not isinstance(value, (int, float)):
+                # Never seen: assume the thermostat sat mid-band.
+                value = (room.comfort_min + room.comfort_max) / 2.0
+            result[room.key] = float(value)
+        return result
+
+    def savings(self, days: int = 30) -> dict[str, Any]:
+        """What quarterly pricing plus hemopt would have saved, per day."""
+        since = self._now() - timedelta(days=max(1, min(days, 400)))
+        steps = self.store.shadow_steps(since, self.tz)
+        payload = summarise(steps, self.config, self.tz)
+        payload["control_enabled"] = self.status.control_enabled
+        return payload
 
     def _update_wood_stove_reading(self, states: dict[str, str], now: datetime) -> None:
         cfg = self.config.wood_stove
@@ -803,12 +1038,26 @@ class Engine:
 
         windows = []
         if self.plan is not None:
+            # Heat the plan sends to the stove's rooms is what a fire can
+            # replace; beyond that the rooms just get warmer.
+            stove_rooms = {effect.room_key for effect in effects}
+            displaceable = [0.0] * len(self.plan.times)
+            for room_plan in self.plan.rooms:
+                if room_plan.key not in stove_rooms:
+                    continue
+                nominal = self._nominal_heat_kw(self.config.room(room_plan.key).heat_share)
+                for index, fraction in enumerate(room_plan.heat_fraction):
+                    displaceable[index] += fraction * nominal
+            stove_kw = sum(effect.equivalent_kw or 0.0 for effect in effects) or None
             windows = recommend_windows(
                 times=self.plan.times,
                 price_sek=self.plan.price_sek_per_kwh,
                 outdoor_c=self.plan.outdoor_c,
                 heat_pump_kw=self.plan.heat_pump_kw,
                 step_minutes=self.plan.step_minutes,
+                stove_kw=stove_kw,
+                displaceable_kw=displaceable,
+                cop=[self.config.heat_pump.cop(t) for t in self.plan.outdoor_c],
             )
 
         stats = self.store.setting("wood_stove_stats") or {}
@@ -1025,7 +1274,7 @@ class Engine:
             "advice_top": (
                 self.advice.recommendations[0].title
                 if self.advice.recommendations
-                else "Inga forslag"
+                else "Inga förslag"
             ),
             "in_peak_window": _json_bool(in_window),
             "control_enabled": _json_bool(self.status.control_enabled),
@@ -1145,20 +1394,6 @@ def _to_kw(value: float) -> float:
     return value / 1000.0 if value > 100 else value
 
 
-def _nearest_value(
-    values: dict[datetime, float],
-    ordered: list[datetime],
-    moment: datetime,
-    tolerance_s: int = 3600,
-) -> float | None:
-    if not ordered:
-        return None
-    best = min(ordered, key=lambda t: abs((t - moment).total_seconds()))
-    if abs((best - moment).total_seconds()) > tolerance_s:
-        return None
-    return values[best]
-
-
 def _heat_fraction(
     climate_by_time: dict[datetime, float],
     climate_times: list[datetime],
@@ -1168,13 +1403,13 @@ def _heat_fraction(
     """Approximate how open the room's loop was.
 
     With no valve feedback, the thermostat's own setpoint error is the best
-    available proxy: a room below its setpoint is calling for heat.
+    available proxy: a room below its setpoint is calling for heat. The
+    setpoint in force is the last one set, not the nearest change in time.
     """
-    setpoint = _nearest_value(climate_by_time, climate_times, moment)
+    setpoint = previous_value(climate_by_time, climate_times, moment, max_age_s=30 * 86400.0)
     if setpoint is None:
         return 0.0
-    error = setpoint - indoor
-    return max(0.0, min(1.0, error / 0.5))
+    return call_for_heat(setpoint, indoor)
 
 
 def _measured_days(history: dict[datetime, float]) -> float:

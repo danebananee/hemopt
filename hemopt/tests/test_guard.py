@@ -54,7 +54,7 @@ def test_the_guard_still_advises_when_ext_actuation_is_off():
 def test_no_block_outside_the_billed_window():
     decision = evaluate(guard(), minutes=30, average_kw=20.0, in_window=False)
     assert decision.block is False
-    assert "window" in decision.reason
+    assert "mättiden" in decision.reason
 
 
 def test_no_block_while_there_is_budget_left():
@@ -125,7 +125,7 @@ def test_block_cannot_exceed_the_configured_cap():
         coldest_room_c=21.0,
     )
     assert decision.block is False
-    assert "cap" in decision.reason
+    assert "maxtiden" in decision.reason
 
 
 def test_minimum_release_time_is_respected():
@@ -150,7 +150,7 @@ def test_minimum_release_time_is_respected():
         coldest_room_c=21.0,
     )
     assert decision.block is False
-    assert "release" in decision.reason
+    assert "frisläppning" in decision.reason
 
 
 def test_idle_heat_pump_is_not_blocked():

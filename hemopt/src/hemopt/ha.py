@@ -58,6 +58,24 @@ def parse_numeric(state: str | None) -> float | None:
         return None
 
 
+def is_climate(entity_id: str | None) -> bool:
+    return bool(entity_id) and entity_id.startswith("climate.")
+
+
+def climate_setpoints(rows: list[dict]) -> dict[str, float]:
+    """Target temperature of every climate entity in a /api/states dump."""
+    result: dict[str, float] = {}
+    for row in rows:
+        entity_id = row.get("entity_id", "")
+        if not is_climate(entity_id):
+            continue
+        raw = (row.get("attributes") or {}).get("temperature")
+        value = parse_numeric(None if raw is None else str(raw))
+        if value is not None:
+            result[entity_id] = value
+    return result
+
+
 def normalize_ha_base_url(url: str) -> str:
     """Strip a trailing /api so paths can always start with /api/…."""
     trimmed = url.strip().rstrip("/")
@@ -163,10 +181,14 @@ class HomeAssistantClient:
         )
         return False
 
-    async def states(self) -> dict[str, str]:
+    async def states_full(self) -> list[dict]:
+        """Every entity's state object, attributes included."""
         response = await self._http.get(self._url("/api/states"), headers=self._auth_headers())
         response.raise_for_status()
-        return {row["entity_id"]: row["state"] for row in response.json()}
+        return list(response.json())
+
+    async def states(self) -> dict[str, str]:
+        return {row["entity_id"]: row["state"] for row in await self.states_full()}
 
     async def state(self, entity_id: str) -> str | None:
         response = await self._http.get(
@@ -195,18 +217,42 @@ class HomeAssistantClient:
         Entities are requested in small batches because Home Assistant builds
         the whole response in memory and a three-week window across a dozen
         sensors will otherwise time out on a Raspberry Pi.
+
+        A thermostat's state is its mode ("heat"), which says nothing. What the
+        models need is the setpoint, which lives in the `temperature`
+        attribute and changes without the state changing. Climate entities are
+        therefore fetched with attributes and reported as their setpoint.
         """
         result: dict[str, list[StatePoint]] = {entity: [] for entity in entity_ids}
-        batch_size = 5
+        plain = [entity for entity in entity_ids if not is_climate(entity)]
+        climate = [entity for entity in entity_ids if is_climate(entity)]
 
+        await self._history_batches(plain, start, end, result, attribute=None, batch_size=5)
+        # Full state objects are much larger, so fewer per request.
+        await self._history_batches(
+            climate, start, end, result, attribute="temperature", batch_size=2
+        )
+        return result
+
+    async def _history_batches(
+        self,
+        entity_ids: list[str],
+        start: datetime,
+        end: datetime | None,
+        result: dict[str, list[StatePoint]],
+        *,
+        attribute: str | None,
+        batch_size: int,
+    ) -> None:
         for index in range(0, len(entity_ids), batch_size):
             batch = entity_ids[index : index + batch_size]
-            params = {
-                "filter_entity_id": ",".join(batch),
-                "minimal_response": "",
-                "no_attributes": "",
-                "significant_changes_only": "",
-            }
+            params = {"filter_entity_id": ",".join(batch)}
+            if attribute is None:
+                params |= {
+                    "minimal_response": "",
+                    "no_attributes": "",
+                    "significant_changes_only": "",
+                }
             if end is not None:
                 params["end_time"] = end.isoformat()
 
@@ -229,16 +275,18 @@ class HomeAssistantClient:
                     continue
                 points: list[StatePoint] = []
                 for row in series:
-                    value = parse_numeric(row.get("state"))
-                    if value is None:
-                        continue
-                    stamp = row.get("last_changed") or row.get("last_updated")
-                    if stamp is None:
+                    if attribute is None:
+                        value = parse_numeric(row.get("state"))
+                        stamp = row.get("last_changed") or row.get("last_updated")
+                    else:
+                        raw = (row.get("attributes") or {}).get(attribute)
+                        value = parse_numeric(None if raw is None else str(raw))
+                        # An attribute change moves last_updated, not last_changed.
+                        stamp = row.get("last_updated") or row.get("last_changed")
+                    if value is None or stamp is None:
                         continue
                     points.append(StatePoint(moment=datetime.fromisoformat(stamp), value=value))
                 result[entity_id] = points
-
-        return result
 
     async def call_service(self, domain: str, service: str, data: dict | None = None) -> None:
         response = await self._http.post(

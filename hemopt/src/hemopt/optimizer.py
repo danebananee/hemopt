@@ -29,6 +29,10 @@ _LOGGER = logging.getLogger(__name__)
 # the price spread actually pays for the mild overheating.
 PREHEAT_DISCOMFORT_RATIO = 0.08
 
+# Share of the cheapest heat in the horizon that stored heat is credited at
+# when the horizon ends. Just under one, so storing is never free money.
+TERMINAL_CREDIT_SHARE = 0.95
+
 
 @dataclass(slots=True)
 class RoomInput:
@@ -36,6 +40,15 @@ class RoomInput:
     model: ThermalModel
     initial_temperature: float
     nominal_heat_kw: float
+    # How much the floor is currently giving off, as a fraction of full
+    # output. None means unknown, in which case the steady-state value that
+    # holds the room at its current temperature is assumed.
+    initial_slab: float | None = None
+
+    def slab_start(self, outdoor_c: float) -> float:
+        if self.initial_slab is not None:
+            return max(0.0, min(1.0, self.initial_slab))
+        return self.model.steady_heat_fraction(self.initial_temperature, outdoor_c)
 
 
 @dataclass(slots=True)
@@ -98,6 +111,8 @@ class RoomPlan:
     heat_fraction: list[float]
     comfort_min: float
     comfort_max: float
+    # Floor output after each step, as a fraction of full output.
+    slab: list[float] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -199,6 +214,7 @@ def solve(problem: OptimisationInput) -> Plan:
     # --- Room variables -------------------------------------------------
     room_temp: list[list] = []
     room_heat: list[list] = []
+    room_slab: list[list] = []
     for room in problem.rooms:
         # The band is widened to cover wherever the room actually is right
         # now. A room that has drifted outside its limits, or whose comfort
@@ -217,11 +233,23 @@ def solve(problem: OptimisationInput) -> Plan:
         heats = [solver.addVariable(lb=0.0, ub=1.0) for _ in range(steps)]
         solver.addConstr(temps[0] == room.initial_temperature)
 
+        # The loop charges the floor, the floor heats the room. Both are
+        # linear, so the lag costs nothing in solve time.
+        alpha = room.model.slab_alpha(dt)
+        slabs = [solver.addVariable(lb=0.0, ub=1.0) for _ in range(steps + 1)]
+        solver.addConstr(slabs[0] == room.slab_start(problem.outdoor_c[0]))
+
         a, b, c = room.model.coefficients(dt)
         for index in range(steps):
             solver.addConstr(
+                slabs[index + 1] == slabs[index] * (1.0 - alpha) + alpha * heats[index]
+            )
+            solver.addConstr(
                 temps[index + 1]
-                == temps[index] * (1.0 - a) + a * problem.outdoor_c[index] + b * heats[index] + c
+                == temps[index] * (1.0 - a)
+                + a * problem.outdoor_c[index]
+                + b * slabs[index + 1]
+                + c
             )
 
         weight = room.config.comfort_weight
@@ -242,6 +270,7 @@ def solve(problem: OptimisationInput) -> Plan:
 
         room_temp.append(temps)
         room_heat.append(heats)
+        room_slab.append(slabs)
 
     # --- Hot water ------------------------------------------------------
     dhw = problem.hot_water
@@ -366,18 +395,36 @@ def solve(problem: OptimisationInput) -> Plan:
 
     # --- Terminal value of stored heat -----------------------------------
     # Without this the plan empties every buffer at the horizon edge. Stored
-    # energy is credited at the cheapest price in the horizon, so the credit
-    # can never justify buying heat that is not worth it on its own.
-    cheapest = min(problem.price_sek_per_kwh)
+    # heat is credited at slightly less than the cheapest heat anywhere in
+    # the horizon, price divided by COP, so the credit can never by itself
+    # justify buying heat. Crediting the cheapest *price* at the final step's
+    # COP instead turned every step with a better COP than the last into a
+    # reason to overheat, even with a flat price.
+    heat_value = TERMINAL_CREDIT_SHARE * min(
+        price / max(cop, 1e-6)
+        for price, cop in zip(problem.price_sek_per_kwh, cop_heat, strict=True)
+    )
     for position, room in enumerate(problem.rooms):
         if room.model.k_heat_per_hour <= 0:
             continue
         capacity_kwh_per_k = room.nominal_heat_kw / room.model.k_heat_per_hour
-        credit = cheapest / max(cop_heat[-1], 1e-6) * capacity_kwh_per_k
-        objective.append(-credit * (room_temp[position][steps] - room.config.comfort_min))
+        objective.append(
+            -heat_value
+            * capacity_kwh_per_k
+            * (room_temp[position][steps] - room.config.comfort_min)
+        )
+        # Heat already in the floor reaches the room after the horizon ends.
+        # It was bought, so it is credited the same way as warmth in the air.
+        stored = room.nominal_heat_kw * room.model.stored_heat_hours()
+        if stored > 0:
+            objective.append(-heat_value * stored * room_slab[position][steps])
 
     if tank_energy:
-        objective.append(-(cheapest / max(cop_dhw[-1], 1e-6)) * tank_energy[steps])
+        tank_value = TERMINAL_CREDIT_SHARE * min(
+            price / max(cop, 1e-6)
+            for price, cop in zip(problem.price_sek_per_kwh, cop_dhw, strict=True)
+        )
+        objective.append(-tank_value * tank_energy[steps])
 
     solver.minimize(sum(objective))
 
@@ -412,6 +459,7 @@ def solve(problem: OptimisationInput) -> Plan:
                 heat_fraction=[round(f, 3) for f in fractions],
                 comfort_min=room.config.comfort_min,
                 comfort_max=room.config.comfort_max,
+                slab=[round(value_of(v), 4) for v in room_slab[position][1:]],
             )
         )
 

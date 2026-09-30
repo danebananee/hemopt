@@ -1,2173 +1,1528 @@
-const SVG_NS = "http://www.w3.org/2000/svg";
-const REFRESH_MS = 20000;
+/* hemopt control panel.
+ *
+ * Plain JavaScript, no build step: the add-on serves this file as is behind
+ * Home Assistant's ingress. Every request is relative so the <base> tag the
+ * server injects routes it through the ingress prefix.
+ */
+"use strict";
 
-const state = {
-  plan: null,
-  status: null,
-  peaks: null,
-  rooms: [],
-  meters: null,
-  peakSettings: null,
-  history: null,
-  advice: null,
-  woodStove: null,
-  prices: null,
-  historyDays: 14,
-  historyResolution: "hour",
-  priceDaysBack: 1,
-  priceDaysForward: 1,
+const REFRESH_STATUS_MS = 30_000;
+const REFRESH_PLAN_MS = 120_000;
+const PRIORITY_LABELS = { 1: "Håll", 2: "Normal", 3: "Flexibel" };
+const PRIORITY_HELP = {
+  1: "Temperaturen hålls inom komfortbandet.",
+  2: "Får svaja lite när elen är dyr.",
+  3: "Bär mest av lastflytten.",
+};
+const CONTRACT_SHORT = {
+  fixed: "fastpris",
+  monthly: "månadspris",
+  daily: "dygnspris",
+  hourly: "timpris",
+  quarterly: "kvartspris",
 };
 
+const state = {
+  status: null,
+  plan: null,
+  rooms: null,
+  savings: null,
+  savingsDays: 30,
+  priceBack: 0,
+  history: { days: 2, res: "hour" },
+  loaded: new Set(),
+};
 
 /* ------------------------------------------------------------------ utils */
 
-function el(tag, attrs = {}, children = []) {
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else if (key === "html") node.innerHTML = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? "" : value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svg(tag, attrs = {}, ...children) {
   const node = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attrs)) {
-    if (value !== null && value !== undefined) node.setAttribute(key, value);
+    if (value === null || value === undefined) continue;
+    node.setAttribute(key, value);
   }
-  for (const child of children) node.appendChild(child);
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
   return node;
 }
 
-function html(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
+const nf = (digits) =>
+  new Intl.NumberFormat("sv-SE", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const fmt0 = nf(0);
+const fmt1 = nf(1);
+const fmt2 = nf(2);
+
+function kr(value, digits = 0) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "–";
+  return `${(digits ? nf(digits) : fmt0).format(value)} kr`;
 }
 
-function fmt(value, digits = 1, fallback = "—") {
-  if (value === null || value === undefined || Number.isNaN(value)) return fallback;
-  return Number(value).toLocaleString("sv-SE", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
+function ore(sekPerKwh) {
+  if (sekPerKwh === null || sekPerKwh === undefined) return "–";
+  return fmt0.format(sekPerKwh * 100);
 }
 
-function clockLabel(iso) {
-  return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+function kw(value, digits = 1) {
+  if (value === null || value === undefined) return "–";
+  return `${nf(digits).format(value)} kW`;
 }
 
-// Behind Home Assistant's ingress the panel lives under a per-session prefix,
-// carried by the <base> tag the server writes into the page. Resolving against
-// it keeps the same paths working both there and on a plain localhost port.
-function apiUrl(path) {
-  return new URL(path.replace(/^\//, ""), document.baseURI).toString();
+function deg(value, digits = 1) {
+  if (value === null || value === undefined) return "–";
+  return `${nf(digits).format(value)} °C`;
 }
 
-async function getJSON(url) {
-  const response = await fetch(apiUrl(url));
-  if (!response.ok) throw new Error(`${url} -> ${response.status}`);
+const timeFmt = new Intl.DateTimeFormat("sv-SE", { hour: "2-digit", minute: "2-digit" });
+const dayFmt = new Intl.DateTimeFormat("sv-SE", { weekday: "short", day: "numeric", month: "short" });
+const shortDayFmt = new Intl.DateTimeFormat("sv-SE", { weekday: "short" });
+const dateFmt = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short" });
+const monthFmt = new Intl.DateTimeFormat("sv-SE", { month: "short", year: "2-digit" });
+
+const hhmm = (date) => timeFmt.format(date);
+
+function sameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function relativeDay(date, now = new Date()) {
+  if (sameDay(date, now)) return "idag";
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (sameDay(date, tomorrow)) return "imorgon";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(date, yesterday)) return "igår";
+  return dayFmt.format(date);
+}
+
+function ago(iso) {
+  if (!iso) return "aldrig";
+  const minutes = Math.round((nowDate().getTime() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "nyss";
+  if (minutes < 60) return `${minutes} min sedan`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h sedan`;
+  return `${Math.round(hours / 24)} dagar sedan`;
+}
+
+async function api(path, options = {}) {
+  const init = { headers: {}, ...options };
+  if (init.body && typeof init.body !== "string") {
+    init.body = JSON.stringify(init.body);
+    init.headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(path, init);
+  if (!response.ok) {
+    let detail = `${response.status}`;
+    try {
+      const body = await response.json();
+      if (body && body.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch (_) {
+      /* not JSON */
+    }
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
-async function postJSON(url, body) {
-  const response = await fetch(apiUrl(url), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(`${url} -> ${response.status}`);
-  return response.json();
+/* Price classes: thirds of the prices in view, so "dyrt" always means
+ * expensive relative to what the planner can choose between. */
+function priceClasses(values) {
+  const sorted = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (!sorted.length) return () => "mid";
+  const q = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+  const low = q(1 / 3);
+  const high = q(2 / 3);
+  const spread = sorted[sorted.length - 1] - sorted[0];
+  return (value) => {
+    if (spread < 0.05) return "mid";
+    if (value <= low) return "cheap";
+    if (value >= high) return "dear";
+    return "mid";
+  };
 }
 
-async function putJSON(url, body) {
-  const response = await fetch(apiUrl(url), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(`${url} -> ${response.status}`);
-  return response.json();
+const CLASS_WORD = { cheap: "billigt", mid: "normalt", dear: "dyrt" };
+const WHEN = { now: "Nu", soon: "Snart", later: "Senare" };
+
+/* ----------------------------------------------------------------- tooltip */
+
+const tooltip = $("#tooltip");
+
+function showTip(event, html) {
+  tooltip.innerHTML = html;
+  tooltip.hidden = false;
+  const pad = 14;
+  const { innerWidth, innerHeight } = window;
+  const rect = tooltip.getBoundingClientRect();
+  let x = event.clientX + pad;
+  let y = event.clientY + pad;
+  if (x + rect.width > innerWidth - 8) x = event.clientX - rect.width - pad;
+  if (y + rect.height > innerHeight - 8) y = event.clientY - rect.height - pad;
+  tooltip.style.left = `${Math.max(8, x)}px`;
+  tooltip.style.top = `${Math.max(8, y)}px`;
 }
 
-/* ------------------------------------------------------------------ chart */
-
-function scaleLinear(domain, range) {
-  const [d0, d1] = domain;
-  const [r0, r1] = range;
-  const span = d1 - d0 || 1;
-  return (value) => r0 + ((value - d0) / span) * (r1 - r0);
+function hideTip() {
+  tooltip.hidden = true;
 }
 
-function linePath(points) {
-  return points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(" ");
+/* ------------------------------------------------------------------ charts */
+
+/* A chart frame: width follows the container, height is fixed per chart.
+ * Returns scales and the root <svg>. Charts are redrawn on resize. */
+function frame(host, { height = 240, left = 40, right = 44, top = 30, bottom = 28 } = {}) {
+  const width = Math.max(host.clientWidth || 600, 280);
+  const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+  host.replaceChildren(root);
+  return {
+    root,
+    width,
+    height,
+    x0: left,
+    x1: width - right,
+    y0: height - bottom,
+    y1: top,
+  };
 }
 
-function renderPlanChart(host, plan, nowIso) {
-  host.textContent = "";
-  if (!plan || !plan.times.length) {
-    host.appendChild(html("p", "empty", "Ingen plan att visa ännu."));
-    return;
-  }
+const NICE_STEPS = [1, 2, 2.5, 5];
+const NICE_STEPS_FIXED = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
 
-  const width = host.clientWidth || 900;
-  const height = host.clientHeight || 320;
-  const margin = { top: 14, right: 52, bottom: 26, left: 46 };
-  const innerW = Math.max(width - margin.left - margin.right, 10);
-  const innerH = Math.max(height - margin.top - margin.bottom, 10);
+function niceCandidates(raw, list) {
+  const exp = Math.pow(10, Math.floor(Math.log10(raw)));
+  const out = [];
+  for (const e of [exp / 10, exp, exp * 10]) for (const n of list) out.push(n * e);
+  return out.filter((v) => v >= raw * 0.5).sort((a, b) => a - b);
+}
 
-  const times = plan.times.map((t) => new Date(t).getTime());
-  const x = scaleLinear([times[0], times[times.length - 1]], [0, innerW]);
-
-  const maxPower = Math.max(
-    ...plan.total_power_kw,
-    plan.peak_threshold_kw || 0,
-    1,
-  ) * 1.15;
-  const maxPrice = Math.max(...plan.price, 0.1) * 1.15;
-  const yPower = scaleLinear([0, maxPower], [innerH, 0]);
-  const yPrice = scaleLinear([0, maxPrice], [innerH, 0]);
-
-  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
-  const root = el("g", { transform: `translate(${margin.left},${margin.top})` });
-  svg.appendChild(root);
-
-  // billable-window shading
-  const billable = new Set(
-    (plan.hour_peaks || []).filter((h) => h.billable).map((h) => new Date(h.hour_start).getTime()),
-  );
-  for (const hour of billable) {
-    const x0 = x(hour);
-    const x1 = x(hour + 3600000);
-    if (x1 < 0 || x0 > innerW) continue;
-    root.appendChild(
-      el("rect", {
-        class: "band-peak",
-        x: Math.max(x0, 0),
-        y: 0,
-        width: Math.max(Math.min(x1, innerW) - Math.max(x0, 0), 0),
-        height: innerH,
-      }),
-    );
-  }
-
-  // horizontal gridlines + power axis
-  const axis = el("g", { class: "axis" });
-  for (let i = 0; i <= 4; i += 1) {
-    const value = (maxPower / 4) * i;
-    const y = yPower(value);
-    root.appendChild(el("line", { class: "gridline", x1: 0, x2: innerW, y1: y, y2: y }));
-    axis.appendChild(
-      el("text", { x: -8, y: y + 3.5, "text-anchor": "end" }, [
-        document.createTextNode(fmt(value, 1)),
-      ]),
-    );
-  }
-  axis.appendChild(
-    el("text", { x: -8, y: -4, "text-anchor": "end" }, [document.createTextNode("kW")]),
-  );
-  axis.appendChild(
-    el("text", { x: innerW + 8, y: -4, "text-anchor": "start" }, [
-      document.createTextNode("SEK/kWh"),
-    ]),
-  );
-  for (let i = 0; i <= 4; i += 1) {
-    const value = (maxPrice / 4) * i;
-    axis.appendChild(
-      el("text", { x: innerW + 8, y: yPrice(value) + 3.5, "text-anchor": "start" }, [
-        document.createTextNode(fmt(value, 1)),
-      ]),
-    );
-  }
-
-  // price area
-  const priceArea = plan.price.map((p, i) => [x(times[i]), yPrice(p)]);
-  root.appendChild(
-    el("path", {
-      d: `${linePath(priceArea)} L${innerW},${innerH} L0,${innerH} Z`,
-      fill: "#3d5a80",
-      opacity: 0.32,
-    }),
-  );
-  root.appendChild(
-    el("path", { d: linePath(priceArea), fill: "none", stroke: "#5b82b8", "stroke-width": 1.2 }),
-  );
-
-  // peak threshold
-  if (plan.peak_threshold_kw > 0) {
-    const y = yPower(plan.peak_threshold_kw);
-    root.appendChild(
-      el("line", {
-        x1: 0,
-        x2: innerW,
-        y1: y,
-        y2: y,
-        stroke: "#ff5f56",
-        "stroke-width": 1.6,
-        "stroke-dasharray": "6 4",
-      }),
-    );
-  }
-
-  // Hourly means are what the peak tariff actually bills, so they get their
-  // own step line: individual quarters may cross the threshold without
-  // costing anything as long as the hour they belong to does not.
-  const hours = plan.hour_peaks || [];
-  if (hours.length) {
-    const steps = [];
-    for (const hour of hours) {
-      const t0 = new Date(hour.hour_start).getTime();
-      steps.push([x(t0), yPower(hour.mean_kw)], [x(t0 + 3600000), yPower(hour.mean_kw)]);
+/* Rounded axis bounds and ticks. The smallest round step that covers the
+ * data in at most count + 1 intervals wins. With `fixed` the axis gets
+ * exactly `count` intervals, so a second axis can share the first one's grid
+ * lines. */
+function niceScale(lo, hi, { count = 4, fixed = false } = {}) {
+  if (!(hi > lo)) hi = lo + 1;
+  const raw = (hi - lo) / count;
+  for (const step of niceCandidates(raw, fixed ? NICE_STEPS_FIXED : NICE_STEPS)) {
+    const min = Math.floor(lo / step + 1e-9) * step;
+    const max = fixed ? min + step * count : Math.ceil(hi / step - 1e-9) * step;
+    const intervals = Math.round((max - min) / step);
+    if (max < hi - 1e-9 || intervals > count + 1) continue;
+    const ticks = [];
+    for (let i = 0; i <= intervals; i += 1) {
+      const v = min + i * step;
+      ticks.push(Math.abs(v) < 1e-9 ? 0 : v);
     }
-    root.appendChild(
-      el("path", {
-        d: linePath(steps),
-        fill: "none",
-        stroke: "#a481ff",
-        "stroke-width": 1.5,
-        opacity: 0.85,
-      }),
-    );
-    for (const hour of hours) {
-      if (!hour.billable || hour.over_threshold_kw <= 0.01) continue;
-      const t0 = new Date(hour.hour_start).getTime();
-      root.appendChild(
-        el("rect", {
-          x: x(t0),
-          y: yPower(hour.mean_kw),
-          width: Math.max(x(t0 + 3600000) - x(t0), 1),
-          height: Math.max(yPower(plan.peak_threshold_kw) - yPower(hour.mean_kw), 1),
-          fill: "rgba(255,95,86,0.45)",
-        }),
-      );
-    }
+    return { min, max, step, ticks };
   }
-
-  // total and pump power
-  root.appendChild(
-    el("path", {
-      d: linePath(plan.total_power_kw.map((p, i) => [x(times[i]), yPower(p)])),
-      fill: "none",
-      stroke: "#4da3ff",
-      "stroke-width": 1.9,
-      "stroke-linejoin": "round",
-    }),
-  );
-  root.appendChild(
-    el("path", {
-      d: linePath(plan.heat_pump_kw.map((p, i) => [x(times[i]), yPower(p)])),
-      fill: "none",
-      stroke: "#ff9f43",
-      "stroke-width": 1.9,
-      "stroke-linejoin": "round",
-    }),
-  );
-
-  // time axis
-  let lastLabel = -Infinity;
-  for (let i = 0; i < times.length; i += 1) {
-    const date = new Date(times[i]);
-    if (date.getMinutes() !== 0 || date.getHours() % 3 !== 0) continue;
-    const px = x(times[i]);
-    if (px - lastLabel < 46) continue;
-    lastLabel = px;
-    axis.appendChild(
-      el("text", { x: px, y: innerH + 16, "text-anchor": "middle" }, [
-        document.createTextNode(String(date.getHours()).padStart(2, "0")),
-      ]),
-    );
-  }
-
-  // now marker
-  const now = new Date(nowIso).getTime();
-  if (now >= times[0] && now <= times[times.length - 1]) {
-    const px = x(now);
-    root.appendChild(el("line", { class: "now-line", x1: px, x2: px, y1: 0, y2: innerH }));
-  }
-
-  root.appendChild(axis);
-  host.appendChild(svg);
+  return { min: lo, max: hi, step: hi - lo, ticks: [lo, hi] };
 }
 
-function renderSparkline(host, room) {
-  host.textContent = "";
-  const width = host.clientWidth || 240;
-  const height = host.clientHeight || 46;
-  if (!room.temperature || !room.temperature.length) return;
-
-  const values = room.temperature;
-  const lo = Math.min(...values, room.comfort_min) - 0.3;
-  const hi = Math.max(...values, room.comfort_max) + 0.3;
-  const x = scaleLinear([0, values.length - 1], [0, width]);
-  const y = scaleLinear([lo, hi], [height - 2, 2]);
-
-  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
-
-  svg.appendChild(
-    el("rect", {
-      x: 0,
-      y: y(room.comfort_max),
-      width,
-      height: Math.max(y(room.comfort_min) - y(room.comfort_max), 1),
-      fill: "rgba(53,196,138,0.13)",
-    }),
-  );
-
-  const points = values.map((v, i) => [x(i), y(v)]);
-  svg.appendChild(
-    el("path", {
-      d: linePath(points),
-      fill: "none",
-      stroke: "#4da3ff",
-      "stroke-width": 1.6,
-      "stroke-linejoin": "round",
-    }),
-  );
-  host.appendChild(svg);
+function stepDigits(step) {
+  if (Number.isInteger(Math.round(step * 1000) / 1000)) return 0;
+  return Number.isInteger(Math.round(step * 10000) / 1000) ? 1 : 2;
 }
 
-function renderHotWater(host, plan) {
-  host.textContent = "";
-  if (!plan || !plan.hot_water) {
-    host.appendChild(html("p", "empty", "Varmvatten är inte konfigurerat."));
-    return;
-  }
-
-  const width = host.clientWidth || 420;
-  const height = host.clientHeight || 210;
-  const margin = { top: 12, right: 12, bottom: 24, left: 38 };
-  const innerW = Math.max(width - margin.left - margin.right, 10);
-  const innerH = Math.max(height - margin.top - margin.bottom, 10);
-
-  const temps = plan.hot_water.temperature;
-  const charge = plan.hot_water.charge_fraction;
-  const times = plan.times.map((t) => new Date(t).getTime());
-  const x = scaleLinear([times[0], times[times.length - 1]], [0, innerW]);
-  const lo = Math.min(...temps) - 2;
-  const hi = Math.max(...temps) + 2;
-  const y = scaleLinear([lo, hi], [innerH, 0]);
-
-  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
-  const root = el("g", { transform: `translate(${margin.left},${margin.top})` });
-  svg.appendChild(root);
-  const barWidth = Math.max(innerW / charge.length, 1);
-  charge.forEach((value, i) => {
-    if (value <= 0.02) return;
-    root.appendChild(
-      el("rect", {
-        x: x(times[i]),
-        y: innerH - value * innerH * 0.4,
-        width: barWidth,
-        height: value * innerH * 0.4,
-        fill: "rgba(255,159,67,0.45)",
-      }),
-    );
-  });
-
-  const axis = el("g", { class: "axis" });
-  for (let i = 0; i <= 3; i += 1) {
-    const value = lo + ((hi - lo) / 3) * i;
-    const py = y(value);
-    root.appendChild(el("line", { class: "gridline", x1: 0, x2: innerW, y1: py, y2: py }));
-    axis.appendChild(
-      el("text", { x: -7, y: py + 3.5, "text-anchor": "end" }, [
-        document.createTextNode(fmt(value, 0)),
-      ]),
-    );
-  }
-  axis.appendChild(
-    el("text", { x: -7, y: -2, "text-anchor": "end" }, [document.createTextNode("°C")]),
-  );
-
-  root.appendChild(
-    el("path", {
-      d: linePath(temps.map((t, i) => [x(times[i]), y(t)])),
-      fill: "none",
-      stroke: "#ff5f56",
-      "stroke-width": 1.9,
-    }),
-  );
-
-  let lastLabel = -Infinity;
-  times.forEach((t) => {
-    const date = new Date(t);
-    if (date.getMinutes() !== 0 || date.getHours() % 6 !== 0) return;
-    const px = x(t);
-    if (px - lastLabel < 40) return;
-    lastLabel = px;
-    axis.appendChild(
-      el("text", { x: px, y: innerH + 15, "text-anchor": "middle" }, [
-        document.createTextNode(`${String(date.getHours()).padStart(2, "0")}:00`),
-      ]),
-    );
-  });
-
-  root.appendChild(axis);
-  host.appendChild(svg);
-}
-
-/* ------------------------------------------------------------------ panels */
-
-function renderPills() {
-  const host = document.getElementById("status-pills");
-  const status = state.status || {};
-  host.textContent = "";
-
-  const pricesOk = Boolean(status.prices_available || state.prices?.available);
-  const mqttExpected = Boolean(status.mqtt_configured);
-  const weatherExpected = Boolean(status.weather_entity);
-
-  const items = [
-    ["Home Assistant", status.home_assistant_online, true],
-    ["Spotpris", pricesOk, true],
-    [
-      weatherExpected ? "Väderprognos" : "Väder (ej satt)",
-      status.forecast_available,
-      weatherExpected,
-    ],
-    [mqttExpected ? "MQTT" : "MQTT (ej satt)", status.mqtt_online, mqttExpected],
-  ];
-  for (const [label, ok, expected] of items) {
-    const cls = !expected ? "pill dim" : ok ? "pill ok" : "pill bad";
-    host.appendChild(html("span", cls, label));
-  }
-}
-
-function renderModelActions() {
-  const host = document.getElementById("model-body");
-  const subtitle = document.getElementById("model-subtitle");
-  if (!host) return;
-  host.textContent = "";
-  const actions = state.status?.model_actions || [];
-  const headlineText = state.status?.model_action;
-
-  if (headlineText) {
-    subtitle.textContent = headlineText;
-  } else {
-    subtitle.textContent = "Läsbara åtgärder just nu — inte bara grafer.";
-  }
-
-  if (!actions.length) {
-    host.appendChild(html("p", "empty", "Ingen förklaring ännu — väntar på plan."));
-    return;
-  }
-
-  const now = actions.filter((a) => a.when !== "soon");
-  const soon = actions.filter((a) => a.when === "soon");
-
-  for (const item of now) {
-    host.appendChild(modelActionCard(item));
-  }
-  if (soon.length) {
-    host.appendChild(html("h3", "model-soon-title", "Strax"));
-    for (const item of soon) {
-      host.appendChild(modelActionCard(item));
-    }
-  }
-}
-
-function modelActionCard(item) {
-  const card = html("div", `model-action kind-${item.kind || "info"}`);
-  card.appendChild(html("div", "model-action-title", item.title));
-  if (item.detail) card.appendChild(html("div", "muted model-action-detail", item.detail));
-  return card;
-}
-
-function renderSystems() {
-  const host = document.getElementById("systems-body");
-  if (!host) return;
-  host.textContent = "";
-  const status = state.status || {};
-  const plan = state.plan;
-  const index = currentIndex();
-
-  const pumpKw = plan ? plan.heat_pump_kw?.[index] : null;
-  const dhw = plan?.hot_water;
-  const charging =
-    dhw && dhw.charge_fraction ? dhw.charge_fraction[index] > 0.05 : null;
-  const draw =
-    dhw && dhw.expected_draw_kwh ? dhw.expected_draw_kwh[index] : null;
-
-  let roomsText = "Inga rum konfigurerade ännu";
-  if (status.rooms_configured) {
-    if (status.rooms_with_climate > 0) {
-      roomsText = `${status.rooms_configured} rum med egna termostater`;
-    } else if (status.room_setpoint_entity) {
-      roomsText = `${status.rooms_configured} rum · ett gemensamt husbörvärde`;
+function yAxis(f, scale, { side = "left", unit = "" } = {}) {
+  const group = svg("g", { class: side === "left" ? "axis grid" : "axis" });
+  const digits = stepDigits(scale.step);
+  const format = nf(digits);
+  for (const value of scale.ticks) {
+    const y = f.y0 - ((value - scale.min) / (scale.max - scale.min)) * (f.y0 - f.y1);
+    if (side === "left") {
+      group.append(svg("line", { x1: f.x0, x2: f.x1, y1: y, y2: y }));
+      group.append(svg("text", { x: f.x0 - 6, y: y + 4, "text-anchor": "end" }, format.format(value)));
     } else {
-      roomsText = `${status.rooms_configured} rum mäts, men ingen termostat är kopplad ännu`;
+      group.append(svg("text", { x: f.x1 + 6, y: y + 4, "text-anchor": "start" }, format.format(value)));
     }
   }
-
-  let dhwText = "Inte konfigurerat";
-  if (status.hot_water_enabled) {
-    dhwText = `Vanlig förbrukning cirka ${fmt(status.hot_water_kwh_per_day, 1)} kWh/dygn`;
-    if (charging != null) dhwText += charging ? " · laddar tanken nu" : " · håller temperaturen";
-    if (draw != null && draw > 0.01) dhwText += ` · förväntat uttag ${fmt(draw, 2)} kWh`;
-    if (!status.hot_water_setpoint_entity) {
-      dhwText += " · planen syns men skrivs inte till värmepumpen än";
-    }
+  if (unit) {
+    const x = side === "left" ? f.x0 - 6 : f.x1 + 6;
+    group.append(svg("text", { x, y: f.y1 - 14, "text-anchor": side === "left" ? "end" : "start" }, unit));
   }
-
-  const rows = [
-    [
-      "Värmepump",
-      pumpKw != null
-        ? `Planerad effekt nu ${fmt(pumpKw, 2)} kW`
-        : "Väntar på plan",
-    ],
-    ["Varmvatten", dhwText],
-    ["Rum", roomsText],
-    [
-      "Koppling till Home Assistant",
-      status.mqtt_online
-        ? "Ansluten — status syns även som entiteter i Home Assistant"
-        : status.mqtt_configured
-          ? "Konfigurerad men offline — kolla MQTT under Configuration"
-          : "MQTT saknas — sätt mqtt_host under Configuration",
-    ],
-    [
-      "Aktiv styrning",
-      status.control_enabled
-        ? "På — hemopt skriver temperaturer till huset"
-        : "Av — du ser bara planen (slå på Styr värmen för att styra)",
-    ],
-  ];
-
-  for (const [label, value] of rows) {
-    const cell = html("div", "readonly-field");
-    cell.appendChild(html("span", "label", label));
-    cell.appendChild(html("span", "value", value));
-    host.appendChild(cell);
-  }
+  f.root.append(group);
 }
 
-function renderKpis() {
-  const host = document.getElementById("kpis");
-  const status = state.status || {};
-  const peaks = state.peaks || {};
-  const prices = state.prices || {};
-  host.textContent = "";
+const yScale = (f, scale) => (v) => f.y0 - ((v - scale.min) / (scale.max - scale.min)) * (f.y0 - f.y1);
 
-  const priceNow =
-    prices.current_total_sek ?? status.current_price_sek ?? prices.current_spot_sek ?? null;
-  const spotNote =
-    prices.current_spot_sek != null
-      ? `Spot ${fmt(prices.current_spot_sek, 2)} · planerad effekt ${fmt(status.planned_power_kw, 2)} kW`
-      : `Planerad effekt ${fmt(status.planned_power_kw, 2)} kW`;
-
-  const cards = [
-    {
-      label: "Elpris nu",
-      value: fmt(priceNow, 2),
-      unit: "SEK/kWh",
-      note: spotNote,
-      tone: "",
-    },
-    {
-      label: "Besparing i planen",
-      value: fmt(status.savings_sek, 0),
-      unit: "SEK",
-      note: `Kommande ${fmt(status.horizon_hours, 0)} h: ${fmt(status.total_cost_sek, 0)} kr i stället för ${fmt(status.baseline_cost_sek, 0)} kr`,
-      tone: "good",
-    },
-    {
-      label: "Effekttak att hålla under",
-      value: fmt(peaks.threshold_kw, 1),
-      unit: "kW",
-      note:
-        peaks.current_hour && peaks.current_hour.allowed_kw !== null
-          ? `${fmt(peaks.current_hour.allowed_kw, 1)} kW kvar denna timme`
-          : "Utanför effektfönstret",
-      tone: "warm",
-    },
-    {
-      label: "Prognos effektavgift",
-      value: fmt(peaks.projected_cost_sek, 0),
-      unit: "SEK/mån",
-      note: `Medel av ${peaks.n_peaks || 5} högsta timmedlen: ${fmt(peaks.average_kw, 1)} kW`,
-      tone: "violet",
-    },
-  ];
-
-  for (const card of cards) {
-    const node = html("div", `kpi ${card.tone}`);
-    node.appendChild(html("span", "kpi-label", card.label));
-    const value = html("span", "kpi-value", card.value);
-    value.appendChild(html("small", null, card.unit));
-    node.appendChild(value);
-    node.appendChild(html("span", "kpi-note", card.note));
-    host.appendChild(node);
-  }
+/* Time axis with hour labels and a weekday at each midnight. */
+function timeAxis(f, times, xOf, { every = 3 } = {}) {
+  const group = svg("g", { class: "axis" });
+  times.forEach((time, i) => {
+    const h = time.getHours();
+    const m = time.getMinutes();
+    if (m !== 0) return;
+    const x = xOf(i);
+    if (h === 0) {
+      group.append(svg("line", { x1: x, x2: x, y1: f.y1, y2: f.y0, class: "baseline" }));
+      group.append(svg("text", { x: x + 4, y: f.y1 + 10, "text-anchor": "start" }, shortDayFmt.format(time)));
+    }
+    if (h % every === 0) {
+      group.append(svg("text", { x, y: f.y0 + 16, "text-anchor": "middle" }, String(h).padStart(2, "0")));
+    }
+  });
+  f.root.append(group);
 }
 
-function renderPeaks() {
-  const host = document.getElementById("peak-body");
-  const peaks = state.peaks;
-  host.textContent = "";
-  if (!peaks) return;
-
-  const subtitle = document.getElementById("peak-subtitle");
-  const w = peaks.window || {};
-  subtitle.textContent = peaks.enabled
-    ? `Medel av de ${peaks.n_peaks} högsta timmedeleffekterna på olika dygn, ${String(w.hour_start).padStart(2, "0")}–${String(w.hour_end).padStart(2, "0")} vardagar — inte en kort momentantopp`
-    : "Effektavgift är avstängd — aktivera under Configuration";
-
-  const summary = html("div", "peak-summary");
-  const figures = [
-    [`${fmt(peaks.average_kw, 2)} kW`, "Månadens medel"],
-    [`${fmt(peaks.threshold_kw, 2)} kW`, "Tröskel att hålla under"],
-    [`${fmt(peaks.marginal_sek_per_kw, 0)} kr/kW`, "Kostnad om tröskeln höjs"],
-  ];
-  for (const [value, label] of figures) {
-    const figure = html("div", "peak-figure");
-    figure.appendChild(html("div", "value", value));
-    figure.appendChild(html("div", "label", label));
-    summary.appendChild(figure);
-  }
-  host.appendChild(summary);
-
-  if (peaks.current_hour) {
-    const hour = peaks.current_hour;
-    const box = html("div", "peak-now");
-    box.appendChild(
-      html(
-        "div",
-        "peak-now-title",
-        `Pågående timme · ${fmt(hour.energy_kwh, 2)} kWh hittills`,
-      ),
-    );
-    box.appendChild(
-      html(
-        "div",
-        "muted",
-        hour.allowed_kw === null
-          ? "Utanför effektfönstret just nu"
-          : `${fmt(hour.allowed_kw, 2)} kW kvar innan tröskeln · ${fmt(hour.minutes_remaining, 0)} min kvar`,
-      ),
-    );
-    host.appendChild(box);
-  }
-
-  if (!peaks.counted.length) {
-    host.appendChild(html("p", "empty", "Inga mätta toppar denna månad ännu."));
-  } else {
-    const max = Math.max(...peaks.counted.map((p) => p.kw), 1);
-    const table = html("table");
-    const thead = html("thead");
-    const headRow = html("tr");
-    for (const label of ["Dygn", "Timme", "Effekt", ""]) {
-      headRow.appendChild(html("th", null, label));
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-
-    const tbody = html("tbody");
-    for (const peak of peaks.counted) {
-      const row = html("tr");
-      row.appendChild(html("td", null, peak.day));
-      row.appendChild(html("td", null, `${String(peak.hour).padStart(2, "0")}:00`));
-      row.appendChild(html("td", null, `${fmt(peak.kw, 2)} kW`));
-      const barCell = html("td", "bar-cell");
-      const bar = html("div", "bar");
-      bar.style.width = `${(peak.kw / max) * 100}%`;
-      barCell.appendChild(bar);
-      row.appendChild(barCell);
-      tbody.appendChild(row);
-    }
-    table.appendChild(tbody);
-    host.appendChild(table);
-  }
-
-  if (peaks.history && peaks.history.length) {
-    host.appendChild(html("h3", "subhead", "Tidigare månader"));
-    const hist = html("table");
-    const head = html("tr");
-    for (const label of ["Månad", "Snitt", "Tröskel", "Kostnad"]) {
-      head.appendChild(html("th", null, label));
-    }
-    const thead = html("thead");
-    thead.appendChild(head);
-    hist.appendChild(thead);
-    const tbody = html("tbody");
-    for (const row of peaks.history) {
-      const tr = html("tr");
-      tr.appendChild(html("td", null, row.month));
-      tr.appendChild(html("td", null, `${fmt(row.average_kw, 2)} kW`));
-      tr.appendChild(html("td", null, `${fmt(row.threshold_kw, 2)} kW`));
-      tr.appendChild(html("td", null, `${fmt(row.cost_sek, 0)} kr`));
-      tbody.appendChild(tr);
-    }
-    hist.appendChild(tbody);
-    host.appendChild(hist);
-  }
-}
-
-const MONTH_LABELS = [
-  "",
-  "jan",
-  "feb",
-  "mar",
-  "apr",
-  "maj",
-  "jun",
-  "jul",
-  "aug",
-  "sep",
-  "okt",
-  "nov",
-  "dec",
-];
-
-function renderPriceChart() {
-  const host = document.getElementById("price-chart");
-  const subtitle = document.getElementById("price-subtitle");
-  const controls = document.getElementById("price-controls");
-  host.textContent = "";
-  if (controls) {
-    controls.textContent = "";
-    controls.appendChild(
-      periodToolbar(
-        "Bakåt",
-        [
-          [1, "1 d"],
-          [7, "1 v"],
-          [30, "1 mån"],
-        ],
-        state.priceDaysBack,
-        (days) => {
-          state.priceDaysBack = days;
-          refreshPrices();
-        },
-      ),
-    );
-    controls.appendChild(
-      periodToolbar(
-        "Framåt",
-        [
-          [0, "I dag"],
-          [1, "+1 d"],
-        ],
-        state.priceDaysForward,
-        (days) => {
-          state.priceDaysForward = days;
-          refreshPrices();
-        },
-      ),
-    );
-  }
-
-  const prices = state.prices;
-  if (!prices || !prices.points || !prices.points.length) {
-    subtitle.textContent = "Spotpris — välj period ovan och dra i grafen";
-    host.appendChild(
-      html(
-        "p",
-        "empty",
-        prices && prices.available === false
-          ? "Kunde inte hämta spotpris just nu."
-          : "Hämtar elpris…",
-      ),
-    );
-    return;
-  }
-
-  const current =
-    prices.current_total_sek != null
-      ? `${fmt(prices.current_total_sek, 2)} SEK/kWh (spot ${fmt(prices.current_spot_sek, 2)})`
-      : "—";
-  subtitle.textContent = `${prices.area} · nu ${current} · dra eller klicka i grafen`;
-
-  const points = prices.points;
-  const width = host.clientWidth || 900;
-  const height = Math.max(host.clientHeight || 280, 260);
-  const margin = { top: 14, right: 18, bottom: 28, left: 46 };
-  const innerW = Math.max(width - margin.left - margin.right, 10);
-  const innerH = Math.max(height - margin.top - margin.bottom, 10);
-  const times = points.map((p) => new Date(p.t).getTime());
-  const maxPrice = Math.max(...points.map((p) => Math.max(p.total, p.spot)), 0.05) * 1.12;
-  const x = scaleLinear([times[0], times[times.length - 1]], [0, innerW]);
-  const xInv = scaleLinear([0, innerW], [times[0], times[times.length - 1]]);
-  const y = scaleLinear([0, maxPrice], [innerH, 0]);
-  const nowMs = prices.now ? new Date(prices.now).getTime() : Date.now();
-
-  const wrap = html("div", "price-chart-wrap");
-  const readout = html("div", "price-readout");
-  const svg = el("svg", {
-    viewBox: `0 0 ${width} ${height}`,
-    preserveAspectRatio: "none",
-    class: "price-svg",
-  });
-  const root = el("g", { transform: `translate(${margin.left},${margin.top})` });
-  svg.appendChild(root);
-
-  for (let i = 0; i <= 4; i += 1) {
-    const value = (maxPrice / 4) * i;
-    const yy = y(value);
-    root.appendChild(el("line", { class: "gridline", x1: 0, x2: innerW, y1: yy, y2: yy }));
-    root.appendChild(
-      el("text", { x: -8, y: yy + 3.5, "text-anchor": "end", class: "axis" }, [
-        document.createTextNode(fmt(value, 2)),
-      ]),
-    );
-  }
-
-  const tomorrow = points.find((p) => {
-    const day = p.day || p.t.slice(0, 10);
-    const today = (prices.now || "").slice(0, 10);
-    return day > today;
-  });
-  if (tomorrow) {
-    const x0 = x(new Date(tomorrow.t).getTime());
-    root.appendChild(
-      el("rect", {
-        class: "band-peak",
-        x: x0,
-        y: 0,
-        width: Math.max(innerW - x0, 0),
-        height: innerH,
-        opacity: "0.35",
-      }),
-    );
-  }
-
-  const spotPath = points.map((p, i) => [x(times[i]), y(p.spot)]);
-  const totalPath = points.map((p, i) => [x(times[i]), y(p.total)]);
-  root.appendChild(
-    el("path", {
-      d: `${linePath(totalPath)} L${innerW},${innerH} L0,${innerH} Z`,
-      fill: "#3d5a80",
-      opacity: 0.28,
-    }),
-  );
-  root.appendChild(
-    el("path", { d: linePath(totalPath), fill: "none", stroke: "#5b82b8", "stroke-width": 1.6 }),
-  );
-  root.appendChild(
-    el("path", {
-      d: linePath(spotPath),
-      fill: "none",
-      stroke: "#9ec1ff",
-      "stroke-width": 1.2,
-      "stroke-dasharray": "4 3",
-    }),
-  );
-
-  if (nowMs >= times[0] && nowMs <= times[times.length - 1]) {
-    root.appendChild(
-      el("line", {
-        x1: x(nowMs),
-        x2: x(nowMs),
-        y1: 0,
-        y2: innerH,
-        stroke: "#ff9f43",
-        "stroke-width": 1.2,
-        "stroke-dasharray": "3 3",
-      }),
-    );
-  }
-
-  const cursor = el("g", { class: "price-cursor", style: "display:none" });
-  const cursorLine = el("line", {
-    y1: 0,
-    y2: innerH,
-    stroke: "#e8eef8",
-    "stroke-width": 1,
-    "stroke-dasharray": "4 3",
-  });
-  const cursorSpot = el("circle", { r: 4, fill: "#9ec1ff", stroke: "#0b0f16", "stroke-width": 1 });
-  const cursorTotal = el("circle", { r: 5, fill: "#5b82b8", stroke: "#0b0f16", "stroke-width": 1 });
-  cursor.appendChild(cursorLine);
-  cursor.appendChild(cursorSpot);
-  cursor.appendChild(cursorTotal);
-  root.appendChild(cursor);
-
-  const hit = el("rect", {
-    x: 0,
-    y: 0,
-    width: innerW,
-    height: innerH,
+/* Invisible hover columns that drive the tooltip. */
+function hoverColumns(f, count, xOf, stepWidth, html) {
+  const band = svg("rect", { class: "hover-band", y: f.y1, height: f.y0 - f.y1, width: stepWidth, x: f.x0, visibility: "hidden" });
+  const layer = svg("rect", {
+    x: f.x0,
+    y: f.y1,
+    width: f.x1 - f.x0,
+    height: f.y0 - f.y1,
     fill: "transparent",
-    style: "cursor: crosshair",
   });
-  root.appendChild(hit);
+  const locate = (event) => {
+    const box = f.root.getBoundingClientRect();
+    const scale = f.width / box.width;
+    const x = (event.clientX - box.left) * scale;
+    const index = Math.max(0, Math.min(count - 1, Math.floor((x - f.x0) / stepWidth)));
+    return index;
+  };
+  const move = (event) => {
+    const index = locate(event);
+    band.setAttribute("x", xOf(index));
+    band.setAttribute("visibility", "visible");
+    showTip(event, html(index));
+  };
+  layer.addEventListener("pointermove", move);
+  layer.addEventListener("pointerdown", move);
+  layer.addEventListener("pointerleave", () => {
+    band.setAttribute("visibility", "hidden");
+    hideTip();
+  });
+  f.root.append(band, layer);
+}
 
-  function nearestIndex(ms) {
-    let best = 0;
-    let bestDist = Infinity;
-    for (let i = 0; i < times.length; i += 1) {
-      const dist = Math.abs(times[i] - ms);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = i;
+function nowMarker(f, x, label = "nu") {
+  f.root.append(
+    svg("line", { x1: x, x2: x, y1: f.y1 - 4, y2: f.y0, class: "now-marker" }),
+    svg("text", { x: x + 4, y: f.y1 + 22, class: "now-label" }, label),
+  );
+}
+
+function stepPath(values, xOf, yOf, stepWidth) {
+  let d = "";
+  values.forEach((value, i) => {
+    if (!Number.isFinite(value)) return;
+    const x = xOf(i);
+    const y = yOf(value);
+    d += `${d ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}L${(x + stepWidth).toFixed(1)},${y.toFixed(1)}`;
+  });
+  return d;
+}
+
+const CLASS_FILL = { cheap: "var(--cheap)", mid: "var(--mid)", dear: "var(--dear)" };
+
+/* The signature chart: the next 36 hours, price as colour, heat pump as bars. */
+function drawHorizon(plan, now) {
+  const host = $("#horizon-chart");
+  if (!plan || !plan.times || !plan.times.length) {
+    host.replaceChildren(el("p", { class: "empty", text: "Ingen plan ännu." }));
+    return;
+  }
+  const times = plan.times.map((t) => new Date(t));
+  const n = times.length;
+  const f = frame(host, { height: 250 });
+  const stepWidth = (f.x1 - f.x0) / n;
+  const xOf = (i) => f.x0 + i * stepWidth;
+
+  const pump = plan.heat_pump_kw;
+  const kwScale = niceScale(0, Math.max(...pump, 0.5));
+  const prices = plan.price.map((p) => p * 100);
+  const priceScale = niceScale(Math.min(0, ...prices), Math.max(...prices, 50), {
+    count: kwScale.ticks.length - 1,
+    fixed: true,
+  });
+  const yKw = yScale(f, kwScale);
+  const yPrice = yScale(f, priceScale);
+  const classOf = priceClasses(plan.price);
+
+  yAxis(f, kwScale, { unit: "kW" });
+  yAxis(f, priceScale, { side: "right", unit: "öre" });
+
+  const bars = svg("g");
+  pump.forEach((value, i) => {
+    const cls = classOf(plan.price[i]);
+    const h = f.y0 - yKw(value);
+    bars.append(
+      svg("rect", {
+        x: xOf(i) + 0.5,
+        y: f.y0 - Math.max(h, 0),
+        width: Math.max(stepWidth - 1, 0.6),
+        height: Math.max(h, 0),
+        fill: CLASS_FILL[cls],
+        opacity: 0.9,
+      }),
+    );
+    // A thin price-coloured strip under the axis shows the price even when
+    // the pump is idle.
+    bars.append(
+      svg("rect", {
+        x: xOf(i),
+        y: f.y0 + 1,
+        width: stepWidth + 0.2,
+        height: 4,
+        fill: CLASS_FILL[cls],
+      }),
+    );
+  });
+  f.root.append(bars);
+  f.root.append(svg("path", { d: stepPath(prices, xOf, yPrice, stepWidth), class: "price-line" }));
+
+  timeAxis(f, times, xOf);
+
+  const nowIndex = times.findIndex((t, i) => t <= now && (i === n - 1 || times[i + 1] > now));
+  if (nowIndex >= 0) nowMarker(f, xOf(nowIndex) + ((now - times[nowIndex]) / 900000) * stepWidth);
+
+  hoverColumns(f, n, xOf, stepWidth, (i) => {
+    const t = times[i];
+    const cls = classOf(plan.price[i]);
+    const lines = [
+      `<b>${relativeDay(t, now)} ${hhmm(t)}</b>`,
+      `Elpris ${ore(plan.price[i])} öre/kWh (${CLASS_WORD[cls]})`,
+      `Värmepump ${kw(pump[i], 2)}`,
+    ];
+    if (plan.hot_water && plan.hot_water.charge_fraction[i] > 0.05) lines.push("Laddar varmvatten");
+    if (plan.outdoor) lines.push(`Ute ${deg(plan.outdoor[i])}`);
+    return lines.join("<br>");
+  });
+}
+
+function drawSavingsChart(days) {
+  const host = $("#savings-chart");
+  if (!days.length) {
+    host.replaceChildren(
+      el("p", {
+        class: "empty",
+        text: "Inga dagar bokförda ännu. Första siffran kommer efter en kvart, en rättvisande bild efter någon vecka.",
+      }),
+    );
+    return;
+  }
+  const f = frame(host, { height: 220, right: 16 });
+  const n = days.length;
+  const stepWidth = (f.x1 - f.x0) / n;
+  const xOf = (i) => f.x0 + i * stepWidth;
+  const tops = days.map((d) => Math.max(d.contract_effect_sek, 0) + Math.max(d.control_effect_sek, 0));
+  const bottoms = days.map((d) => Math.min(d.contract_effect_sek, 0) + Math.min(d.control_effect_sek, 0));
+  const scale = niceScale(Math.min(...bottoms, 0), Math.max(...tops, 1));
+  const yOf = yScale(f, scale);
+  yAxis(f, scale, { unit: "kr" });
+  f.root.append(svg("line", { x1: f.x0, x2: f.x1, y1: yOf(0), y2: yOf(0), class: "baseline" }));
+
+  const g = svg("g");
+  days.forEach((day, i) => {
+    const w = Math.max(stepWidth * 0.72, 1);
+    const x = xOf(i) + (stepWidth - w) / 2;
+    let up = 0;
+    let down = 0;
+    for (const [value, fill] of [
+      [day.contract_effect_sek, "var(--cheap)"],
+      [day.control_effect_sek, "var(--good)"],
+    ]) {
+      if (value >= 0) {
+        g.append(svg("rect", { x, width: w, y: yOf(up + value), height: yOf(up) - yOf(up + value), fill }));
+        up += value;
+      } else {
+        g.append(svg("rect", { x, width: w, y: yOf(down), height: yOf(down + value) - yOf(down), fill, opacity: 0.55 }));
+        down += value;
       }
     }
-    return best;
-  }
-
-  function showAt(index) {
-    const point = points[index];
-    const px = x(times[index]);
-    cursor.setAttribute("style", "display:block");
-    cursorLine.setAttribute("x1", String(px));
-    cursorLine.setAttribute("x2", String(px));
-    cursorSpot.setAttribute("cx", String(px));
-    cursorSpot.setAttribute("cy", String(y(point.spot)));
-    cursorTotal.setAttribute("cx", String(px));
-    cursorTotal.setAttribute("cy", String(y(point.total)));
-
-    const when = new Date(point.t).toLocaleString("sv-SE", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const oreTotal = Math.round(point.total * 100);
-    const oreSpot = Math.round(point.spot * 100);
-    readout.textContent = "";
-    readout.appendChild(html("strong", null, when));
-    readout.appendChild(
-      html(
-        "span",
-        null,
-        `Totalt ${fmt(point.total, 3)} SEK/kWh (${oreTotal} öre) · Spot ${fmt(point.spot, 3)} SEK/kWh (${oreSpot} öre)`,
-      ),
-    );
-  }
-
-  function pointerToIndex(event) {
-    const rect = svg.getBoundingClientRect();
-    const clientX = event.clientX ?? event.touches?.[0]?.clientX;
-    if (clientX == null) return null;
-    const localX = ((clientX - rect.left) / rect.width) * width - margin.left;
-    const clamped = Math.min(Math.max(localX, 0), innerW);
-    return nearestIndex(xInv(clamped));
-  }
-
-  let locked = null;
-  function onMove(event) {
-    if (locked !== null) return;
-    const index = pointerToIndex(event);
-    if (index == null) return;
-    event.preventDefault();
-    showAt(index);
-  }
-  function onDown(event) {
-    const index = pointerToIndex(event);
-    if (index == null) return;
-    event.preventDefault();
-    locked = index;
-    showAt(index);
-  }
-  function onUp() {
-    locked = null;
-  }
-
-  hit.addEventListener("mousemove", onMove);
-  hit.addEventListener("touchmove", onMove, { passive: false });
-  hit.addEventListener("mousedown", onDown);
-  hit.addEventListener("touchstart", onDown, { passive: false });
-  window.addEventListener("mouseup", onUp);
-  window.addEventListener("touchend", onUp);
-  hit.addEventListener("mouseleave", () => {
-    if (locked !== null) return;
-    cursor.setAttribute("style", "display:none");
-    readout.textContent = "Dra eller klicka i grafen för exakt tid och pris.";
   });
+  f.root.append(g);
 
-  // Default: current (or nearest) slot.
-  showAt(nearestIndex(nowMs));
-  if (!readout.textContent) {
-    readout.textContent = "Dra eller klicka i grafen för exakt tid och pris.";
-  }
+  const axis = svg("g", { class: "axis" });
+  const every = Math.ceil(n / 10);
+  days.forEach((day, i) => {
+    if (i % every) return;
+    const date = new Date(`${day.day}T12:00:00`);
+    axis.append(svg("text", { x: xOf(i) + stepWidth / 2, y: f.y0 + 16, "text-anchor": "middle" }, dateFmt.format(date)));
+  });
+  f.root.append(axis);
 
-  wrap.appendChild(readout);
-  wrap.appendChild(svg);
-  host.appendChild(wrap);
+  hoverColumns(f, n, xOf, stepWidth, (i) => {
+    const d = days[i];
+    const date = new Date(`${d.day}T12:00:00`);
+    const cover = d.coverage < 0.95 ? `<br>Bokfört ${fmt0.format(d.coverage * 100)} % av dygnet` : "";
+    return (
+      `<b>${dayFmt.format(date)}</b><br>` +
+      `Kvartspris: ${kr(d.contract_effect_sek, 2)}<br>` +
+      `Styrning: ${kr(d.control_effect_sek, 2)}<br>` +
+      `<b>Totalt ${kr(d.total_sek, 2)}</b>${cover}`
+    );
+  });
 }
 
-let peakSettingsFingerprint = "";
-
-function renderPeakSettings() {
-  const form = document.getElementById("peak-settings");
-  const settings = state.peakSettings;
-  if (!settings) {
-    form.textContent = "";
-    form.appendChild(html("p", "empty", "Kunde inte läsa reglerna."));
-    peakSettingsFingerprint = "";
+function drawDhw(plan, now) {
+  const host = $("#dhw-chart");
+  if (!plan || !plan.hot_water) {
+    host.replaceChildren(el("p", { class: "empty", text: "Varmvattnet planeras inte (ingen givare för tanken)." }));
     return;
   }
-  const fingerprint = JSON.stringify(settings);
-  if (fingerprint === peakSettingsFingerprint && form.childElementCount) return;
-  peakSettingsFingerprint = fingerprint;
-  form.textContent = "";
-
-  form.appendChild(
-    html(
-      "p",
-      "muted",
-      "Ändra under Settings → Add-ons → Kostnadsoptimering → Configuration. " +
-        "Månader med effektavgift sätter du i /homeassistant/hemopt.yaml.",
-    ),
-  );
-
-  const grid = html("div", "settings-grid readonly-grid");
-  const rows = [
-    ["Minimera toppar", settings.enabled ? "På" : "Av"],
-    ["Antal toppar", String(settings.n_peaks)],
-    ["Pris per kW", `${fmt(settings.price_per_kw_sek, 1)} kr`],
-    [
-      "Fönster",
-      `${String(settings.hour_start).padStart(2, "0")}–${String(settings.hour_end).padStart(2, "0")}`,
-    ],
-    ["Bara vardagar", settings.weekdays_only ? "Ja" : "Nej"],
-    [
-      "Månader",
-      (settings.months || []).map((m) => MONTH_LABELS[m] || m).join(", ") || "—",
-    ],
-    ["Marginalkostnad", `${fmt(settings.marginal_sek_per_kw, 0)} kr/kW`],
-  ];
-  for (const [label, value] of rows) {
-    const cell = html("div", "readonly-field");
-    cell.appendChild(html("span", "label", label));
-    cell.appendChild(html("span", "value", value));
-    grid.appendChild(cell);
-  }
-  form.appendChild(grid);
+  const times = plan.times.map((t) => new Date(t));
+  const n = times.length;
+  const f = frame(host, { height: 170, right: 16 });
+  const stepWidth = (f.x1 - f.x0) / n;
+  const xOf = (i) => f.x0 + i * stepWidth;
+  const temps = plan.hot_water.temperature;
+  const scale = niceScale(Math.min(...temps, 40), Math.max(...temps, 55), { count: 3 });
+  const yOf = yScale(f, scale);
+  yAxis(f, scale, { unit: "°C" });
+  const g = svg("g");
+  plan.hot_water.charge_fraction.forEach((c, i) => {
+    if (c < 0.02) return;
+    g.append(svg("rect", { x: xOf(i), y: f.y1, width: stepWidth + 0.2, height: f.y0 - f.y1, fill: "var(--heat)", opacity: 0.18 * c + 0.08 }));
+  });
+  f.root.append(g);
+  f.root.append(svg("path", { d: stepPath(temps, xOf, yOf, stepWidth), class: "price-line", style: "stroke: var(--heat)" }));
+  timeAxis(f, times, xOf, { every: 6 });
+  const nowIndex = times.findIndex((t, i) => t <= now && (i === n - 1 || times[i + 1] > now));
+  if (nowIndex >= 0) nowMarker(f, xOf(nowIndex));
+  hoverColumns(f, n, xOf, stepWidth, (i) => {
+    const t = times[i];
+    const charging = plan.hot_water.charge_fraction[i] > 0.05 ? "<br>Laddar" : "";
+    return `<b>${relativeDay(t, now)} ${hhmm(t)}</b><br>Tank ${deg(temps[i])}${charging}`;
+  });
 }
 
-function renderHistory() {
-  const host = document.getElementById("history-chart");
-  const summary = document.getElementById("history-summary");
-  const subtitle = document.getElementById("history-subtitle");
-  const controls = document.getElementById("history-controls");
-  host.textContent = "";
-  summary.textContent = "";
-  if (controls) renderHistoryControls(controls);
-
-  const history = state.history;
-  if (!history) {
-    if (subtitle) subtitle.textContent = "Hämtar historik…";
-    host.appendChild(html("p", "empty", "Ingen historik ännu."));
-    return;
-  }
-
-  const resLabel = {
-    hour: "timme",
-    day: "dygn",
-    week: "vecka",
-    month: "månad",
-    quarter: "kvartal",
-  }[history.resolution || state.historyResolution] || history.resolution;
-  if (subtitle) {
-    subtitle.textContent =
-      `Uppmätt förbrukning · visat per ${resLabel} · ` +
-      `${fmt(history.hours_measured || 0, 0)} timmar sparade (${fmt(history.measured_days || 0, 1)} dygn)`;
-  }
-  const points = history.points || [];
+function drawPrices(payload, now) {
+  const host = $("#price-chart");
+  const points = payload.points || [];
   if (!points.length) {
-    host.appendChild(
-      html("p", "empty", "Ingen förbrukning sparad ännu — den fylls på när elmätaren är kopplad."),
-    );
-  } else {
-    renderPowerHistory(host, points, history);
+    host.replaceChildren(el("p", { class: "empty", text: "Inga spotpriser kunde hämtas." }));
+    return;
   }
-
-  const cards = html("div", "history-kpis");
-  const planHours = history.plan_hours ? `${fmt(history.plan_hours, 0)} h` : "planen";
-  const items = [
-    [
-      "Förbrukning totalt",
-      history.total_kwh == null ? "—" : `${fmt(history.total_kwh, 1)} kWh`,
-      "energi i valda perioden",
-    ],
-    [
-      "Snitt per dygn",
-      history.kwh_per_day == null ? "—" : `${fmt(history.kwh_per_day, 1)} kWh`,
-      "utifrån sparade timmar",
-    ],
-    [
-      "Högsta timme",
-      history.peak_hour_kw == null ? "—" : `${fmt(history.peak_hour_kw, 2)} kW`,
-      history.peak_hour_at
-        ? `timmedel ${clockLabel(history.peak_hour_at)} — det här debiteras`
-        : "timmedeleffekt",
-    ],
-    [
-      "Besparing i planen",
-      history.savings_sek == null ? "—" : `${fmt(history.savings_sek, 0)} kr`,
-      `gäller kommande ${planHours}, inte hela perioden`,
-    ],
-  ];
-  for (const [label, value, note] of items) {
-    const card = html("div", "history-kpi");
-    card.appendChild(html("div", "label", label));
-    card.appendChild(html("div", "value", value));
-    card.appendChild(html("div", "muted", note));
-    cards.appendChild(card);
-  }
-  summary.appendChild(cards);
-  summary.appendChild(
-    html(
-      "p",
-      "muted",
-      "kW är effekt (hur snabbt el dras just då). kWh är energi (hur mycket som gått åt). " +
-        "Effektavgiften räknas på timmedel i kW.",
-    ),
-  );
-}
-
-function renderHistoryControls(host) {
-  host.textContent = "";
-  const dayChoices = [
-    [2, "2 d"],
-    [7, "1 v"],
-    [14, "2 v"],
-    [30, "1 mån"],
-    [90, "3 mån"],
-    [365, "1 år"],
-  ];
-  const resChoices = [
-    ["hour", "Timme"],
-    ["day", "Dygn"],
-    ["week", "Vecka"],
-    ["month", "Månad"],
-    ["quarter", "Kvartal"],
-  ];
-  host.appendChild(periodToolbar("Period", dayChoices, state.historyDays, (days) => {
-    state.historyDays = days;
-    refreshHistory();
-  }));
-  host.appendChild(
-    periodToolbar("Skala", resChoices, state.historyResolution, (resolution) => {
-      state.historyResolution = resolution;
-      refreshHistory();
-    }),
-  );
-}
-
-function periodToolbar(label, choices, current, onPick) {
-  const bar = html("div", "period-toolbar");
-  bar.appendChild(html("span", "period-label", label));
-  for (const [value, text] of choices) {
-    const btn = html("button", `period-chip${value === current ? " active" : ""}`, text);
-    btn.type = "button";
-    btn.addEventListener("click", () => onPick(value));
-    bar.appendChild(btn);
-  }
-  return bar;
-}
-
-async function refreshHistory() {
-  try {
-    state.history = await getJSON(
-      `/api/history?days=${state.historyDays}&resolution=${state.historyResolution}`,
-    );
-  } catch {
-    state.history = null;
-  }
-  renderHistory();
-}
-
-async function refreshPrices() {
-  try {
-    state.prices = await getJSON(
-      `/api/prices?days_back=${state.priceDaysBack}&days_forward=${state.priceDaysForward}`,
-    );
-  } catch {
-    state.prices = null;
-  }
-  renderPriceChart();
-}
-
-function renderPowerHistory(host, points, history) {
-  const width = host.clientWidth || 480;
-  const height = 220;
-  const pad = { top: 14, right: 14, bottom: 30, left: 46 };
-  const innerW = width - pad.left - pad.right;
-  const innerH = height - pad.top - pad.bottom;
-  const times = points.map((p) => new Date(p.t).getTime());
-  const live = (history && history.live_points) || [];
-  const liveTimes = live.map((p) => new Date(p.t).getTime());
-  const peakLines = (history && history.peak_counted) || [];
-  const threshold = history ? history.peak_threshold_kw : null;
-
-  const max =
-    Math.max(
-      ...points.map((p) => p.kw),
-      ...live.map((p) => p.kw),
-      threshold || 0,
-      ...peakLines.map((p) => p.kw),
-      1,
-    ) * 1.1;
-  const t0 = Math.min(times[0], ...(liveTimes.length ? [liveTimes[0]] : [times[0]]));
-  const t1 = Math.max(
-    times[times.length - 1],
-    ...(liveTimes.length ? [liveTimes[liveTimes.length - 1]] : [times[times.length - 1]]),
-  );
-  const x = scaleLinear([t0, t1], [0, innerW]);
-  const y = scaleLinear([0, max], [innerH, 0]);
-
-  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height: String(height) });
-  const g = el("g", { transform: `translate(${pad.left},${pad.top})` });
-
-  for (let i = 0; i <= 4; i += 1) {
-    const value = (max / 4) * i;
-    const yy = y(value);
-    g.appendChild(
-      el("line", { x1: 0, x2: innerW, y1: yy, y2: yy, stroke: "currentColor", "stroke-opacity": "0.12" }),
-    );
-    g.appendChild(
-      el("text", { x: -6, y: yy + 3.5, "text-anchor": "end", class: "axis" }, [
-        document.createTextNode(fmt(value, 1)),
-      ]),
-    );
-  }
-  g.appendChild(
-    el("text", { x: -6, y: -2, "text-anchor": "end", class: "axis" }, [
-      document.createTextNode("kW"),
-    ]),
-  );
-
-  // Momentary meter readings: spiky, and NOT what the grid bills.
-  if (live.length > 1) {
-    g.appendChild(
-      el("path", {
-        d: linePath(live.map((p, i) => [x(liveTimes[i]), y(p.kw)])),
-        fill: "none",
-        stroke: "#8aa0b8",
-        "stroke-width": "0.9",
-        "stroke-opacity": "0.75",
-      }),
-    );
-  }
-
-  // Hourly means as a step line — this is the billed quantity.
-  const steps = [];
+  const times = points.map((p) => new Date(p.t));
+  const totals = points.map((p) => p.total * 100);
+  const n = points.length;
+  const f = frame(host, { height: 240, right: 16 });
+  const stepWidth = (f.x1 - f.x0) / n;
+  const xOf = (i) => f.x0 + i * stepWidth;
+  const scale = niceScale(Math.min(0, ...totals), Math.max(...totals, 50));
+  const yOf = yScale(f, scale);
+  const classOf = priceClasses(points.map((p) => p.total));
+  yAxis(f, scale, { unit: "öre" });
+  const g = svg("g");
   points.forEach((p, i) => {
-    const start = times[i];
-    const end = i + 1 < times.length ? times[i + 1] : start + 3600000;
-    steps.push([x(start), y(p.kw)], [x(end), y(p.kw)]);
+    const y = yOf(Math.max(totals[i], 0));
+    g.append(svg("rect", { x: xOf(i), y, width: Math.max(stepWidth - (n > 200 ? 0 : 0.6), 0.5), height: yOf(0) - y, fill: CLASS_FILL[classOf(p.total)] }));
   });
-  g.appendChild(
-    el("path", { d: linePath(steps), fill: "none", stroke: "#4da3ff", "stroke-width": "1.8" }),
-  );
-
-  // The peaks that are actually counted this month, drawn where they land.
-  for (const peak of peakLines) {
-    const yy = y(peak.kw);
-    g.appendChild(
-      el("line", {
-        x1: 0,
-        x2: innerW,
-        y1: yy,
-        y2: yy,
-        stroke: "#ffb454",
-        "stroke-width": "1",
-        "stroke-dasharray": "3 5",
-        "stroke-opacity": "0.8",
-      }),
-    );
+  f.root.append(g);
+  if (n <= 200) timeAxis(f, times, xOf, { every: n > 120 ? 6 : 3 });
+  else {
+    const axis = svg("g", { class: "axis" });
+    times.forEach((t, i) => {
+      if (t.getHours() === 0 && t.getMinutes() === 0 && t.getDate() % (n > 1500 ? 5 : 1) === 0) {
+        axis.append(svg("text", { x: xOf(i), y: f.y0 + 16, "text-anchor": "middle" }, dateFmt.format(t)));
+      }
+    });
+    f.root.append(axis);
   }
+  const nowIndex = times.findIndex((t, i) => t <= now && (i === n - 1 || times[i + 1] > now));
+  if (nowIndex >= 0) nowMarker(f, xOf(nowIndex));
+  hoverColumns(f, n, xOf, stepWidth, (i) => {
+    const t = times[i];
+    return `<b>${relativeDay(t, now)} ${hhmm(t)}</b><br>${fmt0.format(totals[i])} öre/kWh totalt<br>Spot ${fmt0.format(points[i].spot * 100)} öre exkl. moms`;
+  });
+}
+
+function drawHistory(payload, now) {
+  const host = $("#history-chart");
+  const points = payload.points || [];
+  if (!points.length) {
+    host.replaceChildren(el("p", { class: "empty", text: "Ingen förbrukning uppmätt ännu. Välj en elmätare under System." }));
+    return;
+  }
+  const hourly = payload.resolution === "hour";
+  const values = points.map((p) => (hourly ? p.kw : p.kwh));
+  const times = points.map((p) => new Date(p.t));
+  const n = points.length;
+  const f = frame(host, { height: 230, right: 16 });
+  const stepWidth = (f.x1 - f.x0) / n;
+  const xOf = (i) => f.x0 + i * stepWidth;
+  const threshold = hourly && payload.peak_enabled ? payload.peak_threshold_kw : null;
+  const scale = niceScale(0, Math.max(...values, threshold || 0, 0.5));
+  const yOf = yScale(f, scale);
+  yAxis(f, scale, { unit: hourly ? "kW" : "kWh" });
+  const g = svg("g");
+  values.forEach((v, i) => {
+    const over = threshold && v > threshold;
+    g.append(svg("rect", {
+      x: xOf(i) + stepWidth * 0.1,
+      y: yOf(v),
+      width: Math.max(stepWidth * 0.8, 0.8),
+      height: f.y0 - yOf(v),
+      fill: over ? "var(--dear)" : "var(--cheap)",
+      opacity: 0.85,
+    }));
+  });
+  f.root.append(g);
   if (threshold) {
-    const yy = y(threshold);
-    g.appendChild(
-      el("line", {
-        x1: 0,
-        x2: innerW,
-        y1: yy,
-        y2: yy,
-        stroke: "#ff5f56",
-        "stroke-width": "1.6",
-        "stroke-dasharray": "6 4",
-      }),
-    );
-    g.appendChild(
-      el("text", { x: innerW, y: yy - 4, "text-anchor": "end", class: "axis" }, [
-        document.createTextNode(`tröskel ${fmt(threshold, 1)} kW`),
-      ]),
-    );
+    f.root.append(svg("line", { x1: f.x0, x2: f.x1, y1: yOf(threshold), y2: yOf(threshold), stroke: "var(--dear)", "stroke-dasharray": "5 4" }));
   }
-
-  const dayLabel = (ms) =>
-    new Date(ms).toLocaleDateString("sv-SE", { day: "numeric", month: "short" });
-  g.appendChild(
-    el("text", { x: 0, y: innerH + 18, class: "axis" }, [document.createTextNode(dayLabel(t0))]),
-  );
-  g.appendChild(
-    el("text", { x: innerW, y: innerH + 18, "text-anchor": "end", class: "axis" }, [
-      document.createTextNode(dayLabel(t1)),
-    ]),
-  );
-  svg.appendChild(g);
-  host.appendChild(svg);
-
-  const legend = html("div", "chart-legend");
-  legend.appendChild(html("span", "key key-hourly", "Timmedel (debiteras)"));
-  if (live.length > 1) legend.appendChild(html("span", "key key-live", "Momentan effekt"));
-  if (peakLines.length) {
-    legend.appendChild(
-      html("span", "key key-peaklines", `${peakLines.length} högsta timmar denna månad`),
-    );
-  }
-  if (threshold) legend.appendChild(html("span", "key key-threshold", "Tröskel att hålla under"));
-  host.appendChild(legend);
-}
-
-function renderWoodStove() {
-  const host = document.getElementById("stove-body");
-  const subtitle = document.getElementById("stove-subtitle");
-  if (!host) return;
-  host.textContent = "";
-  const stove = state.woodStove;
-  if (!stove) {
-    host.appendChild(html("p", "empty", "Ingen brasdata ännu."));
-    return;
-  }
-
-  if (!stove.enabled) {
-    subtitle.textContent = "Avstängd — aktivera wood_stove i hemopt.yaml när du har en givare.";
-    host.appendChild(
-      html(
-        "p",
-        "empty",
-        "Braskaminen är avstängd i konfigurationen. Lägg till wood_stove med temperature_entity eller binary_entity och room_keys.",
-      ),
-    );
-    return;
-  }
-
-  subtitle.textContent = stove.summary || "Braskamin";
-  const card = html("div", `action-card status-${stove.status === "recommend" || stove.status === "lit" ? (stove.status === "lit" ? "ok" : "change") : stove.status === "need_data" || stove.status === "need_sensor" ? "need_data" : "ok"}`);
-  card.appendChild(
-    html(
-      "span",
-      `action-badge ${stove.status === "recommend" ? "change" : stove.status === "lit" ? "ok" : "need_data"}`,
-      stove.status === "lit"
-        ? "Tänd"
-        : stove.status === "recommend"
-          ? "Tänd gärna"
-          : stove.status === "need_sensor" || stove.status === "need_data"
-            ? "Mer data"
-            : "Lugnt",
-    ),
-  );
-  card.appendChild(html("p", "action-summary", stove.summary));
-  if (stove.detail) card.appendChild(html("p", "muted action-detail", stove.detail));
-
-  if (stove.reading && stove.reading.sensor_c != null) {
-    card.appendChild(
-      html(
-        "p",
-        "muted",
-        `Sensor ${fmt(stove.reading.sensor_c, 1)} °C · källa ${stove.reading.source}` +
-          (stove.hours_lit_observed
-            ? ` · ${fmt(stove.hours_lit_observed, 0)} h observerad eldning`
-            : ""),
-      ),
-    );
-  }
-
-  const effects = (stove.effects || []).filter((e) => e.k_stove_per_hour > 0.02);
-  if (effects.length) {
-    const list = html("ul", "stove-effects");
-    for (const effect of effects) {
-      const eq =
-        effect.equivalent_kw != null ? ` · ≈ ${fmt(effect.equivalent_kw, 1)} kW VP` : "";
-      list.appendChild(
-        html(
-          "li",
-          null,
-          `${effect.room_name}: +${fmt(effect.k_stove_per_hour, 2)} K/h när brasan brinner` +
-            ` (tau ${fmt(effect.tau_hours, 0)} h)${eq}`,
-        ),
-      );
-    }
-    card.appendChild(list);
-  }
-
-  if (stove.windows && stove.windows.length) {
-    const list = html("ul", "stove-windows");
-    for (const window of stove.windows) {
-      const start = new Date(window.start);
-      const end = new Date(window.end);
-      const fmtTime = (d) =>
-        `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-      list.appendChild(
-        html(
-          "li",
-          null,
-          `${fmtTime(start)}–${fmtTime(end)}: pris ${fmt(window.mean_price_sek, 2)} kr/kWh, ` +
-            `ute ${fmt(window.mean_outdoor_c, 0)} °C, VP ${fmt(window.mean_heat_pump_kw, 1)} kW`,
-        ),
-      );
-    }
-    card.appendChild(html("p", "muted", "Bästa tändfönster i aktuell plan:"));
-    card.appendChild(list);
-  }
-
-  host.appendChild(card);
-}
-
-function renderActions() {
-  const host = document.getElementById("actions-body");
-  const subtitle = document.getElementById("actions-subtitle");
-  if (!host) return;
-  host.textContent = "";
-  const advice = state.advice;
-  if (!advice) {
-    host.appendChild(html("p", "empty", "Ingen data ännu."));
-    return;
-  }
-
-  const actions = advice.actions || [];
-  if (advice.measured_days) {
-    subtitle.textContent =
-      `Baserat på ${fmt(advice.measured_days, 0)} dygns mätdata` +
-      (advice.current_contract_name ? ` · ditt avtal: ${advice.current_contract_name}` : "");
-  } else {
-    subtitle.textContent =
-      "Elavtal och säkringsstorlek — när det finns tillräckligt med mätdata.";
-  }
-
-  if (!actions.length) {
-    host.appendChild(
-      html(
-        "p",
-        "empty",
-        "Behöver mer mätdata innan åtgärder kan föreslås. Avtalsjämförelse kräver minst två dygn med elmätare; säkringsråd behöver längre historik (ofta cirka 30 dygn).",
-      ),
-    );
-    return;
-  }
-
-  for (const item of actions) {
-    const card = html("div", `action-card status-${item.status}`);
-    const head = html("div", "action-head");
-    head.appendChild(html("span", `action-badge ${item.status}`, statusLabel(item.status)));
-    head.appendChild(html("h3", "action-title", item.title));
-    card.appendChild(head);
-    card.appendChild(html("p", "action-summary", item.summary));
-    if (item.detail) card.appendChild(html("p", "muted action-detail", item.detail));
-    if (item.annual_saving_sek > 0) {
-      card.appendChild(
-        html(
-          "div",
-          "action-saving",
-          `≈ ${fmt(item.annual_saving_sek, 0)} kr/år · ${item.confidence || "medium"}`,
-        ),
-      );
-    }
-    if (item.key === "fuse" && item.meta && item.meta.options && item.meta.options.length) {
-      card.appendChild(renderFuseOptions(item.meta));
-    }
-    if (item.action) card.appendChild(html("p", "action-next", item.action));
-    if (item.caveat) card.appendChild(html("p", "muted", item.caveat));
-    host.appendChild(card);
-  }
-}
-
-function statusLabel(status) {
-  if (status === "change") return "Åtgärd";
-  if (status === "ok") return "Ligger rätt";
-  return "Mer data";
-}
-
-function renderFuseOptions(meta) {
-  const wrap = html("div", "fuse-options");
-  wrap.appendChild(
-    html(
-      "div",
-      "fuse-options-head",
-      `Högsta topp ${fmt(meta.peak_kw, 1)} kW · marginalkrav ${fmt(meta.margin_kw, 0)} kW · du har ${meta.current_amps} A`,
-    ),
-  );
-  const list = html("ul", "fuse-option-list");
-  for (const opt of meta.options) {
-    const li = html("li", opt.ok ? "fuse-ok" : "fuse-no");
-    const mark = opt.ok ? "Klarar" : "För knappt";
-    const current = opt.is_current ? " · din" : "";
-    li.textContent =
-      `${opt.amps} A — ${mark}${current}: kapacitet ${fmt(opt.capacity_kw, 1)} kW, ` +
-      `marginal ${fmt(opt.headroom_kw, 1)} kW efter topp`;
-    list.appendChild(li);
-  }
-  wrap.appendChild(list);
-  return wrap;
-}
-
-function renderAdvice() {
-  const host = document.getElementById("advice-body");
-  const subtitle = document.getElementById("advice-subtitle");
-  host.textContent = "";
-  const advice = state.advice;
-  if (!advice) {
-    host.appendChild(html("p", "empty", "Ingen avtalsdata ännu."));
-    return;
-  }
-
-  const currentName = advice.current_contract_name || "ditt nuvarande avtal";
-  if (advice.notes && advice.notes.length) {
-    subtitle.textContent = advice.notes[0];
-  } else if (advice.measured_days) {
-    subtitle.textContent =
-      `Ditt avtal: ${currentName}. Baserat på ${fmt(advice.measured_days, 0)} dygns ` +
-      "uppmätt förbrukning — kostnad med och utan lastflytt.";
-  } else {
-    subtitle.textContent = "Vad din förbrukning hade kostat under andra avräkningsformer.";
-  }
-
-  const scenarios = advice.scenarios || [];
-  if (scenarios.length) {
-    const intro = html("div", "advice-intro");
-    intro.appendChild(
-      html(
-        "p",
-        "muted",
-        "Tabellen visar vad ett helt år skulle kosta med din uppmätta förbrukning. " +
-          "«Utan styrning» är som du använder el i dag. «Med styrning» antar att hemopt " +
-          "får flytta cirka hälften av förbrukningen till billiga timmar (bästa fall).",
-      ),
-    );
-    intro.appendChild(
-      html(
-        "p",
-        "muted",
-        "«Skillnad mot ditt avtal» är plus när alternativet är billigare. " +
-          "Skillnaderna är små eftersom det mesta av elräkningen är fasta avgifter, " +
-          "energiskatt och nätöverföring — bara spotdelen påverkas av när du använder el.",
-      ),
-    );
-    host.appendChild(intro);
-
-    const table = html("table", "advice-table");
-    const head = html("tr");
-    for (const label of [
-      "Avtal",
-      "Utan styrning",
-      "Med styrning",
-      "Skillnad mot ditt (utan)",
-      "Skillnad mot ditt (med)",
-    ]) {
-      head.appendChild(html("th", null, label));
-    }
-    const thead = html("thead");
-    thead.appendChild(head);
-    table.appendChild(thead);
-    const tbody = html("tbody");
-
-    const bestWith = Math.min(...scenarios.map((s) => s.with_control.annual_sek));
-    for (const row of scenarios) {
-      const tr = html(
-        "tr",
-        row.is_current
-          ? "current-row"
-          : row.with_control.annual_sek === bestWith
-            ? "best-row"
-            : null,
-      );
-      const name = html("td", null, row.name + (row.is_current ? " · ditt" : ""));
-      tr.appendChild(name);
-      tr.appendChild(
-        html(
-          "td",
-          null,
-          `${fmt(row.without_control.annual_sek, 0)} kr/år`,
-        ),
-      );
-      tr.appendChild(
-        html("td", null, `${fmt(row.with_control.annual_sek, 0)} kr/år`),
-      );
-      tr.appendChild(html("td", deltaClass(row.vs_current_without_sek), formatDelta(row.vs_current_without_sek)));
-      tr.appendChild(html("td", deltaClass(row.vs_current_with_sek), formatDelta(row.vs_current_with_sek)));
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    host.appendChild(table);
-
-    const chart = html("div", "scenario-bars");
-    const maxAnnual = Math.max(
-      ...scenarios.map((s) => Math.max(s.without_control.annual_sek, s.with_control.annual_sek)),
-      1,
-    );
-    for (const row of scenarios) {
-      const block = html("div", row.is_current ? "scenario-row current" : "scenario-row");
-      block.appendChild(html("div", "scenario-label", row.name + (row.is_current ? " · ditt" : "")));
-      const tracks = html("div", "scenario-tracks");
-      tracks.appendChild(barTrack("Utan", row.without_control.annual_sek, maxAnnual, "bar-without"));
-      tracks.appendChild(barTrack("Med", row.with_control.annual_sek, maxAnnual, "bar-with"));
-      block.appendChild(tracks);
-      chart.appendChild(block);
-    }
-    host.appendChild(chart);
-  } else if (advice.contract_costs && advice.contract_costs.length) {
-    const table = html("table");
-    const head = html("tr");
-    for (const label of ["Avtal", "Kostnad", "Öre/kWh", "kWh"]) {
-      head.appendChild(html("th", null, label));
-    }
-    const thead = html("thead");
-    thead.appendChild(head);
-    table.appendChild(thead);
-    const tbody = html("tbody");
-    const cheapest = Math.min(...advice.contract_costs.map((c) => c.total_sek));
-    for (const cost of advice.contract_costs) {
-      const row = html("tr", cost.total_sek === cheapest ? "best-row" : null);
-      row.appendChild(html("td", null, cost.name));
-      row.appendChild(html("td", null, `${fmt(cost.total_sek, 0)} kr`));
-      row.appendChild(html("td", null, fmt(cost.ore_per_kwh, 1)));
-      row.appendChild(html("td", null, fmt(cost.kwh, 0)));
-      tbody.appendChild(row);
-    }
-    table.appendChild(tbody);
-    host.appendChild(table);
-  }
-
-  if (advice.recommendations && advice.recommendations.length) {
-    // Detaljerade råd ligger i Besparingsåtgärder; här bara en kort pekare.
-    const extra = advice.recommendations.filter(
-      (r) => r.key !== "settlement" && r.key !== "fuse",
-    );
-    if (extra.length) {
-      const list = html("div", "advice-list");
-      for (const rec of extra) {
-        const card = html("div", "advice-card");
-        card.appendChild(html("div", "advice-title", rec.title));
-        card.appendChild(html("div", "advice-detail", rec.detail));
-        card.appendChild(
-          html(
-            "div",
-            "advice-saving",
-            `≈ ${fmt(rec.annual_saving_sek, 0)} kr/år · ${rec.confidence}`,
-          ),
-        );
-        if (rec.caveat) card.appendChild(html("div", "muted", rec.caveat));
-        list.appendChild(card);
-      }
-      host.appendChild(list);
-    }
-  } else if (!scenarios.length && !(advice.contract_costs && advice.contract_costs.length)) {
-    host.appendChild(
-      html(
-        "p",
-        "empty",
-        advice.measured_days != null
-          ? `Har ${fmt(advice.measured_days, 1)} dygn (${fmt((advice.measured_days || 0) * 24, 0)} timmar) sparade — avtalsjämförelsen behöver minst två dygn med elmätardata.`
-          : "Behöver mer mätdata innan avtalsjämförelsen blir meningsfull (minst två dygn).",
-      ),
-    );
-  }
-}
-
-function formatDelta(value) {
-  if (value == null || Math.abs(value) < 0.5) return "—";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${fmt(value, 0)} kr/år`;
-}
-
-function deltaClass(value) {
-  if (value == null || Math.abs(value) < 50) return null;
-  return value > 0 ? "delta-good" : "delta-bad";
-}
-
-function barTrack(label, value, max, tone) {
-  const track = html("div", "scenario-track");
-  track.appendChild(html("span", "scenario-track-label", label));
-  const bar = html("div", `scenario-bar ${tone}`);
-  bar.style.width = `${Math.max(4, (100 * value) / max)}%`;
-  bar.appendChild(document.createTextNode(`${fmt(value, 0)} kr`));
-  track.appendChild(bar);
-  return track;
-}
-
-function renderRooms() {
-  const host = document.getElementById("rooms");
-  host.textContent = "";
-  if (!state.rooms.length) {
-    const box = html("div", "empty-stack");
-    box.appendChild(html("p", "empty", "Inga rum konfigurerade."));
-    box.appendChild(
-      html(
-        "p",
-        "muted",
-        "Rum läggs inte till i den här panelen. Skapa filen hemopt.yaml i Home Assistants " +
-          "config-mapp (samma plats som configuration.yaml).",
-      ),
-    );
-    const steps = html("ol", "setup-steps");
-    for (const text of [
-      "Settings → Add-ons → File editor (eller Studio Code Server) → Install/Start",
-      "Öppna /config/ (roten där configuration.yaml ligger)",
-      "Skapa ny fil: hemopt.yaml",
-      "Kopiera rum-delen från config.exempel.yaml i GitHub-repot danebananee/hemopt och byt till dina temperature_entity (LK = sensor.*, ingen climate)",
-      "Sätt heat_pump.room_setpoint_entity till climate.h66_hproom_temp_setpoint om du saknar termostat per rum",
-      "Settings → Add-ons → Kostnadsoptimering → Restart",
-    ]) {
-      steps.appendChild(html("li", null, text));
-    }
-    box.appendChild(steps);
-    box.appendChild(
-      html(
-        "p",
-        "muted",
-        "Prioritet här: 1 = håll temperaturen (högst), 3 = får svaja och bär lastflytten. " +
-          "Utan rum blir det ingen värmeplan. Saknas rum efter omstart: kolla Log, " +
-          "annars skapas de automatiskt från husexemplet första gången.",
-      ),
-    );
-    host.appendChild(box);
-    return;
-  }
-
-  const planRooms = new Map((state.plan?.rooms || []).map((r) => [r.key, r]));
-  const index = currentIndex();
-
-  for (const room of state.rooms) {
-    const planned = planRooms.get(room.key);
-    const card = html("div", "room");
-
-    const head = html("div", "room-head");
-    const title = html("div");
-    title.appendChild(html("div", "room-name", room.name));
-    if (room.floor) title.appendChild(html("div", "room-floor", room.floor));
-    head.appendChild(title);
-    head.appendChild(
-      html("div", "room-temp", planned ? `${fmt(planned.setpoint[index], 1)} °C` : "—"),
-    );
-    card.appendChild(head);
-
-    const spark = html("div", "room-spark");
-    card.appendChild(spark);
-
-    const meta = html("div", "room-meta");
-    meta.appendChild(html("span", null, `Komfort ${room.comfort_min}–${room.comfort_max} °C`));
-    meta.appendChild(html("span", null, `Tröghet ${fmt(room.model.tau_hours, 0)} h`));
-    const badge = html(
-      "span",
-      `badge ${room.model.fitted ? "fitted" : ""}`,
-      room.model.fitted ? `R² ${fmt(room.model.r_squared, 2)}` : "Standardmodell",
-    );
-    meta.appendChild(badge);
-    if (!room.climate_entity) {
-      meta.appendChild(
-        html(
-          "span",
-          "badge",
-          state.status?.room_setpoint_entity
-            ? "Sensor — styrs via husbörvärde"
-            : "Sensor — saknar husbörvärde",
-        ),
-      );
-    }
-    card.appendChild(meta);
-
-    const comfortRow = html("div", "priority-row comfort-row");
-    comfortRow.appendChild(html("label", null, "Önskad temp"));
-    const comfortSlider = document.createElement("input");
-    comfortSlider.type = "range";
-    comfortSlider.min = "15";
-    comfortSlider.max = "26";
-    comfortSlider.step = "0.5";
-    const band = 0.75;
-    const target = (Number(room.comfort_min) + Number(room.comfort_max)) / 2;
-    comfortSlider.value = String(Math.round(target * 2) / 2);
-    const comfortLabel = html("span", "priority-value", `${fmt(target, 1)} °C`);
-    comfortSlider.addEventListener("input", () => {
-      comfortLabel.textContent = `${fmt(Number(comfortSlider.value), 1)} °C`;
+  if (hourly) timeAxis(f, times, xOf, { every: n > 60 ? 6 : 3 });
+  else {
+    const axis = svg("g", { class: "axis" });
+    const every = Math.ceil(n / 10);
+    times.forEach((t, i) => {
+      if (i % every) return;
+      const label = payload.resolution === "month" ? monthFmt.format(t) : dateFmt.format(t);
+      axis.append(svg("text", { x: xOf(i) + stepWidth / 2, y: f.y0 + 16, "text-anchor": "middle" }, label));
     });
-    comfortSlider.addEventListener("change", async () => {
-      const mid = Number(comfortSlider.value);
-      try {
-        await postJSON(`/api/rooms/${room.key}/comfort`, {
-          comfort_min: mid - band,
-          comfort_max: mid + band,
-        });
-        await refresh();
-      } catch (error) {
-        console.error(error);
-      }
-    });
-    comfortRow.appendChild(comfortSlider);
-    comfortRow.appendChild(comfortLabel);
-    card.appendChild(comfortRow);
-
-    const priorityRow = html("div", "priority-row");
-    priorityRow.appendChild(html("label", null, "Prioritet"));
-    const slider = document.createElement("input");
-    slider.type = "range";
-    slider.min = "1";
-    slider.max = "3";
-    slider.step = "1";
-    slider.value = String(Math.min(3, Math.max(1, room.priority)));
-    const labels = { 1: "1 · håll temp", 2: "2 · mellan", 3: "3 · får svaja" };
-    const valueLabel = html(
-      "span",
-      "priority-value",
-      labels[slider.value] || String(room.priority),
-    );
-    slider.addEventListener("input", () => {
-      valueLabel.textContent = labels[slider.value] || slider.value;
-    });
-    slider.addEventListener("change", async () => {
-      slider.disabled = true;
-      try {
-        await postJSON(`/api/rooms/${room.key}/priority`, { priority: Number(slider.value) });
-        await refresh();
-      } finally {
-        slider.disabled = false;
-      }
-    });
-    priorityRow.appendChild(slider);
-    priorityRow.appendChild(valueLabel);
-    card.appendChild(priorityRow);
-
-    host.appendChild(card);
-    if (planned) renderSparkline(spark, planned);
+    f.root.append(axis);
   }
+  hoverColumns(f, n, xOf, stepWidth, (i) => {
+    const t = times[i];
+    const p = points[i];
+    if (hourly) return `<b>${relativeDay(t, now)} ${hhmm(t)}</b><br>Timmedel ${kw(p.kw, 2)}`;
+    const label = payload.resolution === "month" ? monthFmt.format(t) : payload.resolution === "week" ? `vecka från ${dateFmt.format(t)}` : dayFmt.format(t);
+    return `<b>${label}</b><br>${fmt1.format(p.kwh)} kWh<br>Medel ${kw(p.kw, 2)}`;
+  });
 }
 
-function currentIndex() {
-  const plan = state.plan;
-  if (!plan || !plan.times.length) return 0;
-  const now = Date.now();
-  const step = plan.step_minutes * 60000;
-  for (let i = 0; i < plan.times.length; i += 1) {
-    const start = new Date(plan.times[i]).getTime();
-    if (now >= start && now < start + step) return i;
-  }
-  return 0;
-}
+/* ------------------------------------------------------------------ views */
 
-function renderMeters() {
-  const host = document.getElementById("meter-body");
-  const subtitle = document.getElementById("meter-subtitle");
-  host.textContent = "";
-
-  const meters = state.meters;
-  const current = meters?.current || state.status?.total_power_entity || null;
-
-  if (state.status?.booting) {
-    subtitle.textContent = "Startar upp…";
-    host.appendChild(html("p", "empty", "Väntar på att tillägget ska bli klart."));
-    return;
-  }
-
-  subtitle.textContent = "Sätts under Configuration (total_power_entity) — inte här.";
-
-  const grid = html("div", "settings-grid readonly-grid");
-  const cell = html("div", "readonly-field");
-  cell.appendChild(html("span", "label", "Elmätare"));
-  cell.appendChild(html("span", "value", current || "Ingen vald"));
-  grid.appendChild(cell);
-  host.appendChild(grid);
-
-  if (!current) {
-    host.appendChild(
-      html(
-        "p",
-        "muted",
-        "Skriv t.ex. sensor.p1_meter_active_power under Configuration → Elmätare, spara och starta om.",
-      ),
-    );
-  }
-
-  if (meters && !meters.online) {
-    host.appendChild(
-      html(
-        "p",
-        "muted",
-        "Home Assistant-API otillgängligt just nu — entitetsvärden syns när tillägget får kontakt.",
-      ),
-    );
-  } else if (meters?.candidates?.length && current) {
-    const match = meters.candidates.find((row) => row.entity_id === current);
-    const watts = match ? Number(match.value) : null;
-    if (watts !== null && !Number.isNaN(watts)) {
-      host.appendChild(html("p", "muted", `Nuvarande effekt ${fmt(watts, 0)} W`));
-    }
-  }
-}
-
-function renderNotes() {
-  const host = document.getElementById("plan-notes");
-  host.textContent = "";
-  if (state.status?.booting) {
-    host.appendChild(
-      html(
-        "div",
-        "note",
-        "Tillägget startar — laddar beräkningsmotor. Panelen svarar redan, " +
-          "men planen kommer när uppstarten är klar.",
-      ),
-    );
-  } else if (!state.status?.home_assistant_online) {
-    const diag = state.status?.ha_diagnosis || {};
-    const detail = [
-      diag.status_code != null ? `HTTP ${diag.status_code}` : null,
-      diag.token_present === false ? "ingen SUPERVISOR_TOKEN" : null,
-      diag.error ? String(diag.error).slice(0, 120) : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    host.appendChild(
-      html(
-        "div",
-        "note warn",
-        "Tillägget når inte Home Assistant Core-API (det är därför HA/väder/MQTT är röda). " +
-          "Loggen visar troligen SUPERVISOR_TOKEN length=0. " +
-          "Sätt en Long-lived access token under Configuration → HA-token " +
-          "(URL http://homeassistant:8123), eller installera om tillägget. " +
-          (detail ? `Senaste probesvar: ${detail}.` : ""),
-      ),
-    );
-  } else if (!(state.status?.rooms_configured > 0) && !(state.rooms || []).length) {
-    host.appendChild(
-      html(
-        "div",
-        "note warn",
-        "Inga rum i konfigurationen. Lägg hemopt.yaml bredvid configuration.yaml " +
-          "(se config.exempel.yaml) och starta om. Spotpriset fungerar ändå.",
-      ),
-    );
-  } else if (state.status?.starting) {
-    host.appendChild(
-      html(
-        "div",
-        "note",
-        "Samlar in historik och räknar fram den första planen. " +
-          "På en Raspberry Pi tar det några minuter första gången.",
-      ),
-    );
-  }
-  for (const note of state.plan?.notes || []) {
-    host.appendChild(html("div", "note", note));
-  }
-}
-
-function renderErrors() {
-  const card = document.getElementById("error-card");
-  const list = document.getElementById("errors");
-  const errors = state.status?.errors || [];
-  const diag = state.status?.ha_diagnosis;
-  list.textContent = "";
-
-  if (diag && !state.status?.home_assistant_online) {
-    const parts = [
-      `HA-diagnos: ${diag.base_url || "—"}`,
-      diag.token_present ? `token ${diag.token_length} tecken` : "token saknas",
-      diag.status_code != null ? `HTTP ${diag.status_code}` : null,
-      diag.error || diag.message || null,
-    ].filter(Boolean);
-    list.appendChild(html("li", null, parts.join(" · ")));
-  }
-
-  for (const message of errors) list.appendChild(html("li", null, message));
-  card.hidden = list.childElementCount === 0;
-}
-
-function renderChrome() {
-  const status = state.status || {};
-  document.getElementById("price-area").textContent = status.price_area || "SE3";
-  document.getElementById("control-toggle").checked = Boolean(status.control_enabled);
-
-  const subtitle = document.getElementById("plan-subtitle");
-  if (state.plan) {
-    subtitle.textContent =
-      `${fmt(status.horizon_hours, 0)} timmar framåt · energikostnad ${fmt(status.energy_cost_sek, 0)} kr` +
-      `, effektavgift ${fmt(status.peak_cost_sek, 0)} kr. Historik finns under «Förbrukning».`;
-  }
-
-  const dhwSubtitle = document.getElementById("dhw-subtitle");
-  dhwSubtitle.textContent =
-    `Planerad tanktemperatur (°C) kommande dygnet · orange staplar = när tanken laddas · ` +
-    `hushållet använder cirka ${fmt(status.hot_water_kwh_per_day, 1)} kWh/dygn`;
-
-  document.getElementById("footer-status").textContent = status.last_plan
-    ? `Senaste plan ${clockLabel(status.last_plan)} · senaste mätning ${
-        status.last_sample ? clockLabel(status.last_sample) : "—"
-      }`
-    : "Väntar på första planen";
-
-  renderSummary();
+function renderMasthead() {
+  const s = state.status;
+  if (!s) return;
+  const toggle = $("#control-toggle");
+  toggle.checked = Boolean(s.control_enabled);
+  toggle.disabled = Boolean(s.booting);
+  $("#control-hint").textContent = s.control_enabled ? "På – hemopt ställer termostaterna" : "Av – hemopt räknar bara";
+  const contract = CONTRACT_SHORT[s.contract] || "";
+  const area = s.price_area ? `Elområde ${s.price_area.replace("SE", "")}` : "";
+  $("#brand-sub").textContent = [area, contract && `du har ${contract}`].filter(Boolean).join(", ");
 }
 
 function renderSummary() {
-  const line = document.getElementById("summary-line");
-  if (!line) return;
-  const status = state.status || {};
-  const prices = state.prices || {};
-  const peaks = state.peaks || {};
+  const s = state.status;
+  const line = $("#summary-line");
+  const sub = $("#summary-sub");
+  if (!s) return;
+  if (s.booting || s.starting) {
+    line.textContent = "hemopt startar och räknar fram första planen…";
+    sub.textContent = "Det kan ta några minuter på en Raspberry Pi.";
+    return;
+  }
+  line.textContent = s.model_action || "Planen är klar.";
+  const parts = [];
+  if (!s.control_enabled) parts.push("Styrningen är av, så termostaterna rörs inte. Planen visar vad hemopt skulle göra.");
+  else if (s.rooms_with_climate) parts.push(`hemopt styr ${s.rooms_with_climate} rum.`);
+  if (s.guard_blocking) parts.push(`Effektvakten håller emot: ${s.guard_reason}.`);
+  if (!s.prices_available) parts.push("Spotpriserna kunde inte hämtas.");
+  if (!s.home_assistant_online) parts.push("Home Assistant svarar inte.");
+  sub.textContent = parts.join(" ");
+}
 
-  if (!state.plan) {
-    line.textContent = status.starting
-      ? "Räknar fram den första planen — det tar några minuter första gången."
-      : "Ingen plan ännu. Kontrollera att elpris och rumsgivare finns.";
+function figure(label, value, unit, note, tone) {
+  return el(
+    "div",
+    { class: "figure" },
+    el("span", { class: "figure-label", text: label }),
+    el("span", { class: `figure-value ${tone ? `tone-${tone}` : ""}` }, value, unit ? el("small", { text: unit }) : null),
+    note ? el("span", { class: "figure-note", text: note }) : null,
+  );
+}
+
+function renderFigures() {
+  const s = state.status;
+  const plan = state.plan;
+  const box = $("#figures");
+  if (!s) return;
+  const items = [];
+
+  if (s.current_price_sek !== undefined) {
+    let tone = null;
+    let note = "inklusive skatt och nät";
+    if (plan && plan.price) {
+      const cls = priceClasses(plan.price)(s.current_price_sek);
+      tone = cls === "mid" ? null : cls;
+      note = `${CLASS_WORD[cls]} jämfört med kommande dygn`;
+    }
+    items.push(figure("Elpris nu", ore(s.current_price_sek), "öre/kWh", note, tone));
+  }
+
+  if (state.rooms && state.rooms.length) {
+    const measured = state.rooms.filter((r) => r.temperature !== null);
+    const inside = measured.filter((r) => r.temperature >= r.comfort_min - 0.2 && r.temperature <= r.comfort_max + 0.3);
+    const cold = measured
+      .filter((r) => r.temperature < r.comfort_min - 0.2)
+      .sort((a, b) => a.temperature - a.comfort_min - (b.temperature - b.comfort_min));
+    const note = cold.length ? `kallast: ${cold[0].name} ${deg(cold[0].temperature)}` : "alla rum inom sitt band";
+    items.push(
+      figure(
+        "Inomhus",
+        `${inside.length}`,
+        `av ${measured.length} rum`,
+        note,
+        cold.length ? "warn" : "good",
+      ),
+    );
+  }
+
+  const sav = state.savings;
+  if (sav && sav.totals && sav.totals.measured_days > 0) {
+    const perDay = sav.saving_per_day_sek;
+    items.push(
+      figure(
+        `Hade sparat, ${fmt0.format(Math.min(sav.totals.measured_days, state.savingsDays))} dagar`,
+        fmt0.format(sav.totals.total_sek),
+        "kr",
+        perDay !== null ? `≈ ${kr(perDay, 1)} per dygn med kvartspris och styrning` : "med kvartspris och styrning",
+        sav.totals.total_sek > 0 ? "good" : null,
+      ),
+    );
+  } else {
+    items.push(figure("Besparing", "–", "", "bokföringen har precis börjat"));
+  }
+
+  if (s.planned_power_kw !== undefined) {
+    items.push(
+      figure(
+        "Värmepump",
+        nf(1).format(s.planned_power_kw),
+        "kW",
+        s.control_enabled ? "planerat just nu" : "vad planen vill just nu",
+      ),
+    );
+  }
+  box.replaceChildren(...items);
+}
+
+function renderActions() {
+  const s = state.status;
+  const list = $("#model-body");
+  const actions = (s && s.model_actions) || [];
+  if (!actions.length) {
+    list.replaceChildren(el("li", { class: "empty", text: s && s.starting ? "Väntar på första planen…" : "Inget särskilt att berätta just nu." }));
+    return;
+  }
+  list.replaceChildren(
+    ...actions.map((a) =>
+      el(
+        "li",
+        { class: `kind-${a.kind || "info"}` },
+        el("span", { class: "when", text: WHEN[a.when] || a.when || "Nu" }),
+        el("span", { class: "what" }, el("b", { text: a.title }), a.detail ? el("span", { text: a.detail }) : null),
+      ),
+    ),
+  );
+}
+
+function renderErrors() {
+  const errors = (state.status && state.status.errors) || [];
+  $("#error-card").hidden = !errors.length;
+  $("#errors").replaceChildren(...errors.map((e) => el("li", { text: e })));
+}
+
+function renderPlanNotes() {
+  const plan = state.plan;
+  const notes = (plan && plan.notes) || [];
+  $("#plan-notes").replaceChildren(...notes.map((n) => el("li", { text: n })));
+  if (plan && plan.times) {
+    const hours = Math.round((plan.times.length * plan.step_minutes) / 60);
+    const saved = plan.baseline_energy_cost_sek + plan.baseline_peak_cost_sek - (plan.energy_cost_sek + plan.peak_cost_sek);
+    const text = `${hours} timmar framåt. Staplarna är värmepumpens planerade effekt, färgen elpriset just den kvarten.`;
+    const extra = Number.isFinite(saved) && saved > 0.5 ? ` Planen är ${kr(saved)} billigare än att värma jämnt över perioden, räknat på kvartspris.` : "";
+    $("#horizon-sub").textContent = text + extra;
+  }
+}
+
+function renderFooter() {
+  const s = state.status;
+  if (!s) return;
+  const bits = [`Plan ${ago(s.last_plan)}`, `mätning ${ago(s.last_sample)}`];
+  if (s.last_training) bits.push(`modeller lärda ${ago(s.last_training)}`);
+  if (s.version) bits.push(`version ${s.version}`);
+  $("#footer-status").textContent = bits.join(", ");
+}
+
+/* Savings ---------------------------------------------------------------- */
+
+function renderSavings() {
+  const sav = state.savings;
+  const ladder = $("#savings-ladder");
+  if (!sav) return;
+  const t = sav.totals;
+  const current = CONTRACT_SHORT[sav.contract] || sav.contract_name;
+  $("#savings-sub").textContent =
+    `Varje kvart räknar hemopt vad huset hade kostat med kvartspris, med och utan styrning, jämfört med ditt ${current}. ` +
+    "Energidelen av elräkningen, inklusive påslag, skatt och moms.";
+
+  if (!t || !t.measured_days) {
+    ladder.replaceChildren(el("p", { class: "empty", text: "Inget bokfört ännu." }));
+    drawSavingsChart([]);
+    $("#savings-comfort").replaceChildren();
+    $("#savings-notes").replaceChildren(...(sav.notes || []).map((n) => el("li", { text: n })));
     return;
   }
 
-  const price = prices.current_total_sek ?? status.current_price_sek;
-  const headline = status.model_action || "Håller en lugn kurva";
-  const parts = [];
-  if (price != null) parts.push(`Elen kostar ${fmt(price, 2)} kr/kWh just nu`);
-  parts.push(headline.charAt(0).toLowerCase() + headline.slice(1));
-  if (status.savings_sek != null) {
-    parts.push(
-      `planen sparar ${fmt(status.savings_sek, 0)} kr på ${fmt(status.horizon_hours, 0)} timmar`,
+  const withQuarter = t.cost_quarter_sek;
+  const withHemopt = t.cost_with_hemopt_sek;
+  const rung = (name, cost, delta, best) =>
+    el(
+      "div",
+      { class: `rung ${best ? "best" : ""}` },
+      el("span", { class: "rung-name", text: name }),
+      el("span", { class: "rung-cost", text: kr(cost) }),
+      delta === null
+        ? el("span", { class: "rung-delta muted", text: `${fmt1.format(t.house_kwh)} kWh på ${fmt1.format(t.measured_days)} dygn` })
+        : el("span", { class: `rung-delta ${delta > 0 ? "tone-good" : "tone-bad"}`, text: delta > 0 ? `${kr(delta)} billigare` : `${kr(-delta)} dyrare` }),
+    );
+  ladder.replaceChildren(
+    rung(`Ditt ${current}, som idag`, t.cost_now_sek, null, false),
+    sav.contract === "quarterly" ? null : rung("Kvartspris, samma förbrukning", withQuarter, t.contract_effect_sek, false),
+    rung("Kvartspris och hemopt styr", withHemopt, t.total_sek, t.total_sek > 0),
+  );
+
+  drawSavingsChart(sav.days || []);
+
+  const comfort = $("#savings-comfort");
+  const extra = t.optimised_cold_dh - t.reference_cold_dh;
+  let pill;
+  let text;
+  if (extra <= 0.5) {
+    pill = el("span", { class: "pill good", text: "Samma komfort" });
+    text = "Styrningen hade inte gjort något rum kallare än dess komfortband.";
+  } else {
+    const perDay = extra / Math.max(t.measured_days, 1);
+    pill = el("span", { class: `pill ${perDay > 2 ? "warn" : "neutral"}`, text: `${fmt1.format(perDay)} gradtimmar/dygn` });
+    text = "Så mycket under komfortbandet hade rummen med låg prioritet legat sammanlagt. Höj prioriteten för rum som känns för kalla.";
+  }
+  comfort.replaceChildren(pill, el("span", { class: "muted", text }));
+
+  const notes = [...(sav.notes || [])];
+  notes.push("Staplarna: blått är vinsten av kvartspris med samma förbrukning, grönt vinsten av att hemopt flyttar värmen till billigare kvartar.");
+  $("#savings-notes").replaceChildren(...notes.map((n) => el("li", { text: n })));
+}
+
+function renderAdvice(advice) {
+  const body = $("#advice-body");
+  if (!advice) return;
+  const items = (advice.actions || []).filter((a) => a.title);
+  const nodes = [];
+  if (items.length) {
+    nodes.push(
+      el(
+        "div",
+        { class: "advice-list" },
+        ...items.map((a) =>
+          el(
+            "div",
+            { class: `advice-item status-${a.status || "info"}` },
+            el(
+              "div",
+              { class: "row" },
+              el("b", { text: a.title }),
+              a.annual_saving_sek > 0 ? el("span", { class: "pill good", text: `${kr(a.annual_saving_sek)}/år` }) : null,
+            ),
+            a.summary ? el("p", { text: a.summary }) : null,
+            a.action ? el("p", { text: a.action }) : null,
+            a.caveat ? el("p", { class: "muted", text: a.caveat }) : null,
+          ),
+        ),
+      ),
     );
   }
-  if (peaks.enabled && peaks.threshold_kw) {
-    parts.push(`håller effekten under ${fmt(peaks.threshold_kw, 1)} kW`);
+  const scenarios = advice.scenarios || [];
+  if (scenarios.length) {
+    const rows = scenarios.map((s) =>
+      el(
+        "tr",
+        { class: s.is_current ? "current" : "" },
+        el("td", { text: `${s.name}${s.is_current ? " (nu)" : ""}` }),
+        el("td", { text: `${fmt0.format(s.without_control.ore_per_kwh)} öre` }),
+        el("td", { text: kr(s.without_control.annual_sek) }),
+        el("td", { text: kr(s.with_control.annual_sek) }),
+      ),
+    );
+    nodes.push(
+      el(
+        "div",
+        { class: "table-wrap" },
+        el(
+          "table",
+          { class: "data" },
+          el(
+            "thead",
+            {},
+            el("tr", {}, el("th", { text: "Avtal" }), el("th", { text: "Snittpris" }), el("th", { text: "Per år, som idag" }), el("th", { text: "Per år, med lastflytt" })),
+          ),
+          el("tbody", {}, ...rows),
+        ),
+      ),
+    );
+    nodes.push(el("p", { class: "muted", style: "margin-top:8px", text: `Uppräknat från ${fmt1.format(advice.measured_days)} dygns mätning. «Med lastflytt» är ett tak: hela den flyttbara delen läggs i dygnets billigaste timmar.` }));
   }
-  let text = `${parts.join(" · ")}.`;
-  if (!status.control_enabled) {
-    text += " Styrningen är av, så det här är bara en plan.";
-  }
-  line.textContent = text;
+  for (const note of advice.notes || []) nodes.push(el("p", { class: "muted", text: note }));
+  if (!nodes.length) nodes.push(el("p", { class: "empty", text: "Ingen rådgivning ännu – den behöver minst ett dygns mätning." }));
+  body.replaceChildren(...nodes);
 }
 
-function renderAll() {
-  renderPills();
-  renderKpis();
-  renderModelActions();
-  renderSystems();
-  renderChrome();
-  renderPriceChart();
-  renderPlanChart(document.getElementById("plan-chart"), state.plan, state.status?.now);
-  renderHotWater(document.getElementById("dhw-chart"), state.plan);
-  renderPeaks();
-  renderPeakSettings();
-  renderHistory();
-  renderActions();
-  renderWoodStove();
-  renderAdvice();
-  renderMeters();
-  renderRooms();
-  renderNotes();
-  renderErrors();
+/* Rooms ------------------------------------------------------------------ */
+
+const FLOOR_TYPE_TEXT = { concrete: "betongplatta", light: "lätt bjälklag" };
+
+function roomBand(room) {
+  const lo = Math.min(room.comfort_min - 1.5, room.temperature ?? 99, room.planned_setpoint ?? 99) - 0.3;
+  const hi = Math.max(room.comfort_max + 1.5, room.temperature ?? -99, room.planned_setpoint ?? -99) + 0.3;
+  const pos = (v) => `${(((v - lo) / (hi - lo)) * 100).toFixed(2)}%`;
+  const band = el("div", { class: "band" }, el("div", { class: "band-track" }));
+  band.append(el("div", { class: "band-comfort", style: `left:${pos(room.comfort_min)};width:calc(${pos(room.comfort_max)} - ${pos(room.comfort_min)})` }));
+  if (room.planned_setpoint !== null && room.planned_setpoint !== undefined) {
+    band.append(el("div", { class: "band-target", style: `left:${pos(room.planned_setpoint)}`, title: `Planerat börvärde ${deg(room.planned_setpoint)}` }));
+  }
+  if (room.temperature !== null) {
+    const cls = room.temperature < room.comfort_min - 0.2 ? "cold" : room.temperature > room.comfort_max + 0.3 ? "warm" : "";
+    band.append(el("div", { class: `band-dot ${cls}`, style: `left:${pos(room.temperature)}`, title: `Nu ${deg(room.temperature)}` }));
+  }
+  const labels = el(
+    "div",
+    { class: "band-labels" },
+    el("span", {}, "Komfort ", el("b", { text: `${fmt1.format(room.comfort_min)}–${fmt1.format(room.comfort_max)}` })),
+    el("span", {}, room.temperature !== null ? el("b", { text: deg(room.temperature) }) : "ingen mätning", room.humidity ? ` · ${fmt0.format(room.humidity)} %` : ""),
+  );
+  return el("div", { class: "band-wrap" }, band, labels);
 }
 
-/* ------------------------------------------------------------------ tabs */
+function roomRow(room) {
+  const priority = el(
+    "div",
+    { class: "segmented", role: "group", "aria-label": `Prioritet ${room.name}` },
+    ...[1, 2, 3].map((p) =>
+      el("button", {
+        type: "button",
+        "aria-pressed": room.priority === p ? "true" : "false",
+        title: PRIORITY_HELP[p],
+        text: PRIORITY_LABELS[p],
+        onclick: () => setPriority(room, p),
+      }),
+    ),
+  );
 
-function activeTab() {
-  try {
-    return localStorage.getItem("hemopt.tab") || "overview";
-  } catch {
-    return "overview";
-  }
-}
-
-function showTab(name) {
-  for (const panel of document.querySelectorAll(".tab-panel")) {
-    panel.hidden = panel.dataset.tab !== name;
-  }
-  for (const button of document.querySelectorAll(".tab-btn")) {
-    button.classList.toggle("active", button.dataset.tab === name);
-  }
-  try {
-    localStorage.setItem("hemopt.tab", name);
-  } catch {
-    /* private mode */
-  }
-  // Charts measure their host, which is zero-width while hidden.
-  renderAll();
-}
-
-function setupTabs() {
-  const nav = document.getElementById("tab-nav");
-  if (!nav) return;
-  nav.addEventListener("click", (event) => {
-    const button = event.target.closest(".tab-btn");
-    if (button) showTab(button.dataset.tab);
+  const m = room.model;
+  const fitted = m.fitted
+    ? `Inlärd från ${fmt0.format(m.samples)} kvartar.`
+    : "Inte inlärd ännu – använder startvärden för golvtypen.";
+  const quality =
+    m.rmse_4h !== null && m.rmse_4h !== undefined
+      ? `Prognosfel 4 h framåt: ±${fmt2.format(m.rmse_4h)} °C.`
+      : "";
+  const minInput = el("input", { type: "number", step: "0.5", min: "5", max: "30", value: room.comfort_min, "aria-label": "Lägsta" });
+  const maxInput = el("input", { type: "number", step: "0.5", min: "5", max: "32", value: room.comfort_max, "aria-label": "Högsta" });
+  const save = el("button", { type: "button", class: "btn ghost", text: "Spara" });
+  const status = el("span", { class: "muted" });
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    status.textContent = "";
+    try {
+      await api(`api/rooms/${encodeURIComponent(room.key)}/comfort`, {
+        method: "POST",
+        body: { comfort_min: Number(minInput.value), comfort_max: Number(maxInput.value) },
+      });
+      status.textContent = "Sparat, planen är omräknad.";
+      await Promise.all([loadRooms(), loadPlan()]);
+    } catch (error) {
+      status.textContent = `Kunde inte spara: ${error.message}`;
+    } finally {
+      save.disabled = false;
+    }
   });
-  showTab(activeTab());
+
+  const detail = el(
+    "details",
+    { class: "room-more" },
+    el("summary", { text: "Komfort och modell" }),
+    el(
+      "div",
+      { class: "room-detail" },
+      el(
+        "div",
+        {},
+        el("p", { class: "muted", text: "Komfortband (°C)" }),
+        el("div", { class: "comfort-form" }, minInput, "–", maxInput, save),
+        status,
+      ),
+      el(
+        "dl",
+        { class: "facts" },
+        el("dt", { text: "Golv" }),
+        el("dd", { text: FLOOR_TYPE_TEXT[room.floor_type] || room.floor_type }),
+        el("dt", { text: "Tröghet" }),
+        el("dd", { text: `${fmt0.format(m.tau_hours)} h` }),
+        el("dt", { text: "Golvets fördröjning" }),
+        el("dd", { text: m.tau_slab_hours > 0 ? `${fmt1.format(m.tau_slab_hours)} h` : "ingen" }),
+        el("dt", { text: "Uppvärmning" }),
+        el("dd", { text: `${fmt2.format(m.k_heat_per_hour)} °C/h fullt på` }),
+        m.k_stove_per_hour > 0 ? el("dt", { text: "Braskamin" }) : null,
+        m.k_stove_per_hour > 0 ? el("dd", { text: `+${fmt2.format(m.k_stove_per_hour)} °C/h` }) : null,
+        el("dt", { text: "Termostat" }),
+        el("dd", { text: room.thermostat_setpoint !== null ? deg(room.thermostat_setpoint) : "okänd" }),
+      ),
+      el("p", { class: "muted", text: `${fitted} ${quality}` }),
+    ),
+  );
+
+  return el(
+    "div",
+    { class: "room" },
+    el("div", { class: "room-name" }, el("b", { text: room.name }), el("small", { text: PRIORITY_HELP[room.priority] })),
+    roomBand(room),
+    el("div", { class: "room-controls" }, priority),
+    detail,
+  );
 }
 
-/* ------------------------------------------------------------------ boot */
-
-async function refresh() {
-  const [status, peaks, rooms, meters, peakSettings, history, advice, prices, woodStove] =
-    await Promise.all([
-      getJSON("/api/status").catch(() => null),
-      getJSON("/api/peaks").catch(() => null),
-      getJSON("/api/rooms").catch(() => []),
-      getJSON("/api/meters").catch(() => null),
-      getJSON("/api/settings/peaks").catch(() => null),
-      getJSON(
-        `/api/history?days=${state.historyDays}&resolution=${state.historyResolution}`,
-      ).catch(() => null),
-      getJSON("/api/advice").catch(() => null),
-      getJSON(
-        `/api/prices?days_back=${state.priceDaysBack}&days_forward=${state.priceDaysForward}`,
-      ).catch(() => null),
-      getJSON("/api/wood-stove").catch(() => null),
-    ]);
-  state.status = status;
-  state.peaks = peaks;
-  state.rooms = rooms;
-  state.meters = meters;
-  state.peakSettings = peakSettings;
-  state.history = history;
-  state.advice = advice;
-  state.prices = prices;
-  state.woodStove = woodStove;
-  state.plan = await getJSON("/api/plan").catch(() => null);
-  renderAll();
+function renderRooms() {
+  const host = $("#rooms");
+  const rooms = state.rooms || [];
+  if (!rooms.length) {
+    host.replaceChildren(el("p", { class: "empty", text: "Inga rum konfigurerade." }));
+    return;
+  }
+  const floors = new Map();
+  for (const room of rooms) {
+    const key = room.floor || "Rum";
+    if (!floors.has(key)) floors.set(key, []);
+    floors.get(key).push(room);
+  }
+  host.replaceChildren(
+    ...Array.from(floors.entries()).map(([name, list]) => {
+      const types = new Set(list.map((r) => FLOOR_TYPE_TEXT[r.floor_type] || r.floor_type));
+      return el(
+        "div",
+        { class: "floor" },
+        el("div", { class: "floor-head" }, el("h3", { text: name }), el("span", { text: Array.from(types).join(", ") })),
+        ...list.map(roomRow),
+      );
+    }),
+  );
 }
 
-document.getElementById("replan-btn").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  button.textContent = "Räknar…";
+async function setPriority(room, priority) {
+  if (room.priority === priority) return;
+  const previous = room.priority;
+  room.priority = priority;
+  renderRooms();
   try {
-    await postJSON("/api/replan");
-    await refresh();
+    await api(`api/rooms/${encodeURIComponent(room.key)}/priority`, { method: "POST", body: { priority } });
+    await loadPlan();
   } catch (error) {
-    console.error(error);
+    room.priority = previous;
+    renderRooms();
+    alert(`Kunde inte ändra prioritet: ${error.message}`);
+  }
+}
+
+function renderDhwSub() {
+  const s = state.status;
+  const plan = state.plan;
+  const sub = $("#dhw-sub");
+  if (!plan || !plan.hot_water) {
+    sub.textContent = "Ingen tankgivare konfigurerad.";
+    return;
+  }
+  const temps = plan.hot_water.temperature;
+  const perDay = s ? s.hot_water_kwh_per_day : null;
+  sub.textContent =
+    `Tanken ligger mellan ${fmt0.format(Math.min(...temps))} och ${fmt0.format(Math.max(...temps))} °C. ` +
+    (perDay ? `Uppmätt användning ≈ ${fmt1.format(perDay)} kWh per dygn. ` : "") +
+    "Skuggat område: planerad laddning.";
+}
+
+const FLAME = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2.2 1-3.6 2.2-4.8.2 1.6 1 2.6 2 3 0-3.2-1-6.2.8-9.2z"/></svg>';
+
+function renderStove(report) {
+  const body = $("#stove-body");
+  if (!report) return;
+  $("#stove-title").textContent = report.name || "Braskamin";
+  if (!report.enabled) {
+    body.replaceChildren(
+      el("p", { class: "muted", text: "Braskaminen är inte aktiverad. Lägg till en temperaturgivare vid kaminen (eller en på/av-givare) under wood_stove i konfigurationen, så lär sig hemopt hur mycket brasan värmer varje rum." }),
+    );
+    return;
+  }
+  const lit = report.reading && report.reading.lit;
+  const nodes = [
+    el(
+      "div",
+      { class: "stove-state" },
+      el("span", { class: `flame ${lit ? "lit" : ""}`, html: FLAME }),
+      el(
+        "div",
+        {},
+        el("b", { text: report.summary || (lit ? "Brasan brinner" : "Släckt") }),
+        report.detail ? el("p", { class: "muted", text: report.detail }) : null,
+      ),
+    ),
+  ];
+  const effects = (report.effects || []).filter((e) => e.k_stove_per_hour > 0);
+  if (effects.length) {
+    nodes.push(
+      el(
+        "dl",
+        { class: "facts" },
+        ...effects.flatMap((e) => [
+          el("dt", { text: e.room_name }),
+          el("dd", { text: `+${fmt2.format(e.k_stove_per_hour)} °C/h${e.equivalent_kw ? `, motsvarar ${kw(e.equivalent_kw)} golvvärme` : ""}` }),
+        ]),
+      ),
+    );
+  } else {
+    nodes.push(el("p", { class: "muted", text: `Observerat ${report.sessions_observed || 0} eldningar, ${fmt1.format(report.hours_lit_observed || 0)} timmar. Modellen behöver några kvällar med brasa för att se effekten.` }));
+  }
+  const windows = report.windows || [];
+  if (windows.length) {
+    nodes.push(el("p", { style: "margin-top:12px", text: "Bäst att tända:" }));
+    nodes.push(
+      el(
+        "ul",
+        { class: "windows" },
+        ...windows.slice(0, 3).map((w) => {
+          const start = new Date(w.start);
+          const end = new Date(w.end);
+          return el(
+            "li",
+            {},
+            el("span", { text: `${relativeDay(start)} ${hhmm(start)}–${hhmm(end)}` }),
+            el("span", { class: "muted", text: `${ore(w.mean_price_sek)} öre/kWh, ${deg(w.mean_outdoor_c, 0)} ute` }),
+          );
+        }),
+      ),
+    );
+  }
+  body.replaceChildren(...nodes);
+}
+
+/* Energy ----------------------------------------------------------------- */
+
+function renderHistoryFacts(payload) {
+  const facts = $("#history-facts");
+  const items = [];
+  if (payload.total_kwh !== undefined) {
+    items.push(["Förbrukat", `${fmt0.format(payload.total_kwh)} kWh på ${fmt1.format(payload.measured_days)} dygn`]);
+  }
+  if (payload.kwh_per_day) items.push(["Per dygn", `${fmt1.format(payload.kwh_per_day)} kWh`]);
+  if (payload.peak_hour_kw) {
+    const at = new Date(payload.peak_hour_at);
+    items.push(["Högsta timme", `${kw(payload.peak_hour_kw, 2)} ${relativeDay(at)} ${hhmm(at)}`]);
+  }
+  facts.replaceChildren(...items.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+}
+
+function renderPeaks(peaks) {
+  const body = $("#peak-body");
+  const sub = $("#peak-sub");
+  if (!peaks) return;
+  if (!peaks.enabled) {
+    sub.textContent = "Ingen effektavgift konfigurerad. hemopt optimerar bara mot elpriset.";
+    body.replaceChildren(
+      el("p", { class: "muted", text: "Alla nätbolag ska ha infört en effektavgift senast 1 januari 2027. När din faktura visar en, slå på peak_tariff i konfigurationen." }),
+    );
+    return;
+  }
+  const w = peaks.window;
+  sub.textContent = `Snittet av de ${peaks.n_peaks} högsta timmarna på olika dygn, ${w.weekdays_only ? "vardagar " : ""}${w.hour_start}–${w.hour_end}. ${kr(peaks.price_per_kw_sek)} per kW och månad.`;
+  const hour = peaks.current_hour;
+  const allowed = hour.allowed_kw;
+  const used = hour.energy_kwh;
+  const share = peaks.threshold_kw > 0 ? Math.min(used / peaks.threshold_kw, 1.2) : 0;
+  const nodes = [
+    el(
+      "dl",
+      { class: "facts" },
+      el("dt", { text: "Månadens snitt" }),
+      el("dd", { text: `${kw(peaks.average_kw, 2)} → ${kr(peaks.projected_cost_sek)}` }),
+      el("dt", { text: "Tröskel för ny topp" }),
+      el("dd", { text: kw(peaks.threshold_kw, 2) }),
+      el("dt", { text: "Timmen som pågår" }),
+      el("dd", { text: `${fmt2.format(used)} kWh förbrukat, ${fmt0.format(hour.minutes_remaining)} min kvar${allowed !== null ? `, ${kw(allowed, 1)} till tillåts` : ""}` }),
+    ),
+    el("div", { class: "meter-gauge" }, el("span", { class: share >= 1 ? "over" : "", style: `width:${(Math.min(share, 1) * 100).toFixed(1)}%` })),
+  ];
+  if (peaks.counted.length) {
+    nodes.push(el("p", { style: "margin-top:12px", text: "Toppar som räknas just nu:" }));
+    nodes.push(
+      el(
+        "div",
+        { class: "peaks" },
+        ...peaks.counted.map((p) =>
+          el("div", { class: "peak" }, el("b", { text: kw(p.kw, 2) }), el("small", { text: `${dateFmt.format(new Date(`${p.day}T12:00:00`))} kl ${String(p.hour).padStart(2, "0")}` })),
+        ),
+      ),
+    );
+  }
+  body.replaceChildren(...nodes);
+}
+
+/* System ----------------------------------------------------------------- */
+
+function renderSystems() {
+  const s = state.status;
+  if (!s) return;
+  const row = (level, title, detail) =>
+    el("li", { class: level }, el("span", { class: "dot" }), el("div", {}, el("b", { text: title }), detail ? el("small", { text: detail }) : null));
+  const diag = s.ha_diagnosis || {};
+  const rows = [
+    row(
+      s.home_assistant_online ? "ok" : "bad",
+      s.home_assistant_online ? "Home Assistant svarar" : "Home Assistant svarar inte",
+      s.home_assistant_online ? s.ha_base_url : diag.error || (s.ha_token_present ? s.ha_base_url : "Token saknas"),
+    ),
+    row(s.prices_available ? "ok" : "bad", s.prices_available ? "Spotpriser hämtas" : "Spotpriser saknas", `Elområde ${s.price_area || "?"}`),
+    row(
+      s.forecast_available ? "ok" : "warn",
+      s.forecast_available ? "Väderprognos används" : "Ingen väderprognos",
+      s.forecast_available ? s.weather_entity || "" : "Planen antar att det är lika kallt hela dygnet. Ange site.weather_entity.",
+    ),
+    row(s.total_power_entity ? "ok" : "warn", s.total_power_entity ? "Elmätare för hela huset" : "Ingen elmätare vald", s.total_power_entity || "Behövs för förbrukning, effekttoppar och avtalseffekten i besparingen."),
+    row(s.rooms_with_climate ? "ok" : "warn", `${s.rooms_with_climate || 0} av ${s.rooms_configured || 0} rum har termostat`, s.rooms_with_climate ? "Via LK Arc Climate." : s.room_setpoint_entity ? `Styr hela huset via ${s.room_setpoint_entity}` : "Inget att styra."),
+    row(s.hot_water_enabled ? (s.hot_water_setpoint_entity ? "ok" : "warn") : "warn", s.hot_water_enabled ? "Varmvatten planeras" : "Varmvatten planeras inte", s.hot_water_setpoint_entity ? `Börvärde via ${s.hot_water_setpoint_entity}` : "Inget börvärde att skriva till – planen visas men styr inte tanken."),
+    row(s.mqtt_online ? "ok" : s.mqtt_configured ? "bad" : "warn", s.mqtt_online ? "MQTT ansluten" : s.mqtt_configured ? "MQTT svarar inte" : "MQTT avstängt", "Sensorerna hemopt_* i Home Assistant kommer härifrån."),
+    row(s.ext_enabled ? "ok" : "warn", s.ext_enabled ? "Effektvakten får bryta via EXT" : "Effektvakten räknar men bryter inte", s.guard_reason || ""),
+  ];
+  $("#systems-body").replaceChildren(...rows);
+}
+
+async function renderMeters() {
+  const body = $("#meter-body");
+  let payload;
+  try {
+    payload = await api("api/meters");
+  } catch (error) {
+    body.replaceChildren(el("p", { class: "empty", text: `Kunde inte läsa mätare: ${error.message}` }));
+    return;
+  }
+  if (!payload.online) {
+    body.replaceChildren(el("p", { class: "muted", text: `Home Assistant svarar inte. Vald mätare: ${payload.current || "ingen"}.` }));
+    return;
+  }
+  const candidates = payload.candidates || [];
+  const choose = async (entity) => {
+    try {
+      await api("api/meters/total", { method: "PUT", body: { entity_id: entity } });
+      await loadStatus();
+      renderMeters();
+    } catch (error) {
+      alert(`Kunde inte välja mätaren: ${error.message}`);
+    }
+  };
+  const list = el(
+    "div",
+    { class: "meter-list" },
+    ...candidates.map((c) => {
+      const id = typeof c === "string" ? c : c.entity_id;
+      const label = typeof c === "string" ? "" : c.name || "";
+      const value = typeof c === "string" ? "" : c.state !== undefined ? ` (${c.state}${c.unit ? ` ${c.unit}` : ""})` : "";
+      return el(
+        "label",
+        { class: "meter-option" },
+        el("input", { type: "radio", name: "meter", checked: id === payload.current, onchange: () => choose(id) }),
+        el("span", {}, label ? `${label} ` : "", el("code", { text: id }), value),
+      );
+    }),
+  );
+  body.replaceChildren(
+    el("p", { class: "muted", text: payload.current ? `Vald: ${payload.current}` : "Ingen mätare vald." }),
+    candidates.length ? list : el("p", { class: "empty", text: "Hittade inga effektsensorer som ser ut att mäta hela huset." }),
+  );
+}
+
+async function renderPeakSettings() {
+  try {
+    const p = await api("api/settings/peaks");
+    const months =
+      p.months.length === 12
+        ? "hela året"
+        : p.months.map((m) => new Intl.DateTimeFormat("sv-SE", { month: "short" }).format(new Date(2026, m - 1, 1))).join(", ");
+    const items = [
+      ["Aktiverad", p.enabled ? "ja" : "nej"],
+      ["Toppar som snittas", String(p.n_peaks)],
+      ["Pris", `${kr(p.price_per_kw_sek)} per kW och månad`],
+      ["Mäts", `${p.weekdays_only ? "vardagar " : ""}${p.hour_start}–${p.hour_end}`],
+      ["Månader", months],
+    ];
+    $("#peak-settings").replaceChildren(...items.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+  } catch (error) {
+    $("#peak-settings").replaceChildren(el("dd", { text: error.message }));
+  }
+}
+
+/* ----------------------------------------------------------------- loading */
+
+async function loadStatus() {
+  try {
+    state.status = await api("api/status");
+  } catch (error) {
+    state.status = { booting: true, errors: [`Panelen når inte hemopt: ${error.message}`] };
+  }
+  renderMasthead();
+  renderSummary();
+  renderFigures();
+  renderActions();
+  renderErrors();
+  renderFooter();
+  if (currentTab() === "system") renderSystems();
+}
+
+async function loadPlan() {
+  try {
+    state.plan = await api("api/plan");
+  } catch (error) {
+    state.plan = null;
+  }
+  const now = nowDate();
+  drawHorizon(state.plan, now);
+  renderPlanNotes();
+  renderFigures();
+  if (currentTab() === "rooms") {
+    drawDhw(state.plan, now);
+    renderDhwSub();
+  }
+}
+
+async function loadRooms() {
+  try {
+    state.rooms = await api("api/rooms");
+  } catch (error) {
+    state.rooms = null;
+  }
+  renderFigures();
+  if (currentTab() === "rooms") renderRooms();
+}
+
+async function loadSavings() {
+  try {
+    state.savings = await api(`api/savings?days=${state.savingsDays}`);
+  } catch (error) {
+    state.savings = null;
+  }
+  renderFigures();
+  if (currentTab() === "savings") renderSavings();
+}
+
+async function loadAdvice(recompute = false) {
+  const button = $("#advice-btn");
+  button.disabled = recompute;
+  try {
+    renderAdvice(await api("api/advice", recompute ? { method: "POST" } : {}));
+  } catch (error) {
+    $("#advice-body").replaceChildren(el("p", { class: "empty", text: `Kunde inte hämta: ${error.message}` }));
   } finally {
     button.disabled = false;
-    button.textContent = "Räkna om planen";
   }
-});
+}
 
-document.getElementById("control-toggle").addEventListener("change", async (event) => {
-  await postJSON("/api/control", { enabled: event.currentTarget.checked });
-  await refresh();
-});
-
-document.getElementById("advice-btn").addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  button.textContent = "Räknar…";
+async function loadStove() {
   try {
-    state.advice = await postJSON("/api/advice");
-    renderActions();
-    renderAdvice();
+    renderStove(await api("api/wood-stove"));
   } catch (error) {
-    console.error(error);
-  } finally {
-    button.disabled = false;
-    button.textContent = "Räkna om";
+    $("#stove-body").replaceChildren(el("p", { class: "empty", text: error.message }));
   }
-});
+}
 
-const actionsBtn = document.getElementById("actions-btn");
-if (actionsBtn) {
-  actionsBtn.addEventListener("click", async (event) => {
+async function loadPrices() {
+  const back = state.priceBack;
+  try {
+    const payload = await api(`api/prices?days_back=${back}&days_forward=1`);
+    drawPrices(payload, nowDate());
+    const sub = $("#price-sub");
+    if (payload.current_total_sek !== null && payload.current_total_sek !== undefined) {
+      sub.textContent = `Just nu ${ore(payload.current_total_sek)} öre/kWh inklusive påslag, nätavgift, skatt och moms (spot ${ore(payload.current_spot_sek)} öre).`;
+    }
+  } catch (error) {
+    $("#price-chart").replaceChildren(el("p", { class: "empty", text: error.message }));
+  }
+}
+
+async function loadHistory() {
+  const { days, res } = state.history;
+  try {
+    const payload = await api(`api/history?days=${days}&resolution=${res}`);
+    drawHistory(payload, nowDate());
+    renderHistoryFacts(payload);
+  } catch (error) {
+    $("#history-chart").replaceChildren(el("p", { class: "empty", text: error.message }));
+  }
+}
+
+async function loadPeaks() {
+  try {
+    renderPeaks(await api("api/peaks"));
+  } catch (error) {
+    $("#peak-body").replaceChildren(el("p", { class: "empty", text: error.message }));
+  }
+}
+
+function nowDate() {
+  return state.status && state.status.now ? new Date(state.status.now) : new Date();
+}
+
+/* -------------------------------------------------------------------- tabs */
+
+function currentTab() {
+  const active = $(".tab[aria-selected='true']");
+  return active ? active.dataset.tab : "overview";
+}
+
+const TAB_LOADERS = {
+  overview: () => {
+    drawHorizon(state.plan, nowDate());
+  },
+  savings: () => {
+    renderSavings();
+    loadSavings();
+    loadAdvice();
+  },
+  rooms: () => {
+    renderRooms();
+    loadRooms();
+    drawDhw(state.plan, nowDate());
+    renderDhwSub();
+    loadStove();
+  },
+  energy: () => {
+    loadPrices();
+    loadHistory();
+    loadPeaks();
+  },
+  system: () => {
+    renderSystems();
+    renderMeters();
+    renderPeakSettings();
+  },
+};
+
+function selectTab(name, { push = true } = {}) {
+  if (!TAB_LOADERS[name]) name = "overview";
+  for (const tab of $$(".tab")) tab.setAttribute("aria-selected", tab.dataset.tab === name ? "true" : "false");
+  for (const view of $$(".view")) view.hidden = view.dataset.tab !== name;
+  if (push) history.replaceState(null, "", `#${name}`);
+  hideTip();
+  TAB_LOADERS[name]();
+}
+
+/* ------------------------------------------------------------------ events */
+
+function bindSegmented(selector, onPick) {
+  const group = $(selector);
+  group.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    for (const b of $$("button", group)) b.setAttribute("aria-pressed", b === button ? "true" : "false");
+    onPick(button.dataset);
+  });
+}
+
+function bind() {
+  $("#tab-nav").addEventListener("click", (event) => {
+    const tab = event.target.closest(".tab");
+    if (tab) selectTab(tab.dataset.tab);
+  });
+
+  $("#control-toggle").addEventListener("change", async (event) => {
+    const enabled = event.target.checked;
+    try {
+      await api("api/control", { method: "POST", body: { enabled } });
+    } catch (error) {
+      event.target.checked = !enabled;
+      alert(`Kunde inte ändra styrningen: ${error.message}`);
+    }
+    await loadStatus();
+  });
+
+  $("#replan-btn").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
     button.textContent = "Räknar…";
     try {
-      state.advice = await postJSON("/api/advice");
-      renderActions();
-      renderAdvice();
+      await api("api/replan", { method: "POST" });
     } catch (error) {
-      console.error(error);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Räkna om";
+      alert(`Planeringen misslyckades: ${error.message}`);
     }
+    await Promise.all([loadStatus(), loadPlan(), loadRooms()]);
+    button.disabled = false;
+    button.textContent = "Räkna om";
+  });
+
+  $("#train-btn").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Lär…";
+    try {
+      await api("api/train", { method: "POST" });
+      await Promise.all([loadStatus(), loadRooms()]);
+    } catch (error) {
+      alert(`Inlärningen misslyckades: ${error.message}`);
+    }
+    button.disabled = false;
+    button.textContent = "Lär om modellerna";
+  });
+
+  $("#advice-btn").addEventListener("click", () => loadAdvice(true));
+
+  bindSegmented("#savings-period", ({ days }) => {
+    state.savingsDays = Number(days);
+    loadSavings();
+  });
+  bindSegmented("#price-period", ({ back }) => {
+    state.priceBack = Number(back);
+    loadPrices();
+  });
+  bindSegmented("#history-period", ({ days, res }) => {
+    state.history = { days: Number(days), res };
+    loadHistory();
+  });
+
+  window.addEventListener("hashchange", () => selectTab((location.hash || "#overview").slice(1), { push: false }));
+
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => selectTab(currentTab(), { push: false }), 150);
   });
 }
 
-let resizeTimer = null;
-window.addEventListener("resize", () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(renderAll, 150);
-});
+async function start() {
+  bind();
+  const initial = (location.hash || "#overview").slice(1);
+  await loadStatus();
+  selectTab(initial, { push: false });
+  await Promise.all([loadPlan(), loadRooms(), loadSavings()]);
+  setInterval(loadStatus, REFRESH_STATUS_MS);
+  setInterval(() => {
+    loadPlan();
+    loadRooms();
+    loadSavings();
+  }, REFRESH_PLAN_MS);
+}
 
-setupTabs();
-refresh();
-setInterval(refresh, REFRESH_MS);
+start();

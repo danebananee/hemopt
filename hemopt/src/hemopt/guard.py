@@ -36,7 +36,7 @@ class PeakGuard:
     config: ExtControlConfig
     blocked_since: datetime | None = None
     released_at: datetime | None = None
-    last_reason: str = "inactive"
+    last_reason: str = "inaktiv"
 
     def evaluate(
         self,
@@ -55,17 +55,18 @@ class PeakGuard:
         not the reasoning.
         """
         if not in_peak_window or threshold_kw <= 0:
-            return self._release(now, "outside the billed window")
+            return self._release(now, "utanför mättiden för effektavgiften")
 
         # Comfort always outranks the tariff. One expensive hour costs a few
         # tens of kronor; a cold house costs a lot more than that.
         if coldest_room_c is not None and coldest_room_c < self.config.min_room_temperature:
-            return self._release(now, f"room down to {coldest_room_c:.1f} °C")
+            return self._release(now, f"ett rum har sjunkit till {coldest_room_c:.1f} °C")
 
         if self.blocked_since is not None:
             held = (now - self.blocked_since).total_seconds() / 60.0
             if held >= self.config.max_block_minutes:
-                return self._release(now, f"block hit the {self.config.max_block_minutes} min cap")
+                cap = self.config.max_block_minutes
+                return self._release(now, f"spärren har nått maxtiden {cap} min")
 
         allowed = accumulator.allowed_kw(now, threshold_kw)
 
@@ -73,16 +74,16 @@ class PeakGuard:
             if self.released_at is not None:
                 since_release = (now - self.released_at).total_seconds() / 60.0
                 if since_release < self.config.min_release_minutes:
-                    return GuardDecision(False, "waiting out the minimum release", allowed)
+                    return GuardDecision(False, "väntar ut minsta frisläppningstid", allowed)
             # Blocking only helps if the pump is actually drawing something.
             if heat_pump_kw > 0.1 and allowed < heat_pump_kw:
-                return self._block(now, f"only {allowed:.1f} kW left this hour", allowed)
-            return GuardDecision(False, "within budget", allowed)
+                return self._block(now, f"bara {allowed:.1f} kW kvar denna timme", allowed)
+            return GuardDecision(False, "inom timmens budget", allowed)
 
         # Already blocking: hold until there is real headroom, so the pump does
         # not chatter on and off around the threshold.
         if allowed > heat_pump_kw + 0.3:
-            return self._release(now, "headroom recovered", allowed)
+            return self._release(now, "utrymme finns igen", allowed)
         return GuardDecision(True, self.last_reason, allowed)
 
     def _block(self, now: datetime, reason: str, allowed: float | None = None) -> GuardDecision:

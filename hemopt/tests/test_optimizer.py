@@ -275,3 +275,54 @@ def test_baseline_is_more_expensive_than_the_optimised_plan():
 
     assert baseline.status in {"kOptimal", "kTimeLimit"}
     assert baseline.energy_cost_sek > plan.energy_cost_sek
+
+
+def _with_floor_lag(problem: OptimisationInput, lag_hours: float) -> OptimisationInput:
+    from dataclasses import replace
+
+    rooms = [
+        replace(room, model=replace(room.model, tau_slab_hours=lag_hours), initial_slab=0.3)
+        for room in problem.rooms
+    ]
+    return replace(problem, rooms=rooms)
+
+
+def test_heat_already_in_the_slab_is_counted():
+    """A warm slab keeps heating the room, so the plan buys less right now."""
+    from dataclasses import replace
+
+    base = _with_floor_lag(
+        build_problem(with_hot_water=False, cheap_window=(0, 0), expensive_window=(0, 0)), 3.0
+    )
+
+    def with_slab(level: float):
+        rooms = [
+            replace(room, initial_temperature=room.config.comfort_min + 0.1, initial_slab=level)
+            for room in base.rooms
+        ]
+        return solve(replace(base, rooms=rooms))
+
+    charged = with_slab(1.0)
+    empty = with_slab(0.0)
+    assert sum(charged.heat_pump_kw[:8]) < sum(empty.heat_pump_kw[:8]) - 0.5
+    for room in charged.rooms:
+        assert len(room.slab) == len(room.temperature)
+        assert all(-1e-6 <= value <= 1 + 1e-6 for value in room.slab)
+        # The released heat shows up as a slab that drains over the first hours.
+        assert room.slab[0] > room.slab[12]
+
+
+def test_stored_heat_is_not_bought_just_for_the_credit():
+    """With a flat price nothing should be pre-heated above the comfort floor.
+
+    The terminal credit used to value stored heat at the cheapest price over
+    the final step's COP, so any step with a better COP looked like a bargain.
+    """
+    problem = build_problem(with_hot_water=False, cheap_window=(0, 0), expensive_window=(0, 0))
+    warmer_end = [-5.0 + 8.0 * i / problem.steps for i in range(problem.steps)]
+    from dataclasses import replace
+
+    rooms = [replace(room, initial_temperature=room.config.comfort_min) for room in problem.rooms]
+    plan = solve(replace(problem, rooms=rooms, outdoor_c=list(reversed(warmer_end))))
+    for room in plan.rooms:
+        assert max(room.temperature) <= room.comfort_min + 0.1

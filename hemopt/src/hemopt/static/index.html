@@ -4,265 +4,246 @@
     <meta charset="utf-8" />
     <base href="./" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>hemopt — kostnadsoptimering</title>
+    <title>hemopt · Kostnadsoptimering</title>
     <link rel="stylesheet" href="static/styles.css" />
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>⚡</text></svg>"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232f6fab'/><path d='M9 22c3-9 11-9 14 0' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/></svg>"
     />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark">⚡</span>
-        <div>
+    <header class="masthead">
+      <div class="masthead-row">
+        <div class="brand">
           <h1>Kostnadsoptimering</h1>
-          <p class="brand-sub">
-            Flyttar el till billiga timmar utan att du fryser
-            <span class="area" id="price-area">SE3</span>
-          </p>
+          <p class="brand-sub" id="brand-sub">Värme och varmvatten när elen är billig</p>
+        </div>
+        <div class="control">
+          <label class="switch" title="Låt hemopt ställa termostaterna">
+            <input type="checkbox" id="control-toggle" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            <span class="switch-text">
+              <strong id="control-label">Styr värmen</strong>
+              <small id="control-hint">Av – hemopt räknar bara</small>
+            </span>
+          </label>
+          <button type="button" class="btn" id="replan-btn">Räkna om</button>
         </div>
       </div>
-
-      <div class="topbar-actions">
-        <div class="pills" id="status-pills"></div>
-        <label class="toggle" title="Låt hemopt ställa temperaturerna i huset">
-          <input type="checkbox" id="control-toggle" />
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          <span class="toggle-label">Styr värmen</span>
-        </label>
-        <button class="btn" id="replan-btn" title="Räkna om planen utifrån aktuella priser och temperaturer">Räkna om planen</button>
-      </div>
+      <nav class="tabs" id="tab-nav" aria-label="Vyer">
+        <button type="button" class="tab" data-tab="overview" aria-selected="true">Översikt</button>
+        <button type="button" class="tab" data-tab="savings" aria-selected="false">Besparing</button>
+        <button type="button" class="tab" data-tab="rooms" aria-selected="false">Rum och värme</button>
+        <button type="button" class="tab" data-tab="energy" aria-selected="false">El och effekt</button>
+        <button type="button" class="tab" data-tab="system" aria-selected="false">System</button>
+      </nav>
     </header>
 
-    <nav class="tab-nav" id="tab-nav" aria-label="Vyer">
-      <button type="button" class="tab-btn active" data-tab="overview">Översikt</button>
-      <button type="button" class="tab-btn" data-tab="price">Elpris och plan</button>
-      <button type="button" class="tab-btn" data-tab="usage">Förbrukning</button>
-      <button type="button" class="tab-btn" data-tab="comfort">Värme och vatten</button>
-      <button type="button" class="tab-btn" data-tab="save">Spara mer</button>
-      <button type="button" class="tab-btn" data-tab="system">System</button>
-    </nav>
-
     <main>
-      <!-- ---------------------------------------------------- Översikt -->
-      <div class="tab-panel" data-tab="overview">
-        <section class="card wide summary-card">
-          <p class="summary-line" id="summary-line">Läser in…</p>
-          <p class="muted" id="summary-help">
-            hemopt jämför elpriset timme för timme med hur snabbt huset tappar
-            värme, och lägger uppvärmning och varmvatten där elen är billig.
-          </p>
-        </section>
+      <!-- Översikt ---------------------------------------------------------->
+      <section class="view" data-tab="overview">
+        <div class="now">
+          <p class="now-line" id="summary-line">Läser in…</p>
+          <p class="now-sub" id="summary-sub"></p>
+        </div>
 
-        <section class="kpis" id="kpis" aria-label="Nyckeltal"></section>
+        <div class="figures" id="figures" aria-label="Nyckeltal"></div>
 
-        <section class="card wide" id="model-card">
-          <div class="card-head">
+        <article class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Kommande dygn</h2>
+              <p class="muted" id="horizon-sub">Elpris och när värmepumpen planeras gå</p>
+            </div>
+            <div class="legend" id="horizon-legend">
+              <span><i class="sw sw-cheap"></i>Billigt</span>
+              <span><i class="sw sw-mid"></i>Normalt</span>
+              <span><i class="sw sw-dear"></i>Dyrt</span>
+              <span><i class="sw sw-line"></i>Elpris</span>
+            </div>
+          </header>
+          <div class="chart" id="horizon-chart"></div>
+          <ul class="notes" id="plan-notes"></ul>
+        </article>
+
+        <article class="panel">
+          <header class="panel-head">
             <div>
               <h2>Vad händer just nu</h2>
-              <p class="muted" id="model-subtitle">Vad hemopt gör med värmen och varmvattnet.</p>
+              <p class="muted" id="actions-sub">Det hemopt gör med värmen och varmvattnet</p>
             </div>
-          </div>
-          <div id="model-body" class="model-actions">
-            <p class="empty">Väntar på plan…</p>
-          </div>
-        </section>
+          </header>
+          <ol class="timeline" id="model-body"><li class="empty">Väntar på första planen…</li></ol>
+        </article>
 
-        <section class="card wide" id="error-card" hidden>
-          <div class="card-head"><h2>Senaste fel</h2></div>
+        <article class="panel alert" id="error-card" hidden>
+          <header class="panel-head"><h2>Senaste fel</h2></header>
           <ul class="errors" id="errors"></ul>
-        </section>
-      </div>
+        </article>
+      </section>
 
-      <!-- ------------------------------------------------ Elpris & plan -->
-      <div class="tab-panel" data-tab="price" hidden>
-        <section class="card wide">
-          <div class="card-head">
+      <!-- Besparing --------------------------------------------------------->
+      <section class="view" data-tab="savings" hidden>
+        <article class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Vad hade du sparat?</h2>
+              <p class="muted" id="savings-sub">
+                hemopt räknar varje kvart vad huset hade kostat med kvartspris och styrning,
+                jämfört med ditt nuvarande avtal.
+              </p>
+            </div>
+            <div class="segmented" id="savings-period" role="group" aria-label="Period">
+              <button type="button" data-days="7">7 dagar</button>
+              <button type="button" data-days="30" aria-pressed="true">30 dagar</button>
+              <button type="button" data-days="90">90 dagar</button>
+              <button type="button" data-days="365">1 år</button>
+            </div>
+          </header>
+          <div id="savings-ladder" class="ladder"></div>
+          <div class="chart" id="savings-chart"></div>
+          <div id="savings-comfort" class="comfort-check"></div>
+          <ul class="notes" id="savings-notes"></ul>
+        </article>
+
+        <article class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Avtal och säkring</h2>
+              <p class="muted" id="advice-sub">Jämför elavtal och säkringsstorlek mot uppmätt förbrukning.</p>
+            </div>
+            <button type="button" class="btn ghost" id="advice-btn">Räkna om</button>
+          </header>
+          <div id="advice-body"><p class="empty">Hämtar…</p></div>
+        </article>
+      </section>
+
+      <!-- Rum och värme ----------------------------------------------------->
+      <section class="view" data-tab="rooms" hidden>
+        <article class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Rum</h2>
+              <p class="muted">
+                Prioritet avgör vilka rum som får svaja när elen är dyr. «Håll» rubbas inte,
+                «Flexibel» bär mest av lastflytten.
+              </p>
+            </div>
+          </header>
+          <div id="rooms"></div>
+        </article>
+
+        <div class="split">
+          <article class="panel">
+            <header class="panel-head">
+              <div>
+                <h2>Varmvatten</h2>
+                <p class="muted" id="dhw-sub">—</p>
+              </div>
+            </header>
+            <div class="chart small" id="dhw-chart"></div>
+          </article>
+
+          <article class="panel" id="stove-card">
+            <header class="panel-head">
+              <div>
+                <h2 id="stove-title">Braskamin</h2>
+                <p class="muted" id="stove-sub">Hur mycket brasan värmer och när det lönar sig att tända.</p>
+              </div>
+            </header>
+            <div id="stove-body"><p class="empty">Hämtar…</p></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- El och effekt ----------------------------------------------------->
+      <section class="view" data-tab="energy" hidden>
+        <article class="panel">
+          <header class="panel-head">
             <div>
               <h2>Elpris</h2>
-              <p class="muted" id="price-subtitle">Spotpris — välj period och dra i grafen</p>
+              <p class="muted" id="price-sub">Pris per kvart inklusive påslag, skatt och moms</p>
             </div>
-            <div class="legend">
-              <span class="key key-price">Spot (exkl. moms)</span>
-              <span class="key key-power">Totalt med påslag och skatt</span>
+            <div class="segmented" id="price-period" role="group" aria-label="Period">
+              <button type="button" data-back="0" aria-pressed="true">Idag och imorgon</button>
+              <button type="button" data-back="6">Senaste veckan</button>
+              <button type="button" data-back="29">30 dagar</button>
             </div>
-          </div>
-          <div id="price-controls" class="period-controls"></div>
-          <div class="chart-host" id="price-chart"></div>
-        </section>
+          </header>
+          <div class="chart" id="price-chart"></div>
+        </article>
 
-        <section class="card wide">
-          <div class="card-head">
+        <article class="panel">
+          <header class="panel-head">
             <div>
-              <h2>Planen framåt</h2>
-              <p class="muted" id="plan-subtitle">Läser in…</p>
+              <h2>Förbrukning</h2>
+              <p class="muted" id="history-sub">Hela husets uppmätta förbrukning</p>
             </div>
-            <div class="legend">
-              <span class="key key-price">Elpris</span>
-              <span class="key key-power">Planerad total effekt</span>
-              <span class="key key-pump">Värmepump</span>
-              <span class="key key-hourly">Timmedel (det som debiteras)</span>
-              <span class="key key-threshold">Effekttak (håll under)</span>
+            <div class="segmented" id="history-period" role="group" aria-label="Period">
+              <button type="button" data-days="2" data-res="hour" aria-pressed="true">2 dygn</button>
+              <button type="button" data-days="14" data-res="day">14 dagar</button>
+              <button type="button" data-days="90" data-res="week">90 dagar</button>
+              <button type="button" data-days="366" data-res="month">1 år</button>
             </div>
-          </div>
-          <p class="muted chart-help">
-            Timmedel är genomsnittet under en hel klocktimme. Effektavgiften räknas
-            på timmedel — en kort spik kostar inget så länge hela timmen håller sig
-            under taket.
-          </p>
-          <div class="chart-host" id="plan-chart"></div>
-          <div id="plan-notes" class="notes"></div>
-        </section>
-      </div>
+          </header>
+          <div class="chart" id="history-chart"></div>
+          <dl class="facts" id="history-facts"></dl>
+        </article>
 
-      <!-- ------------------------------------------------- Förbrukning -->
-      <div class="tab-panel" data-tab="usage" hidden>
-        <section class="card wide">
-          <div class="card-head">
+        <article class="panel">
+          <header class="panel-head">
             <div>
-              <h2>Din förbrukning</h2>
-              <p class="muted" id="history-subtitle">Uppmätt förbrukning — välj period och skala</p>
+              <h2>Effekttoppar</h2>
+              <p class="muted" id="peak-sub">—</p>
             </div>
-          </div>
-          <div id="history-controls" class="period-controls"></div>
-          <div class="chart-host" id="history-chart"></div>
-          <div id="history-summary" class="history-summary"></div>
-        </section>
-
-        <section class="card wide">
-          <div class="card-head">
-            <div>
-              <h2>Effekttoppar denna månad</h2>
-              <p class="muted" id="peak-subtitle">—</p>
-            </div>
-          </div>
+          </header>
           <div id="peak-body"></div>
-        </section>
-      </div>
+        </article>
+      </section>
 
-      <!-- ------------------------------------------- Värme och vatten -->
-      <div class="tab-panel" data-tab="comfort" hidden>
-        <section class="card wide">
-          <div class="card-head">
+      <!-- System ------------------------------------------------------------>
+      <section class="view" data-tab="system" hidden>
+        <article class="panel">
+          <header class="panel-head">
             <div>
-              <h2>Rum och prioritet</h2>
-              <p class="muted">
-                Hög prioritet håller temperaturen. Låg prioritet får svaja lite och
-                bär lastflytten, vilket är det som sänker kostnaden.
-              </p>
+              <h2>Anslutningar</h2>
+              <p class="muted">Det hemopt läser och styr, och om det fungerar just nu.</p>
             </div>
-          </div>
-          <div class="rooms" id="rooms"></div>
-        </section>
+            <button type="button" class="btn ghost" id="train-btn">Lär om modellerna</button>
+          </header>
+          <ul class="checklist" id="systems-body"></ul>
+        </article>
 
-        <section class="card wide">
-          <div class="card-head">
-            <div>
-              <h2>Varmvatten</h2>
-              <p class="muted" id="dhw-subtitle">—</p>
-            </div>
-          </div>
-          <div class="chart-host small" id="dhw-chart"></div>
-        </section>
-
-        <section class="card wide" id="stove-card">
-          <div class="card-head">
-            <div>
-              <h2>Braskamin</h2>
-              <p class="muted" id="stove-subtitle">
-                Om brasan är tänd, hur mycket den värmer och när det lönar sig att tända.
-              </p>
-            </div>
-          </div>
-          <div id="stove-body">
-            <p class="empty">Hämtar brasstatus…</p>
-          </div>
-        </section>
-      </div>
-
-      <!-- --------------------------------------------------- Spara mer -->
-      <div class="tab-panel" data-tab="save" hidden>
-        <section class="card wide" id="actions-card">
-          <div class="card-head">
-            <div>
-              <h2>Vad du kan göra för att spara</h2>
-              <p class="muted" id="actions-subtitle">
-                Elavtal och säkringsstorlek — när det finns tillräckligt med mätdata.
-              </p>
-            </div>
-            <button type="button" class="btn" id="actions-btn">Räkna om</button>
-          </div>
-          <div id="actions-body" class="actions-grid">
-            <p class="empty">Hämtar rekommendationer…</p>
-          </div>
-        </section>
-
-        <section class="card wide">
-          <div class="card-head">
-            <div>
-              <h2>Jämför elavtal</h2>
-              <p class="muted" id="advice-subtitle">
-                Vad din förbrukning hade kostat med olika avräkning — per år, med och
-                utan hemopts styrning.
-              </p>
-            </div>
-            <button type="button" class="btn" id="advice-btn">Räkna om</button>
-          </div>
-          <div id="advice-body">
-            <p class="empty">Hämtar avtalsjämförelse…</p>
-          </div>
-        </section>
-      </div>
-
-      <!-- ----------------------------------------------------- System -->
-      <div class="tab-panel" data-tab="system" hidden>
-        <section class="card wide" id="systems-card">
-          <div class="card-head">
-            <div>
-              <h2>Vad hemopt styr</h2>
-              <p class="muted">
-                Slå på «Styr värmen» högst upp för att hemopt ska ställa
-                temperaturerna. Annars visas bara planen.
-              </p>
-            </div>
-          </div>
-          <div id="systems-body" class="systems-grid"></div>
-        </section>
-
-        <div class="grid-two">
-          <section class="card">
-            <div class="card-head">
-              <div>
-                <h2>Regler för effektavgift</h2>
-                <p class="muted">Ändras under tilläggets Configuration — inte här.</p>
-              </div>
-            </div>
-            <div id="peak-settings" class="settings-form"></div>
-          </section>
-
-          <section class="card" id="meter-card">
-            <div class="card-head">
+        <div class="split">
+          <article class="panel" id="meter-card">
+            <header class="panel-head">
               <div>
                 <h2>Elmätare</h2>
-                <p class="muted" id="meter-subtitle">
-                  Behövs för förbrukning och effekttoppar.
-                </p>
+                <p class="muted" id="meter-sub">Hela husets effekt, för förbrukning, effekttoppar och besparing.</p>
               </div>
-            </div>
-            <div id="meter-body" class="meter-body">
-              <p class="empty">Letar efter elmätare…</p>
-            </div>
-          </section>
+            </header>
+            <div id="meter-body"><p class="empty">Letar efter elmätare…</p></div>
+          </article>
+
+          <article class="panel">
+            <header class="panel-head">
+              <div>
+                <h2>Effektavgift</h2>
+                <p class="muted">Ändras under tilläggets Konfiguration.</p>
+              </div>
+            </header>
+            <dl class="facts" id="peak-settings"></dl>
+          </article>
         </div>
-      </div>
+      </section>
     </main>
 
-    <footer>
+    <footer class="foot">
       <span id="footer-status">—</span>
-      <span class="muted">Spotpris från elprisetjustnu.se</span>
+      <span>Spotpris från elprisetjustnu.se</span>
     </footer>
 
+    <div class="tooltip" id="tooltip" role="status" hidden></div>
     <script src="static/app.js"></script>
   </body>
 </html>

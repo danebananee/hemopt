@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from .hotwater import UsageProfile
+from .shadow import LedgerStep
 from .thermal import ThermalModel
 
 SCHEMA = """
@@ -64,6 +65,21 @@ CREATE TABLE IF NOT EXISTS peak_months (
 CREATE TABLE IF NOT EXISTS plans (
     created_at TEXT PRIMARY KEY,
     payload    TEXT NOT NULL
+);
+
+-- One row per planning step: the shadow ledger behind the savings estimate.
+CREATE TABLE IF NOT EXISTS shadow_steps (
+    ts                INTEGER PRIMARY KEY,
+    spot              REAL,
+    spot_hour         REAL,
+    spot_day          REAL,
+    adder             REAL,
+    reference_kwh     REAL,
+    optimised_kwh     REAL,
+    house_kwh         REAL,
+    reference_cold_dh REAL NOT NULL DEFAULT 0,
+    optimised_cold_dh REAL NOT NULL DEFAULT 0,
+    control_enabled   INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -297,7 +313,93 @@ class Store:
             row = cursor.fetchone()
         return json.loads(row["payload"]) if row else None
 
+    # --- shadow ledger --------------------------------------------------
+    def has_shadow_step(self, start: datetime) -> bool:
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM shadow_steps WHERE ts = ? AND reference_kwh IS NOT NULL",
+                (_to_ts(start),),
+            )
+            return cursor.fetchone() is not None
+
+    def record_shadow_step(self, step: LedgerStep) -> None:
+        """Book a step's prices and twin energies; keeps any measured house energy."""
+        with self._cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO shadow_steps (
+                    ts, spot, spot_hour, spot_day, adder, reference_kwh, optimised_kwh,
+                    reference_cold_dh, optimised_cold_dh, control_enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ts) DO UPDATE SET
+                    spot = excluded.spot,
+                    spot_hour = excluded.spot_hour,
+                    spot_day = excluded.spot_day,
+                    adder = excluded.adder,
+                    reference_kwh = excluded.reference_kwh,
+                    optimised_kwh = excluded.optimised_kwh,
+                    reference_cold_dh = excluded.reference_cold_dh,
+                    optimised_cold_dh = excluded.optimised_cold_dh,
+                    control_enabled = excluded.control_enabled
+                """,
+                (
+                    _to_ts(step.start),
+                    step.spot,
+                    step.spot_hour,
+                    step.spot_day,
+                    step.adder,
+                    step.reference_kwh,
+                    step.optimised_kwh,
+                    step.reference_cold_dh,
+                    step.optimised_cold_dh,
+                    int(step.control_enabled),
+                ),
+            )
+
+    def record_house_energy(self, start: datetime, kwh: float) -> None:
+        """Measured whole-house energy for one step, booked when the step ends."""
+        with self._cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO shadow_steps (ts, house_kwh) VALUES (?, ?)
+                ON CONFLICT(ts) DO UPDATE SET house_kwh = excluded.house_kwh
+                """,
+                (_to_ts(start), float(kwh)),
+            )
+
+    def shadow_steps(self, since: datetime, tz: timezone | None = None) -> list[LedgerStep]:
+        """Fully priced ledger steps since `since`, oldest first."""
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM shadow_steps WHERE ts >= ? AND spot IS NOT NULL ORDER BY ts",
+                (_to_ts(since),),
+            )
+            rows = cursor.fetchall()
+        return [
+            LedgerStep(
+                start=_from_ts(row["ts"], tz),
+                spot=row["spot"],
+                spot_hour=row["spot_hour"],
+                spot_day=row["spot_day"],
+                adder=row["adder"],
+                reference_kwh=row["reference_kwh"],
+                optimised_kwh=row["optimised_kwh"],
+                house_kwh=row["house_kwh"],
+                reference_cold_dh=row["reference_cold_dh"],
+                optimised_cold_dh=row["optimised_cold_dh"],
+                control_enabled=bool(row["control_enabled"]),
+            )
+            for row in rows
+        ]
+
     def housekeeping(self, retain_days: int = 120) -> None:
         self.prune_samples(datetime.now(UTC) - timedelta(days=retain_days))
+        with self._cursor() as cursor:
+            # The ledger is a few kB a day; a bit over a year covers a full
+            # heating season plus the one before for comparison.
+            cursor.execute(
+                "DELETE FROM shadow_steps WHERE ts < ?",
+                (_to_ts(datetime.now(UTC) - timedelta(days=400)),),
+            )
         with self._cursor() as cursor:
             cursor.execute("PRAGMA optimize")

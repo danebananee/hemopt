@@ -104,3 +104,59 @@ def test_build_report_need_sensor():
         [],
     )
     assert report.status == "need_sensor"
+
+
+def test_a_learnt_stove_is_priced_in_kronor():
+    start = datetime(2026, 1, 10, 0, tzinfo=TZ)
+    times = [start + timedelta(minutes=15 * i) for i in range(96)]
+    price = [0.5] * 96
+    for i in range(68, 84):
+        price[i] = 2.5
+    displaceable = [2.0] * 96
+    windows = recommend_windows(
+        times=times,
+        price_sek=price,
+        outdoor_c=[-5.0] * 96,
+        heat_pump_kw=[1.0] * 96,
+        step_minutes=15,
+        stove_kw=1.5,
+        displaceable_kw=displaceable,
+        cop=[3.0] * 96,
+    )
+    best = windows[0]
+    assert best.start == times[68]
+    assert best.end == times[83] + timedelta(minutes=15)
+    # 4 h × 1.5 kW heat / COP 3 × 2.5 kr = 5 kr.
+    assert best.saving_sek == pytest.approx(5.0, rel=0.01)
+
+
+def test_a_fire_cannot_save_more_than_the_plan_would_heat():
+    start = datetime(2026, 1, 10, 18, tzinfo=TZ)
+    times = [start + timedelta(minutes=15 * i) for i in range(16)]
+    windows = recommend_windows(
+        times=times,
+        price_sek=[2.0] * 16,
+        outdoor_c=[-5.0] * 16,
+        heat_pump_kw=[0.3] * 16,
+        step_minutes=15,
+        stove_kw=4.0,
+        displaceable_kw=[0.3] * 16,
+        cop=[3.0] * 16,
+    )
+    assert windows[0].saving_sek == pytest.approx(0.3 / 3.0 * 2.0 * 4, rel=0.01)
+
+
+def test_nobody_is_told_to_light_a_fire_at_night():
+    start = datetime(2026, 1, 10, 0, tzinfo=TZ)
+    times = [start + timedelta(minutes=15 * i) for i in range(96)]
+    price = [0.5] * 96
+    for i in range(4, 20):  # expensive 01-05
+        price[i] = 3.0
+    windows = recommend_windows(
+        times=times,
+        price_sek=price,
+        outdoor_c=[-10.0] * 96,
+        heat_pump_kw=[2.0] * 96,
+        step_minutes=15,
+    )
+    assert all(7 <= window.start.hour < 23 for window in windows)

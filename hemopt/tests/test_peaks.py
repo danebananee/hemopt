@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from hemopt.config import PeakTariffConfig, PeakWindow
 from hemopt.peaks import HourAccumulator, daily_maxima, peak_state
 
@@ -146,9 +148,28 @@ def test_accumulator_resets_on_the_hour_boundary():
     accumulator.add_sample(start + timedelta(minutes=30), 5.0)
     assert accumulator.energy_kwh == 2.5
 
-    accumulator.add_sample(start + timedelta(hours=1, minutes=5), 5.0)
+    closed = accumulator.add_sample(start + timedelta(hours=1, minutes=5), 5.0)
     assert accumulator.hour_start == start + timedelta(hours=1)
-    assert accumulator.energy_kwh == 0.0
+    # The finished hour is handed back with its mean, not overwritten.
+    assert closed == (start, pytest.approx(5.0))
+    # The five minutes since the boundary already belong to the new hour.
+    assert accumulator.energy_kwh == pytest.approx(5.0 * 5 / 60)
+
+
+def test_a_restart_mid_hour_reports_the_mean_of_what_was_seen():
+    start = datetime(2026, 1, 12, 8, 0, tzinfo=TZ)
+    accumulator = HourAccumulator(hour_start=start)
+    for minute in range(30, 60):
+        accumulator.add_sample(start + timedelta(minutes=minute), 2.0)
+    closed = accumulator.add_sample(start + timedelta(hours=1), 2.0)
+    assert closed == (start, pytest.approx(2.0))
+
+
+def test_a_barely_observed_hour_is_not_reported():
+    start = datetime(2026, 1, 12, 8, 0, tzinfo=TZ)
+    accumulator = HourAccumulator(hour_start=start)
+    accumulator.add_sample(start + timedelta(minutes=55), 2.0)
+    assert accumulator.add_sample(start + timedelta(hours=1, minutes=1), 2.0) is None
 
 
 def test_projection_extrapolates_the_rest_of_the_hour():
