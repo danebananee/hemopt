@@ -1,5 +1,9 @@
 # Ändringar
 
+## 0.1.2
+
+- Rättar «No module named slingkoll» vid start.
+
 ## 0.1.1
 
 - Panelen startar direkt i stället för att vänta på Home Assistant (gav
