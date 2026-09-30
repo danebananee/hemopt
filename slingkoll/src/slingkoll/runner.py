@@ -105,22 +105,41 @@ class Runner:
 
     # --- startup ----------------------------------------------------------
     def start(self) -> None:
-        """Called once at boot: timezone, first-run settings, resume or restore."""
+        """Called once at boot: timezone, first-run settings, resume or restore.
+
+        Never raises: a Home Assistant that is not reachable yet is shown in
+        the panel and retried on every tick.
+        """
+        try:
+            self._start()
+        except Exception as exc:  # noqa: BLE001 - the panel must come up regardless
+            _LOGGER.exception("start failed")
+            self.error = f"Uppstarten misslyckades: {exc}"
+
+    def _start(self) -> None:
+        try:
+            zone = (self.ha.config() or {}).get("time_zone")
+            if zone:
+                self.tz = ZoneInfo(zone)
+        except (HAError, KeyError, ValueError) as exc:
+            _LOGGER.warning("could not read Home Assistant's time zone: %s", exc)
+        try:
+            states = self.ha.states()
+        except HAError as exc:
+            self.error = str(exc)
+            _LOGGER.warning("Home Assistant not reachable at start: %s", exc)
+            states = None
         with self.lock:
-            try:
-                zone = (self.ha.config() or {}).get("time_zone")
-                if zone:
-                    self.tz = ZoneInfo(zone)
-            except (HAError, KeyError, ValueError):
-                pass
-            try:
-                states = self.ha.states()
+            if states is not None:
                 self.found = discover(states)
                 if not self.settings.configured and not self.settings.thermostats:
                     self.settings = default_settings(self.found, self.settings)
                     save_settings(self.settings, self.dir / "settings.json")
-            except HAError as exc:
-                self.error = str(exc)
+                _LOGGER.info(
+                    "found %d thermostats, %d selected",
+                    len(self.found["thermostats"]),
+                    len(self.settings.thermostats),
+                )
             run = self.run
             if run and run.get("status") in ACTIVE:
                 gap = self.ha.now() - float(run.get("last_tick") or 0)
@@ -270,6 +289,12 @@ class Runner:
                 self.error = str(exc)
                 return
             now = self.ha.now()
+            if self.found is None:
+                # Home Assistant was not reachable at boot: set up now instead.
+                self.found = discover(list(states.values()))
+                if not self.settings.configured and not self.settings.thermostats:
+                    self.settings = default_settings(self.found, self.settings)
+                    save_settings(self.settings, self.dir / "settings.json")
             self._update_live(states)
             run = self.run
             if not run or run.get("status") not in ACTIVE:

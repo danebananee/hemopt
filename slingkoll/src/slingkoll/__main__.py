@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8099)
     args = parser.parse_args()
+    print(f"[slingkoll] startar, port {args.port}", flush=True)
 
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -35,21 +36,25 @@ def main() -> None:
 
         ha = SimHA(demo_house(), history_days=3)
         runner = Runner(ha, Path(tempfile.mkdtemp(prefix="slingkoll-")))
-        runner.start()
 
-        def simulate() -> None:
+        def background() -> None:
+            runner.start()
             while not stop.is_set():
                 ha.advance(60)
                 runner.tick()
                 time.sleep(60 / args.speed)
 
-        threading.Thread(target=simulate, daemon=True).start()
     else:
         runner = Runner(HAClient.from_env())
-        runner.start()
-        threading.Thread(target=run_forever, args=(runner, 60.0, stop), daemon=True).start()
 
+        def background() -> None:
+            runner.start()
+            run_forever(runner, 60.0, stop)
+
+    # Open the port first: Home Assistant shows "502 Bad Gateway" for as long
+    # as nothing listens, so talking to Home Assistant waits until we do.
     server = make_server(runner, args.host, args.port, demo=args.demo)
+    threading.Thread(target=background, daemon=True).start()
 
     def terminate(*_: object) -> None:
         stop.set()
