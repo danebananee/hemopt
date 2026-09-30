@@ -232,3 +232,26 @@ def test_http_api(runner):
         assert urllib.request.urlopen(base + "/static/styles.css").status == 200
     finally:
         server.shutdown()
+
+
+def test_hemopt_house_is_preset_when_its_thermostats_exist():
+    from slingkoll.discovery import HEMOPT_HOUSE
+
+    states = [
+        {
+            "entity_id": entity,
+            "state": "heat",
+            "attributes": {"friendly_name": "LK", "temperature": 21, "current_temperature": 20.5},
+        }
+        for entity, _ in HEMOPT_HOUSE
+    ] + [
+        {"entity_id": "sensor.h66_hpradiator_forward", "state": "31", "attributes": {}},
+        {"entity_id": "climate.h66_hproom_temp_setpoint", "state": "heat", "attributes": {"temperature": 21}},
+    ]
+    settings = default_settings(discover(states))
+    assert [t["name"] for t in settings.thermostats][:2] == ["Vardagsrum", "Badrum"]
+    assert len(settings.thermostats) == 11
+    assert settings.supply_entity == "sensor.h66_hpradiator_forward"
+    assert settings.hp_setpoint_entity == "climate.h66_hproom_temp_setpoint"
+    assert settings.outdoor_entity is None
+    assert settings.floor == "slow"

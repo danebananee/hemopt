@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/with-contenv sh
 # Add-on entrypoint. The Supervisor hands us a token for Home Assistant's API
 # (SUPERVISOR_TOKEN), so there is nothing for the user to configure.
 set -eu

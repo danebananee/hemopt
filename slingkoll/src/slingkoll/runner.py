@@ -132,7 +132,7 @@ class Runner:
         with self.lock:
             if states is not None:
                 self.found = discover(states)
-                if not self.settings.configured and not self.settings.thermostats:
+                if not self.settings.configured:
                     self.settings = default_settings(self.found, self.settings)
                     save_settings(self.settings, self.dir / "settings.json")
                 _LOGGER.info(
@@ -292,7 +292,7 @@ class Runner:
             if self.found is None:
                 # Home Assistant was not reachable at boot: set up now instead.
                 self.found = discover(list(states.values()))
-                if not self.settings.configured and not self.settings.thermostats:
+                if not self.settings.configured:
                     self.settings = default_settings(self.found, self.settings)
                     save_settings(self.settings, self.dir / "settings.json")
             self._update_live(states)

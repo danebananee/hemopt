@@ -115,15 +115,48 @@ def discover(states: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "outdoor": pick(("sensor.",), ("hpoutdoor", "outdoor", "utomhus", "utetemp", "ute_temp")),
         "hemopt_switch": pick(("switch.",), ("hemopt_control_enabled",)),
+        "all_entities": sorted(s["entity_id"] for s in states),
     }
+
+
+# The house this app was written for: the same rooms and LK Arc thermostats
+# as hemopt is set up with. Used whenever these thermostats exist.
+HEMOPT_HOUSE = (
+    ("climate.fa_6a_ee_c8_9a_63_thermostat", "Vardagsrum"),
+    ("climate.f7_d4_23_14_49_da_thermostat", "Badrum"),
+    ("climate.e6_5e_d9_54_a8_e7_thermostat", "Rios rum"),
+    ("climate.c8_1b_04_e0_7e_90_thermostat", "Sovrum"),
+    ("climate.d0_f5_31_05_49_9d_thermostat", "Kontor"),
+    ("climate.e3_09_14_3f_f0_f0_thermostat", "Pysselrum"),
+    ("climate.d5_ba_fd_c1_0c_c1_thermostat", "Garderob"),
+    ("climate.e9_bd_23_4a_e9_a8_thermostat", "Salong"),
+    ("climate.ce_9f_90_cd_bf_74_thermostat", "Lekrum"),
+    ("climate.ca_97_f7_ba_7d_23_thermostat", "Entré"),
+    ("climate.e0_ec_2c_c8_5e_2c_thermostat", "Tvättstuga"),
+)
+HEMOPT_HEAT_PUMP = {
+    "hp_setpoint_entity": "climate.h66_hproom_temp_setpoint",
+    "supply_entity": "sensor.h66_hpradiator_forward",
+    "outdoor_entity": "sensor.h66_hpoutdoor",
+    "hemopt_switch_entity": "switch.hemopt_control_enabled",
+}
 
 
 def default_settings(found: dict[str, Any], base: Settings | None = None) -> Settings:
     """First-run settings: every LK thermostat, and the heat pump if found."""
     settings = base or Settings()
-    settings.thermostats = [
-        {"entity_id": t["entity_id"], "name": t["name"]} for t in found["thermostats"] if t["default"]
-    ]
+    present = {t["entity_id"] for t in found["thermostats"]}
+    house = [{"entity_id": e, "name": n} for e, n in HEMOPT_HOUSE if e in present]
+    if house:
+        settings.thermostats = house
+        settings.floor = "slow"  # concrete slab downstairs
+        for attr, entity in HEMOPT_HEAT_PUMP.items():
+            if entity in found["all_entities"]:
+                setattr(settings, attr, entity)
+    else:
+        settings.thermostats = [
+            {"entity_id": t["entity_id"], "name": t["name"]} for t in found["thermostats"] if t["default"]
+        ]
     for key, attr in (
         ("hp_setpoint", "hp_setpoint_entity"),
         ("supply", "supply_entity"),

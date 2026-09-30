@@ -1,5 +1,10 @@
 # Ändringar
 
+## 0.1.3
+
+- Rättar «401: Unauthorized»: nyckeln till Home Assistant lästes inte.
+- Förinställd med samma elva rum och värmepumpsentiteter som hemopt.
+
 ## 0.1.2
 
 - Rättar «No module named slingkoll» vid start.

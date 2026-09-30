@@ -26,7 +26,7 @@ class HAClient:
 
     @classmethod
     def from_env(cls) -> HAClient:
-        supervisor = os.environ.get("SUPERVISOR_TOKEN", "")
+        supervisor = os.environ.get("SUPERVISOR_TOKEN", "") or _container_env("SUPERVISOR_TOKEN")
         override = os.environ.get("HA_TOKEN", "")
         if supervisor and not override:
             return cls("http://supervisor/core/api", supervisor)
@@ -94,6 +94,21 @@ class HAClient:
                     (moment, str(row.get("state")), row.get("attributes") or {})
                 )
         return out
+
+
+def _container_env(name: str) -> str:
+    """A variable the Supervisor set, read from s6-overlay's copy of the environment.
+
+    The base image's init system keeps the container environment in a
+    directory instead of passing it on to the add-on's start script.
+    """
+    for folder in ("/run/s6/container_environment", "/var/run/s6/container_environment"):
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                return handle.read().strip()
+        except OSError:
+            continue
+    return ""
 
 
 def number(value: Any) -> float | None:
