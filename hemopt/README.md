@@ -64,6 +64,26 @@ också och går fortare.
 Assistants långtidsstatistik för elmätaren, så effekttoppar och avtalsråd
 bygger på hela historiken från start.
 
+**Ställs in med klick.** Vid första starten letar hemopt igenom Home
+Assistant efter termostater, temperaturgivare, elmätare, fasströmmar, väder,
+batterier och laddboxar, och fliken *Inställningar* visar vad den hittat med
+en checklista över vad som saknas. Ingen YAML behövs; det som sparas i panelen
+hamnar i `/data/profile.json` och gäller före tilläggets Configuration-flik.
+
+**Husbatteri, elbil och V2H.** Ett husbatteri och en elbil planeras i samma
+optimering som värmen: de laddas när elen är billig och kan täcka husets
+förbrukning när den är dyr eller en effekttopp hotar. Elbilen blir alltid
+laddad till vald nivå före avgångstiden. Med en dubbelriktad laddbox kan
+bilen också driva huset (V2H), ned till en lägsta nivå du väljer. Ingenting
+säljs till nätet. Batteri och bil utan laddnivågivare planeras, men räknas
+inte in i besparingskalkylen.
+
+**Bevakar huvudsäkringen.** Ur strömmen per fas (timmens högsta och
+medelvärde i Home Assistants statistik) bedömer hemopt om säkringen är för
+liten, har liten marginal, är rätt, eller om en mindre skulle räcka med
+marginal. Råd om mindre säkring ges först efter två veckors mätning, och
+panelen säger till om ingen vintermånad ingår än.
+
 **Planerar mot vädret.** Utetemperaturen hämtas som timprognos från en
 weather-entitet. Utan prognos måste planeraren anta att det är lika varmt om
 36 timmar som just nu, vilket felbedömer varenda förvärmning inför ett
@@ -81,6 +101,10 @@ uv run hemopt --demo serve --port 47318
 verkliga SE3-priser men ett simulerat hus, så inget behöver vara inkopplat.
 
 ## Skarp installation
+
+Som Home Assistant-tillägg behövs inget av detta: installera enligt
+[`DOCS.md`](DOCS.md) och följ guiden under *Inställningar*. Stegen nedan gäller
+drift utanför Home Assistant.
 
 ### 1. Skapa konfigurationen
 
@@ -227,6 +251,8 @@ Med MQTT påslaget dyker enheten **Kostnadsoptimering** upp via autodiscovery:
 | `sensor.hemopt_saving_month_contract` | Varav avtalsbytet, denna månad |
 | `sensor.hemopt_saving_month_control` | Varav styrningen, denna månad |
 | `sensor.hemopt_saving_per_day` | Snitt per dygn, senaste 30 dagarna |
+| `sensor.hemopt_battery_planned` | Planerad batterieffekt nu (+ laddar, − till huset) |
+| `sensor.hemopt_ev_planned` | Planerad laddeffekt för elbilen nu (− vid V2H) |
 | `number.hemopt_priority_<rum>` | Rummets prioritet: 1 håll, 2 normal, 3 flexibel |
 
 Dashboardvyn ligger i `../dashboards/kostnadsoptimering.yaml`.

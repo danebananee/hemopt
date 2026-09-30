@@ -153,13 +153,17 @@ class DemoEngine(Engine):
         outdoor = self._outdoor_at(moment)
         states: dict[str, str] = {"sensor.demo_outdoor": f"{outdoor:.1f}"}
 
+        # Rooms added in the setup guide start mid-band.
+        for room in self.config.rooms:
+            self._temperatures.setdefault(room.key, (room.comfort_min + room.comfort_max) / 2.0)
+
         pump_kw = 0.0
         if self.plan is not None:
             index = self.plan.step_at(moment)
             pump_kw = self.plan.heat_pump_kw[index]
             for room_plan in self.plan.rooms:
                 target = room_plan.temperature[index]
-                current = self._temperatures[room_plan.key]
+                current = self._temperatures.get(room_plan.key, target)
                 # Track the plan with a lag so the chart shows the house
                 # responding rather than teleporting to the setpoint.
                 self._temperatures[room_plan.key] = current + 0.35 * (target - current)
@@ -252,6 +256,10 @@ class DemoEngine(Engine):
 
     async def fetch_weather_history(self, start: datetime) -> dict[str, list[StatePoint]]:
         return {}
+
+    async def refresh_fuse(self):
+        """The demo has no phase currents; keep the empty report."""
+        return self.fuse
 
     async def backfill_power_history(self, days: int = 400) -> int:
         """The demo has no Home Assistant to fill history from."""

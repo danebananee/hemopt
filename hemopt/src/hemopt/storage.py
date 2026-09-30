@@ -15,6 +15,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
+from .fuse import PhaseHour
 from .hotwater import UsageProfile
 from .shadow import LedgerStep
 from .thermal import ThermalModel
@@ -66,6 +67,15 @@ CREATE TABLE IF NOT EXISTS plans (
     created_at TEXT PRIMARY KEY,
     payload    TEXT NOT NULL
 );
+
+-- Highest and average current per phase and hour, for the fuse check.
+CREATE TABLE IF NOT EXISTS phase_hours (
+    ts     INTEGER NOT NULL,
+    phase  INTEGER NOT NULL,
+    max_a  REAL NOT NULL,
+    mean_a REAL NOT NULL,
+    PRIMARY KEY (ts, phase)
+) WITHOUT ROWID;
 
 -- One row per planning step: the shadow ledger behind the savings estimate.
 CREATE TABLE IF NOT EXISTS shadow_steps (
@@ -353,6 +363,30 @@ class Store:
             cursor.execute("SELECT payload FROM plans ORDER BY created_at DESC LIMIT 1")
             row = cursor.fetchone()
         return json.loads(row["payload"]) if row else None
+
+    # --- phase currents -------------------------------------------------
+    def record_phase_hours(self, rows: Iterable[PhaseHour]) -> int:
+        payload = [
+            (_to_ts(row.hour_start), row.phase, float(row.max_a), float(row.mean_a)) for row in rows
+        ]
+        with self._cursor() as cursor:
+            cursor.executemany(
+                "INSERT OR REPLACE INTO phase_hours (ts, phase, max_a, mean_a) VALUES (?, ?, ?, ?)",
+                payload,
+            )
+        return len(payload)
+
+    def phase_hours(self, since: datetime, tz: timezone | None = None) -> list[PhaseHour]:
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT ts, phase, max_a, mean_a FROM phase_hours WHERE ts >= ? ORDER BY ts",
+                (_to_ts(since),),
+            )
+            rows = cursor.fetchall()
+        return [
+            PhaseHour(_from_ts(row["ts"], tz), row["phase"], row["max_a"], row["mean_a"])
+            for row in rows
+        ]
 
     # --- shadow ledger --------------------------------------------------
     def has_shadow_step(self, start: datetime) -> bool:

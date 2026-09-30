@@ -79,6 +79,26 @@ def wind_to_ms(value: float, unit: object) -> float:
     return value
 
 
+def parse_statistics_rows(
+    result: dict, statistic_id: str, types: tuple[str, ...]
+) -> list[tuple[datetime, dict[str, float]]]:
+    """(hour start, {type: value}) rows from a statistics_during_period result."""
+    rows: list[tuple[datetime, dict[str, float]]] = []
+    for row in result.get(statistic_id, []) or []:
+        start = row.get("start")
+        if start is None:
+            continue
+        values = {name: float(row[name]) for name in types if row.get(name) is not None}
+        if not values:
+            continue
+        if isinstance(start, (int, float)):
+            moment = datetime.fromtimestamp(start / 1000.0, tz=UTC)
+        else:
+            moment = datetime.fromisoformat(str(start))
+        rows.append((moment, values))
+    return rows
+
+
 def parse_statistics(result: dict, statistic_id: str) -> list[tuple[datetime, float]]:
     """(hour start, mean kW) rows from a statistics_during_period result.
 
@@ -392,7 +412,22 @@ class HomeAssistantClient:
     async def hourly_statistics(
         self, statistic_id: str, start: datetime, end: datetime | None = None
     ) -> list[tuple[datetime, float]]:
-        """Hourly mean from Home Assistant's long-term statistics, in kW.
+        """Hourly mean power from Home Assistant's long-term statistics, in kW."""
+        rows = await self.statistics(
+            statistic_id, start, end, types=("mean",), units={"power": "kW"}
+        )
+        return [(moment, values["mean"]) for moment, values in rows if "mean" in values]
+
+    async def statistics(
+        self,
+        statistic_id: str,
+        start: datetime,
+        end: datetime | None = None,
+        *,
+        types: tuple[str, ...] = ("mean",),
+        units: dict[str, str] | None = None,
+    ) -> list[tuple[datetime, dict[str, float]]]:
+        """Hourly values from Home Assistant's long-term statistics.
 
         Home Assistant keeps raw history for about ten days but hourly
         statistics for as long as the database lives, and only offers them
@@ -405,15 +440,16 @@ class HomeAssistantClient:
             _LOGGER.warning("websockets is not installed; long-term statistics unavailable")
             return []
 
-        request = {
+        request: dict[str, object] = {
             "id": 1,
             "type": "recorder/statistics_during_period",
             "start_time": start.isoformat(),
             "statistic_ids": [statistic_id],
             "period": "hour",
-            "types": ["mean"],
-            "units": {"power": "kW"},
+            "types": list(types),
         }
+        if units:
+            request["units"] = units
         if end is not None:
             request["end_time"] = end.isoformat()
         try:
@@ -437,7 +473,7 @@ class HomeAssistantClient:
         if not message.get("success"):
             _LOGGER.warning("statistics request failed: %s", message.get("error"))
             return []
-        return parse_statistics(message.get("result") or {}, statistic_id)
+        return parse_statistics_rows(message.get("result") or {}, statistic_id, types)
 
     async def call_service(self, domain: str, service: str, data: dict | None = None) -> None:
         response = await self._http.post(

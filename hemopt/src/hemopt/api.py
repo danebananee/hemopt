@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -93,9 +94,10 @@ async def _adopt_meter_if_missing(engine: Engine) -> None:
 
 async def _bootstrap(engine: Engine) -> None:
     """Get a plan on screen before the periodic loops take over."""
+    lk_house = os.environ.get("HEMOPT_ADDON") != "1" or os.environ.get("HEMOPT_LK") == "1"
     try:
         async with HomeAssistantClient(engine.config.home_assistant, engine._ha_http) as ha:
-            if await ha.ping():
+            if lk_house and await ha.ping():
                 lk = await ha.ensure_lk_arc_climate()
                 _LOGGER.warning(
                     "LK Arc Climate check: ok=%s action=%s detail=%s sample=%s",
@@ -118,6 +120,10 @@ async def _bootstrap(engine: Engine) -> None:
         await engine.backfill_power_history()
     except Exception:  # noqa: BLE001
         _LOGGER.exception("consumption backfill failed")
+    try:
+        await engine.refresh_fuse()
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("fuse check failed")
     try:
         await engine.refresh_advice()
     except Exception:  # noqa: BLE001

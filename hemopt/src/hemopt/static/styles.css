@@ -1123,6 +1123,192 @@ table.data tr.current td {
   overflow-wrap: anywhere;
 }
 
+/* Welcome, fuse, storage -------------------------------------------------- */
+
+.welcome {
+  border-color: var(--cheap);
+  background: var(--cheap-soft);
+}
+
+.welcome p {
+  margin: 6px 0 14px;
+  max-width: 62ch;
+}
+
+.fuse-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.fuse-scale {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+
+.fuse-size {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 6px 10px;
+  min-width: 76px;
+  display: flex;
+  flex-direction: column;
+}
+
+.fuse-size small {
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+
+.fuse-size.good {
+  border-color: var(--good);
+}
+
+.fuse-size.warn {
+  border-color: var(--warn);
+}
+
+.fuse-size.bad {
+  border-color: var(--bad);
+}
+
+.fuse-size.current {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.storage-block + .storage-block {
+  margin-top: 18px;
+}
+
+.storage-block h3 {
+  margin-bottom: 2px;
+}
+
+/* Settings ---------------------------------------------------------------- */
+
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.setup-section {
+  margin: 0;
+}
+
+.setup-section legend {
+  font-weight: 650;
+  font-size: 1.05rem;
+  padding: 0 6px;
+  margin-left: -6px;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  gap: 12px 18px;
+  margin-top: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.88rem;
+  min-width: 0;
+}
+
+.field[hidden] {
+  display: none;
+}
+
+.field > span {
+  color: var(--ink-2);
+}
+
+.field small {
+  color: var(--ink-3);
+  font-size: 0.78rem;
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+.field input[type="text"],
+.field input[type="number"],
+.field input[type="time"],
+.field select,
+.room-edit-head input {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--surface);
+  min-width: 0;
+  width: 100%;
+}
+
+.field.check {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.field.check > span {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.field.check small {
+  flex-basis: 100%;
+}
+
+.row-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+
+.room-edit {
+  border-top: 1px solid var(--line-2);
+  padding: 12px 0;
+}
+
+.room-edit-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.room-edit-head input {
+  font-weight: 600;
+  max-width: 320px;
+}
+
+.btn.small {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--paper);
+  padding: 12px 0;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+}
+
 /* Footer ------------------------------------------------------------------ */
 
 .foot {

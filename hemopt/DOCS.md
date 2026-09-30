@@ -1,249 +1,139 @@
 # Kostnadsoptimering (hemopt)
 
-Flyttar uppvärmning och varmvatten till billiga timmar, kapar effekttoppar och
-jämför löpande vad de olika elavtalen skulle ha kostat dig.
+Värmer huset och varmvattnet när elen är billig, laddar elbil och husbatteri
+på rätt timmar, håller nere effekttopparna och räknar ut vad du sparar. Du
+ställer in allt med klick i panelen; ingen YAML behövs.
 
-Menyvägarna nedan står på engelska, eftersom Home Assistant är på engelska.
-
-## Innan du börjar
-
-Du behöver **Mosquitto broker**. Har du redan H66 på MQTT så har du den.
-Annars: **Settings → Add-ons → Add-on Store**, sök *Mosquitto broker*,
-**Install**, **Start**. Gå sedan till **Settings → Devices & Services** och
-bekräfta MQTT-integrationen som dyker upp under *Discovered*.
+Menyvägarna nedan står på engelska, eftersom Home Assistant oftast är det.
 
 ## Installera
-
-### A. Från GitHub (rekommenderat)
-
-Repot måste vara **publikt**, eftersom Home Assistant klonar det anonymt. I
-gengäld dyker nya versioner upp som en **Update**-knapp på tilläggets sida.
 
 1. **Settings → Add-ons → Add-on Store**
 2. Trepunktsmenyn uppe till höger → **Repositories**
 3. Klistra in `https://github.com/danebananee/hemopt`, **Add**, **Close**
-4. Ladda om sidan. Under rubriken med repots namn finns
-   **Kostnadsoptimering (hemopt)**
+4. Ladda om sidan och välj **Kostnadsoptimering (hemopt)** → **Install**.
+   Första installationen tar några minuter på en Raspberry Pi.
+5. Fliken **Info**: slå på **Start on boot**, **Watchdog** och
+   **Show in sidebar**, tryck **Start**.
+6. Öppna **Kostnadsoptimering** i vänstermenyn.
 
-Home Assistant bygger avbilden på din Raspberry Pi första gången, vilket tar
-några minuter. Det är normalt att **Install** står och snurrar under tiden.
+Har du **Mosquitto broker** installerad (Add-on Store → Mosquitto broker) dyker
+hemopts sensorer och knappar upp i Home Assistant av sig själva. Det behövs
+inte för att panelen ska fungera.
 
-### B. Lokalt tillägg
+## Kom igång
 
-Går utan GitHub, men då finns ingen **Update**-knapp.
+Första gången visar panelen **Välkommen till hemopt** och en knapp,
+**Kom igång**. Den öppnar fliken **Inställningar**, där hemopt redan har letat
+igenom Home Assistant och fyllt i det den hittat:
 
-Home Assistant letar efter tillägg i `/addons/<namn>/config.yaml`. Lägg mappen
-`hemopt/` där, alltså som `/addons/hemopt/`, så dyker det upp av sig självt.
+- **Grundläggande**: elområde, elavtal och huvudsäkring (står på fakturorna).
+- **Rum**: ett rum per termostat, med temperaturgivaren som hör till. Tryck
+  **Hämta termostater från Home Assistant** om listan är tom. Ge rummen bra
+  namn och välj prioritet: *Håll* rubbas aldrig, *Flexibel* får svaja mest.
+- **Värmepump och varmvatten**: utetemperatur behövs, resten är valfritt.
+- **Elmätare och väder**: en mätare på elmätarens P1-port (HomeWizard,
+  Tibber Pulse …) ger förbrukning, effekttoppar och säkringskoll. Väder ger
+  bättre förvärmning och räknar med solen.
+- **Husbatteri** och **Elbil**: kryssa i om du har, se nedan.
+- **Braskamin**: bara namnet; resten lär sig hemopt.
 
-Filerna får du dit med **Samba share** eller **Studio Code Server**, båda finns
-i Add-on Store. Kopiera hela `hemopt/`-mappen, inte repots rot.
+Tryck **Spara inställningarna**. hemopt börjar planera direkt. Listan överst
+visar vad som är klart och vad som saknas.
 
-Gå sedan till **Settings → Add-ons → Add-on Store**, tryck trepunktsmenyn och
-**Check for updates**. Tillägget hamnar under **Local add-ons**. Uppdatering
-görs genom att kopiera in mappen igen och trycka **Rebuild**.
+Allt kan ändras senare under **Inställningar**. Det du sparar där gäller före
+tilläggets **Configuration**-flik.
 
-### Sedan, oavsett väg
+## Styr eller bara titta
 
-5. **Install**
-6. Fliken **Configuration**: välj elområde, avräkning, effektregler, elmätare
-   och MQTT (`core-mosquitto` + eventuellt user/lösen), tryck **Save**
-7. Fliken **Info**: slå på **Start on boot**, **Watchdog** och
-   **Show in sidebar**, tryck **Start**
-   (eller **Rebuild** efter uppdatering)
-8. Öppna **Kostnadsoptimering** i vänstermenyn
+hemopt styr ingenting förrän du slår på **Styr värmen** högst upp i panelen.
+Låt den gå en vecka eller två först. Under tiden:
 
-Ingen Info-toggle för API — `homeassistant_api` ges automatiskt. Om Loggen
-visar `SUPERVISOR_TOKEN length=0` behövs en long-lived **HA-token** under
-Configuration. MQTT-lösen behövs bara om Mosquitto kräver inloggning och
-Supervisorn inte lämnat över broker-uppgifter.
+- lär sig modellen hur varje rum reagerar på värme, sol, blåst och brasa,
+- räknar fliken **Besparing** ut vad du hade sparat med kvartspris och styrning
+  jämfört med ditt nuvarande avtal,
+- kan du jämföra planen med hur huset faktiskt beter sig.
 
-## Vad tillägget redan vet
+När du slår på styrningen skriver hemopt börvärden till termostaterna, till
+varmvattnet, till batteriet och till laddboxen.
 
-| Sak | Varifrån |
+## Husbatteri
+
+hemopt laddar batteriet när elen är billig och låter huset använda det när elen
+är dyr eller när en effekttopp hotar. Det säljer aldrig el till nätet.
+
+Batteriet styrs via **en** entitet med ett effektbörvärde: plus laddar, minus
+laddar ur, i watt eller kilowatt. Många batteriintegrationer har en sådan,
+annars går det att göra med en hjälpare och en automation. Anger du också
+batteriets **laddnivå** blir planen exakt; utan den antas halvfullt.
+
+## Elbil och V2H
+
+Ange avgångstid och hur full bilen ska vara. hemopt laddar på de billigaste
+timmarna fram till dess och ser till att bilen är klar i tid.
+
+- **Laddboxens styrning** är helst laddboxens strömgräns i ampere (Easee,
+  Zaptec, Wallbox …). En vanlig på/av-knapp fungerar också.
+- **Kabel i** gör att hemopt vet när bilen står hemma. Utan den antas bilen
+  stå hemma från 17 till avgångstiden.
+- **Bilens laddnivå** från bilens integration gör planen exakt.
+
+**V2H** (bilen driver huset) kräver en dubbelriktad laddbox. Kryssa i
+*Bilen får driva huset* och ange hur mycket laddning som alltid ska lämnas
+kvar.
+
+## Huvudsäkring
+
+Under **Besparing → Huvudsäkring** bedömer hemopt om säkringen har rätt storlek
+utifrån strömmen per fas som elmätaren mäter: om du skulle klara dig med en
+mindre (billigare abonnemang), om marginalen är liten, eller om säkringen är
+för liten. Tillfällen när strömmen var nära gränsen listas med datum och fas.
+
+Rådet blir säkrare med tiden. Det kräver minst två veckors mätning och är
+bäst när en kall period har passerat. Byte av säkring beställs hos nätbolaget.
+
+## Braskamin
+
+Tryck **Jag har tänt brasan** under **Rum och värme** när du eldar (eller slå
+på `switch.hemopt_wood_stove_lit` i Home Assistant) och **Brasan har slocknat**
+när den brunnit ut. Efter några kvällar vet hemopt hur mycket brasan värmer
+varje rum, känner själv igen en tänd brasa och tipsar om när det lönar sig
+att elda. Har du en givare vid kaminen kan den anges i Inställningar.
+
+## Sensorer i Home Assistant
+
+Med MQTT får du bland annat:
+
+| Entitet | Vad |
 | --- | --- |
-| Home Assistant-API | `SUPERVISOR_TOKEN`, ges av Supervisorn (annars HA-token) |
-| MQTT-broker | Supervisorns tjänste-API, annars Configuration (`mqtt_host` …) |
-| Lagring | `/data`, överlever uppdateringar |
-
-## Vad som styrs (inte bara rum)
-
-Optimeraren planerar **värmepumpens effekt**, **varmvattenladdning** efter
-inlärt användningsmönster, och **rummens börvärden**. Styrningen går via
-Home Assistant-entiteter (climate / number) — ofta MQTT→H66 under huven.
-Slå på **Styr värmen** i panelen för att skriva börvärden; annars syns bara
-planen. Under **Vad som styrs** syns vilka entiteter som är kopplade.
-
-### LK Arc-rum (golvvärme)
-
-LK Systems ger oftast bara **Sensors**. Från hemopt **0.1.20** installeras
-**LK Arc Climate** automatiskt i `/config/custom_components/` när tillägget
-startar. Från **0.1.25** skapas även config entry automatiskt efter
-**Restart Home Assistant** — Golvvärme ska då visa termostater (inte
-Entity not found). Från **0.1.31** auto-rättas `climate.<mac>` i yaml till
-`climate.<mac>_thermostat` om den senare finns.
-
-1. **Update** / **Restart** hemopt → kolla **Log** (`LK Arc Climate installerad`)
-2. **Settings → System → ⋮ → Restart Home Assistant** (en gång)
-3. Kolla Logs: `LK Arc Climate check:` / `climate.*_thermostat`
-4. **Developer tools → States**: sök `climate.` / `_thermostat`
-5. Matcha `climate_entity` i `/config/hemopt.yaml`, restart hemopt
-
-Styr **`climate.*_thermostat`**, inte `sensor.hemopt_setpoint_*` (det är bara
-planen). MQTT-varning om `object_id` betyder äldre hemopt än 0.1.22 — Update.
-
-Reserv om automatiken missar:
-**Settings → Devices & services → Add integration → LK Arc Climate**
-
-Utförlig guide:
-[../custom_components/lk_arc_climate/README.md](../custom_components/lk_arc_climate/README.md).
-
-## Inställningar (Configuration)
-
-Effektregler, elmätare, elområde och MQTT sätts här — inte i dashboarden.
-Rumsprioritet kan justeras i panelen.
-
-| Val | Betyder |
-| --- | --- |
-| **Price area** | Ditt elområde, SE1–SE4 |
-| **Contract settlement** | Hur spotavtalet avräknas: dygn, timme eller kvart |
-| **Log level** | Höj till `debug` om något beter sig konstigt |
-| **Minimera effekttoppar** | Om optimeraren ska hålla nere debiterbara toppar |
-| **Antal toppar / pris / fönster** | Enligt ditt elnätsavtal |
-| **Elmätare (entitets-id)** | T.ex. `sensor.p1_meter_power` |
-| **MQTT-host / port / user / lösen** | Normalt `core-mosquitto`. Används om Supervisorn inte ger broker |
-| **HA-token / HA-URL** | Bara om Loggen visar `SUPERVISOR_TOKEN length=0` |
-
-Rum, värmepump (`heat_pump`) och varmvatten (`hot_water`, inkl.
-`setpoint_entity` för tankbörvärde) läggs i `/homeassistant/hemopt.yaml`
-(bredvid `configuration.yaml`). Börja från `config.exempel.yaml` i repot.
-Månader med effektavgift styrs också där under `peak_tariff.window.months`.
-
-Efter ändring i Configuration: **Save**, sedan **Restart** (eller Rebuild).
-
-## Home Assistant-API (viktigt)
-
-Tillägget ska få `SUPERVISOR_TOKEN` automatiskt (`homeassistant_api: true`).
-Om Loggen visar **`SUPERVISOR_TOKEN length=0`** och **HTTP 401**:
-
-1. **Snabbast:** Skapa en *Long-lived access token* under din HA-profil →
-   Säkerhet, klistra in under **Configuration → HA-token**, låt HA-URL vara
-   `http://homeassistant:8123`, **Save**, **Restart**.
-2. **Alternativ:** Avinstallera tillägget och installera om från GitHub-repot
-   (data i `/data` behålls om du inte tar bort den), så Supervisorn ger en
-   riktig token.
-
-Utan token blir HA, väder och MQTT röda och ingen historik laddas — det hjälper
-inte att vänta.
-
-## Elmätare
-
-Ange under **Configuration → Elmätare**. HomeWizard P1 heter oftast
-`sensor.p1_meter_active_power`. Panelen visar bara vilken entitet som gäller.
-
-## Elpris i panelen
-
-Panelen visar **aktuellt spotpris** och en graf för **igår / idag / imorgon**.
-Spotpriset hämtas från elprisetjustnu.se och kräver inte Home Assistant.
-
-## Effekttoppar och elavtal
-
-**Effektregler** i panelen är skrivskyddad status. Ändra under Configuration.
-**Effekttoppar denna månad** visar tröskel, pågående timme och historik.
-## En fil att konfigurera
-
-All husbeskrivning samlas i **`/homeassistant/hemopt.yaml`**.
-
-1. Kopiera `hemopt/hemopt.init.yaml` från GitHub-repot
-2. Klistra in som `/homeassistant/hemopt.yaml` (File editor / Samba)
-3. Fyll i rader märkta KONTROLLERA
-4. **Restart** tillägget
-
-| Var | Vad |
-| --- | --- |
-| **Configuration** (tillägget) | Elområde, avräkning, påslag/skatt/överföring, effektavgift, elmätare, MQTT, HA-token |
-| **hemopt.yaml** | Rum, VP, varmvatten, braskamin, säkringsabonnemang, detaljerade nätpriser |
-
-Under **Vad gör modellen** i panelen (och `sensor.hemopt_model_action` i HA)
-syns meningar som «Laddar varmvatten inför dyrare period». Texterna är skrivna
-för slutkund (svenska med kommatecken) och varnar om elpriset snart sjunker.
-
-**Besparingsåtgärder** föreslår byte av avräkning och eventuell sänkning av
-huvudsäkring (25 → 20 → 16 A) när det finns tillräckligt med mätdata — annars
-står det att mer data behövs, och om du redan ligger rätt syns det tydligt.
-**Användning och besparing** ritars när elmätaren ger data. **Jämför elavtal**
-visar varje avräkningsform (månad / dygn / timme / kvart) både **utan** och
-**med** lastflytt, och hur mycket det skiljer mot ditt nuvarande avtal
-(behöver minst ett par dygns mätdata).
-
-## Innan du litar på styrningen
-
-Tillägget styr ingenting förrän du slår på **Styr värmen** i panelen. Låt det
-gå några dygn först. Rummens tröghet lärs in från historik (ungefär en vecka)
-**även med styrningen av** — träningen läser Home Assistants recorder, inte
-aktuella börvärdesskrivningar. Slå på styrningen först när Log/doctor visar
-att climate-entiteterna finns och planen ser vettig ut.
-
-**Braskamin** (valfritt): lägg `wood_stove` i `hemopt.yaml` med en
-temperaturgivare eller binary-sensor och `room_keys` för rummen som känner
-värmen. hemopt detekterar när brasan är tänd, lär K/h-bidrag + VP-ekvivalent
-per rum (så trögheten inte blandas ihop med golvvärmen) och föreslår dyra
-kalla fönster att tända i. Tillägget tänder aldrig själv.
-
-## Loop-mapping (tillfällig diagnostik)
-
-Misstänker du att golvvärmeslingor är kopplade till fel LK Arc-termostat?
-hemopt kan **passivt** korrelera varje rums värmeanrop (börvärde − inne)
-mot fördröjd temperaturstegring i alla rum, utifrån recorder-historik.
-
-```bash
-# i tillägget / lokalt med HA-token
-hemopt loop-mapping
-# eller GET /api/loop-mapping
-```
-
-Resultatet flaggar `suspect_swap` när termostat A värmer rum B tydligt mer
-än A. Föreslagna byten rör **bara** `climate_entity` i profilen (inte den
-fysiska ventilen). Bekräfta i fördelarskåpet innan du litar på det.
-
-```bash
-# valfritt: skriv bytena till profile.json
-curl -X POST …/api/loop-mapping/apply -d '{"confirm":true}'
-```
-
-Det här är **inte** del av styrningen och kan tas bort senare
-(`loop_mapping.py` + API/CLI-hooks). Låt styrningen vara av medan data
-samlas — ju mer börvärdena skiljer sig mellan rummen, desto tydligare
-blir matrisen.
-
-## Användning och besparing (panelen)
-
-Kortet visar **uppmätt** förbrukning (timmedel från elmätaren) med valbar
-period och skala. Siffrorna under grafen är förbrukning totalt (kWh), snitt per
-dygn, högsta timme (kW — det är den som debiteras) och besparingen i den
-aktuella planen.
-
-**kW** är effekt (hur snabbt el dras just då). **kWh** är energi (hur mycket
-som gått åt). Effektavgiften räknas på **timmedel i kW**, inte på en kort topp.
-
-**Plan för kommande dygnet** är alltid framåt i tiden — historik finns bara i
-kortet ovan. «Besparing i planen» gäller planens horisont (36 h), inte hela
-tiden sedan installation.
+| `sensor.hemopt_saving_today` / `_month` / `_per_day` | Vad kvartspris och styrning hade sparat |
+| `sensor.hemopt_model_action` | Vad hemopt gör just nu, i klartext |
+| `switch.hemopt_control_enabled` | Styr värmen på/av |
+| `switch.hemopt_wood_stove_lit` | Markera att brasan brinner |
+| `sensor.hemopt_battery_planned` / `ev_planned` | Planerad effekt för batteri och bil |
+| `number.hemopt_priority_<rum>` | Rummets prioritet 1–3 |
 
 ## Felsök
 
-Det finns **ingen** Info-toggle «Allow Home Assistant API». Tillägget har
-`homeassistant_api: true` i manifestet, så Supervisorn ska ge
-`SUPERVISOR_TOKEN` automatiskt.
-
 | Symptom | Att göra |
 | --- | --- |
-| Home Assistant / väder / MQTT röda | Öppna **Log**. Om `SUPERVISOR_TOKEN length=0`: sätt **HA-token** under Configuration (se ovan) eller installera om tillägget. Behöver `HA API ping HTTP 200`. |
-| Token length 0 | Supervisorn gav ingen token. Använd long-lived token-fallback eller reinstallera. |
-| Minimera toppar av i Configuration men På i panelen | Bug i äldre version: `false` ignorerades. Uppdatera till **0.1.6+**, spara om Configuration, **Restart**. |
-| MQTT «Not authorized» / röd | Sätt **MQTT-host** `core-mosquitto` + user/lösen under Configuration (0.1.12+). Från 0.1.8 stängs yaml-MQTT av i add-on tills broker finns. |
-| Ingen elmätare | Sätt entitets-id under Configuration. |
-| Ingen plan / inga rum | Skapa `/homeassistant/hemopt.yaml` från exemplet. |
-| Spotpris saknas | Nätverk utåt till elprisetjustnu.se; kolla Log. |
+| Panelen fastnar på «Läser in…» | Ladda om sidan med **Ctrl+Shift+R** (mobil: dra ned). |
+| Home Assistant, väder eller MQTT är röda under **System** | Öppna tilläggets **Log**. Står det `SUPERVISOR_TOKEN length=0`, se nedan. |
+| Inga rum hittas | Kontrollera att termostaterna syns under **Settings → Devices & services**. Rum kan också läggas till för hand med **Lägg till rum**. |
+| Ingen elmätare | Välj den under **Inställningar → Elmätare och väder**. |
+| Spotpris saknas | Tillägget behöver nå elprisetjustnu.se; se **Log**. |
 
-Loggen ligger på tilläggets **Log**-flik. Entitets-ID:n under
-**Developer tools → States**.
+**Om Loggen visar `SUPERVISOR_TOKEN length=0`:** skapa en *Long-lived access
+token* under din profil i Home Assistant (längst ned under *Security*), klistra
+in den under tilläggets **Configuration → HA-token**, **Save**, **Restart**.
+
+## För den som vill veta mer
+
+- Inställningarna sparas i tilläggets `/data/profile.json`. En handskriven
+  `/homeassistant/hemopt.yaml` används om den är nyare. Mallen finns som
+  `config.exempel.yaml` i repot.
+- Har huset LK Systems golvvärme installerar tillägget LK Arc Climate så att
+  varje rum får en termostat. Det görs bara om LK Systems-integrationen finns.
+- Hur modellen och besparingskalkylen fungerar beskrivs i `README.md`.
+- `GET /api/loop-mapping` är en tillfällig diagnostik för golvvärmeslingor
+  som misstänks vara kopplade till fel termostat. Den rör aldrig styrningen.

@@ -37,6 +37,9 @@ TERMINAL_CREDIT_SHARE = 0.95
 # setback or pre-heat) is than one merely outside the comfort band.
 OUTER_BAND_PENALTY = 10.0
 
+# SEK per kWh the car is short of its target at departure.
+EV_SHORTFALL_SEK_PER_KWH = 20.0
+
 
 @dataclass(slots=True)
 class RoomInput:
@@ -67,6 +70,44 @@ class HotWaterInput:
     # keeps the requirement a single linear constraint instead of an
     # "at least one step in this window" disjunction.
     legionella_step: int | None = None
+
+
+@dataclass(slots=True)
+class BatteryInput:
+    """A home battery: energy in kWh, power in kW, efficiencies one-way."""
+
+    capacity_kwh: float
+    max_charge_kw: float
+    max_discharge_kw: float
+    efficiency_in: float
+    efficiency_out: float
+    min_kwh: float
+    max_kwh: float
+    initial_kwh: float
+    wear_sek_per_kwh: float = 0.25
+
+
+@dataclass(slots=True)
+class EVInput:
+    """An electric car while it is plugged in.
+
+    `available` says per step whether the car is at the charger. By
+    `deadline_step` (the step that ends at departure) it must hold
+    `target_kwh`. With V2H it may also feed the house, never below
+    `v2h_min_kwh`.
+    """
+
+    capacity_kwh: float
+    max_charge_kw: float
+    charge_efficiency: float
+    initial_kwh: float
+    available: list[bool]
+    target_kwh: float
+    deadline_step: int | None
+    v2h_max_kw: float = 0.0
+    v2h_min_kwh: float = 0.0
+    discharge_efficiency: float = 0.9
+    wear_sek_per_kwh: float = 0.25
 
 
 @dataclass(slots=True)
@@ -101,6 +142,8 @@ class OptimisationInput:
     # step. Missing means the planner assumes no sun and no wind.
     sun: list[float] | None = None
     wind_ms: list[float] | None = None
+    battery: BatteryInput | None = None
+    ev: EVInput | None = None
 
     def sun_at(self, index: int) -> float:
         return self.sun[index] if self.sun else 0.0
@@ -169,6 +212,12 @@ class Plan:
     solve_seconds: float = 0.0
     peak_threshold_kw: float = 0.0
     notes: list[str] = field(default_factory=list)
+    # Net power per step (positive charging) and state of charge after it.
+    battery_kw: list[float] = field(default_factory=list)
+    battery_soc_kwh: list[float] = field(default_factory=list)
+    ev_kw: list[float] = field(default_factory=list)
+    ev_soc_kwh: list[float] = field(default_factory=list)
+    ev_shortfall_kwh: float = 0.0
 
     @property
     def total_cost_sek(self) -> float:
@@ -386,11 +435,80 @@ def solve(problem: OptimisationInput) -> Plan:
             solver.addConstr(heat_thermal[index] <= heat_pump.max_thermal_kw * (1 - switch))
             solver.addConstr(dhw_charge[index] <= switch)
 
+    # --- Home battery -----------------------------------------------------
+    battery = problem.battery
+    bat_in: list = []
+    bat_out: list = []
+    bat_energy: list = []
+    if battery is not None:
+        bat_energy = [
+            solver.addVariable(lb=battery.min_kwh, ub=battery.max_kwh) for _ in range(steps + 1)
+        ]
+        solver.addConstr(
+            bat_energy[0] == min(max(battery.initial_kwh, battery.min_kwh), battery.max_kwh)
+        )
+        for index in range(steps):
+            charge = solver.addVariable(lb=0.0, ub=battery.max_charge_kw)
+            discharge = solver.addVariable(lb=0.0, ub=battery.max_discharge_kw)
+            solver.addConstr(
+                bat_energy[index + 1]
+                == bat_energy[index]
+                + dt * battery.efficiency_in * charge
+                - dt * discharge * (1.0 / battery.efficiency_out)
+            )
+            # Wear is paid per kWh taken out, so small spreads are left alone.
+            objective.append(battery.wear_sek_per_kwh * dt * discharge)
+            bat_in.append(charge)
+            bat_out.append(discharge)
+
+    # --- Electric car -------------------------------------------------------
+    ev = problem.ev
+    ev_in: list = []
+    ev_out: list = []
+    ev_energy: list = []
+    ev_short = None
+    if ev is not None:
+        ev_energy = [solver.addVariable(lb=0.0, ub=ev.capacity_kwh) for _ in range(steps + 1)]
+        solver.addConstr(ev_energy[0] == min(max(ev.initial_kwh, 0.0), ev.capacity_kwh))
+        floor = min(ev.v2h_min_kwh, ev.initial_kwh)
+        for index in range(steps):
+            here = ev.available[index] if index < len(ev.available) else False
+            charge = solver.addVariable(lb=0.0, ub=ev.max_charge_kw if here else 0.0)
+            discharge = solver.addVariable(lb=0.0, ub=ev.v2h_max_kw if here else 0.0)
+            solver.addConstr(
+                ev_energy[index + 1]
+                == ev_energy[index]
+                + dt * ev.charge_efficiency * charge
+                - dt * discharge * (1.0 / ev.discharge_efficiency)
+            )
+            if ev.v2h_max_kw > 0:
+                solver.addConstr(ev_energy[index + 1] >= floor)
+                objective.append(ev.wear_sek_per_kwh * dt * discharge)
+            ev_in.append(charge)
+            ev_out.append(discharge)
+        if ev.deadline_step is not None:
+            deadline = min(max(ev.deadline_step, 0), steps - 1)
+            ev_short = solver.addVariable(lb=0.0)
+            solver.addConstr(ev_energy[deadline + 1] >= ev.target_kwh - ev_short)
+            # Leaving with too little charge is far worse than any price.
+            objective.append(EV_SHORTFALL_SEK_PER_KWH * ev_short)
+
+    def storage_flow(index: int):
+        flow = 0.0
+        if bat_in:
+            flow = flow + bat_in[index] - bat_out[index]
+        if ev_in:
+            flow = flow + ev_in[index] - ev_out[index]
+        return flow
+
     # --- Grid limits and peak tariff -------------------------------------
     total_power = []
     for index in range(steps):
+        # Batteries only serve the house: nothing is exported to the grid.
         total = solver.addVariable(lb=0.0, ub=problem.fuse_limit_kw)
-        solver.addConstr(total == hp_power[index] + problem.base_load_kw[index])
+        solver.addConstr(
+            total == hp_power[index] + problem.base_load_kw[index] + storage_flow(index)
+        )
         total_power.append(total)
 
     groups = _hour_groups(problem.times)
@@ -420,7 +538,9 @@ def solve(problem: OptimisationInput) -> Plan:
 
     # --- Energy cost ------------------------------------------------------
     for index in range(steps):
-        objective.append(problem.price_sek_per_kwh[index] * dt * hp_power[index])
+        objective.append(
+            problem.price_sek_per_kwh[index] * dt * (hp_power[index] + storage_flow(index))
+        )
 
     # --- Terminal value of stored heat -----------------------------------
     # Without this the plan empties every buffer at the horizon edge. Stored
@@ -447,6 +567,16 @@ def solve(problem: OptimisationInput) -> Plan:
         stored = room.nominal_heat_kw * room.model.stored_heat_hours()
         if stored > 0:
             objective.append(-heat_value * stored * room_slab[position][steps])
+
+    # Energy left in the batteries is worth what it would cost to put back
+    # at the cheapest price, a little less, so it is never bought for itself.
+    cheapest_price = min(problem.price_sek_per_kwh)
+    if bat_energy:
+        objective.append(
+            -TERMINAL_CREDIT_SHARE * cheapest_price * battery.efficiency_out * bat_energy[steps]
+        )
+    if ev_energy:
+        objective.append(-TERMINAL_CREDIT_SHARE * cheapest_price * ev_energy[steps])
 
     if tank_energy:
         tank_value = TERMINAL_CREDIT_SHARE * min(
@@ -506,6 +636,10 @@ def solve(problem: OptimisationInput) -> Plan:
 
     hp_kw = [round(value_of(v), 3) for v in hp_power]
     total_kw = [round(value_of(v), 3) for v in total_power]
+    battery_kw = [round(value_of(a) - value_of(b), 3) for a, b in zip(bat_in, bat_out, strict=True)]
+    battery_soc = [round(value_of(v), 3) for v in bat_energy[1:]]
+    ev_kw = [round(value_of(a) - value_of(b), 3) for a, b in zip(ev_in, ev_out, strict=True)]
+    ev_soc = [round(value_of(v), 3) for v in ev_energy[1:]]
 
     hour_peaks: list[HourPeak] = []
     for hour_start, indices in sorted(groups.items()):
@@ -522,7 +656,12 @@ def solve(problem: OptimisationInput) -> Plan:
             )
         )
 
-    energy_cost = sum(problem.price_sek_per_kwh[i] * dt * hp_kw[i] for i in range(steps))
+    energy_cost = sum(
+        problem.price_sek_per_kwh[i]
+        * dt
+        * (hp_kw[i] + (battery_kw[i] if battery_kw else 0.0) + (ev_kw[i] if ev_kw else 0.0))
+        for i in range(steps)
+    )
     peak_cost = sum(peak.marginal_sek_per_kw * value_of(excess) for excess in daily_excess.values())
     comfort_penalty = 0.0
     for position, room in enumerate(problem.rooms):
@@ -552,6 +691,11 @@ def solve(problem: OptimisationInput) -> Plan:
         status=status_name,
         solve_seconds=round(time.monotonic() - started, 3),
         peak_threshold_kw=peak.threshold_kw,
+        battery_kw=battery_kw,
+        battery_soc_kwh=battery_soc,
+        ev_kw=ev_kw,
+        ev_soc_kwh=ev_soc,
+        ev_shortfall_kwh=round(value_of(ev_short), 3) if ev_short is not None else 0.0,
     )
 
 
@@ -589,14 +733,21 @@ def solve_baseline(problem: OptimisationInput) -> Plan:
         move_penalty_sek=problem.move_penalty_sek,
         sun=problem.sun,
         wind_ms=problem.wind_ms,
+        battery=problem.battery,
+        ev=problem.ev,
     )
     plan = solve(baseline)
 
     # Re-price the unoptimised schedule with the real tariff.
     dt = problem.step_hours
+    flows = [
+        kw
+        + (plan.battery_kw[i] if plan.battery_kw else 0.0)
+        + (plan.ev_kw[i] if plan.ev_kw else 0.0)
+        for i, kw in enumerate(plan.heat_pump_kw)
+    ]
     energy = sum(
-        price * dt * kw
-        for price, kw in zip(problem.price_sek_per_kwh, plan.heat_pump_kw, strict=True)
+        price * dt * kw for price, kw in zip(problem.price_sek_per_kwh, flows, strict=True)
     )
     worst_by_day: dict[datetime, float] = {}
     for hour in plan.hour_peaks:

@@ -217,6 +217,16 @@ class MqttBridge:
             ),
             ("saving_month_control", "Varav styrning, månad", _money("mdi:robot-outline")),
             ("saving_per_day", "Hade sparat per dygn (30 d)", _money("mdi:calendar-today")),
+            (
+                "battery_planned",
+                "Husbatteri planerat",
+                {"unit_of_measurement": "kW", "device_class": "power", "icon": "mdi:home-battery"},
+            ),
+            (
+                "ev_planned",
+                "Elbil planerat",
+                {"unit_of_measurement": "kW", "device_class": "power", "icon": "mdi:car-electric"},
+            ),
         ]
 
         for object_id, name, extra in sensors:
@@ -327,6 +337,29 @@ class MqttBridge:
                     "entity_category": "diagnostic",
                 },
             )
+
+    def reconfigure(self, config: Config) -> None:
+        """Announce the entities of a changed configuration.
+
+        Entities for rooms that no longer exist are removed from Home
+        Assistant by publishing an empty discovery message for them.
+        """
+        old_keys = {room.key for room in self._config.rooms}
+        self._config = config
+        new_keys = {room.key for room in config.rooms}
+        if self._client is not None:
+            for key in old_keys - new_keys:
+                for component, object_id in (
+                    ("number", f"priority_{key}"),
+                    ("sensor", f"setpoint_{key}"),
+                    ("sensor", f"inertia_{key}"),
+                ):
+                    topic = (
+                        f"{self._mqtt.discovery_prefix}/{component}/"
+                        f"{self._mqtt.node_id}/{object_id}/config"
+                    )
+                    self._client.publish(topic, "", retain=True)
+        self.publish_discovery()
 
     # --- state ----------------------------------------------------------
     def publish_state(self, payload: dict[str, Any]) -> None:

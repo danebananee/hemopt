@@ -36,6 +36,7 @@
         <button type="button" class="tab" data-tab="rooms" aria-selected="false">Rum och värme</button>
         <button type="button" class="tab" data-tab="energy" aria-selected="false">El och effekt</button>
         <button type="button" class="tab" data-tab="system" aria-selected="false">System</button>
+        <button type="button" class="tab" data-tab="setup" aria-selected="false">Inställningar</button>
       </nav>
     </header>
 
@@ -46,6 +47,15 @@
           <p class="now-line" id="summary-line">Läser in…</p>
           <p class="now-sub" id="summary-sub"></p>
         </div>
+
+        <article class="panel welcome" id="welcome-card" hidden>
+          <h2>Välkommen till hemopt</h2>
+          <p>
+            hemopt behöver veta vilka rum, givare och apparater huset har. Guiden hittar det mesta
+            själv i Home Assistant – du bekräftar bara.
+          </p>
+          <button type="button" class="btn" id="welcome-btn">Kom igång</button>
+        </article>
 
         <div class="figures" id="figures" aria-label="Nyckeltal"></div>
 
@@ -74,6 +84,21 @@
             </div>
           </header>
           <ol class="timeline" id="model-body"><li class="empty">Väntar på första planen…</li></ol>
+        </article>
+
+        <article class="panel" id="storage-card" hidden>
+          <header class="panel-head">
+            <div>
+              <h2>Batteri och elbil</h2>
+              <p class="muted" id="storage-sub">När de laddas och när de hjälper huset</p>
+            </div>
+            <div class="legend">
+              <span><i class="sw sw-good"></i>Laddar</span>
+              <span><i class="sw sw-heat"></i>Ger ström till huset</span>
+              <span><i class="sw sw-line"></i>Laddnivå</span>
+            </div>
+          </header>
+          <div id="storage-body"></div>
         </article>
 
         <article class="panel alert" id="error-card" hidden>
@@ -109,12 +134,23 @@
         <article class="panel">
           <header class="panel-head">
             <div>
-              <h2>Avtal och säkring</h2>
-              <p class="muted" id="advice-sub">Jämför elavtal och säkringsstorlek mot uppmätt förbrukning.</p>
+              <h2>Elavtal</h2>
+              <p class="muted" id="advice-sub">Vad din uppmätta förbrukning hade kostat med olika sorters elavtal.</p>
             </div>
             <button type="button" class="btn ghost" id="advice-btn">Räkna om</button>
           </header>
           <div id="advice-body"><p class="empty">Hämtar…</p></div>
+        </article>
+
+        <article class="panel" id="fuse-card">
+          <header class="panel-head">
+            <div>
+              <h2>Huvudsäkring</h2>
+              <p class="muted">Bedöms från strömmen per fas som elmätaren mäter.</p>
+            </div>
+            <button type="button" class="btn ghost" id="fuse-btn">Räkna om</button>
+          </header>
+          <div id="fuse-body"><p class="empty">Hämtar…</p></div>
         </article>
       </section>
 
@@ -235,6 +271,23 @@
             <dl class="facts" id="peak-settings"></dl>
           </article>
         </div>
+      </section>
+
+      <!-- Inställningar ----------------------------------------------------->
+      <section class="view" data-tab="setup" hidden>
+        <article class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Inställningar</h2>
+              <p class="muted">
+                hemopt har letat i Home Assistant och fyllt i det den hittat. Kontrollera, ändra om
+                något är fel och spara. Inget här kräver att du kan YAML.
+              </p>
+            </div>
+          </header>
+          <ul class="checklist" id="setup-checklist"></ul>
+        </article>
+        <form id="setup-form" class="setup" autocomplete="off"></form>
       </section>
     </main>
 

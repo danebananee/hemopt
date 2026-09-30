@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,7 +21,9 @@ from . import baseload
 from .advice import AdviceReport, build_advice, samples_from_hourly
 from .climate_ids import repair_room_climate_entities, resolve_climate_entity
 from .config import Config, clamp_priority
+from .discovery import discover
 from .explain import explain_plan, explain_upcoming, headline
+from .fuse import FuseReport, PhaseHour, assess, hours_from_samples
 from .guard import GuardDecision, PeakGuard
 from .ha import (
     HomeAssistantClient,
@@ -40,6 +43,8 @@ from .loop_mapping import (
 )
 from .mqtt_bridge import MqttBridge
 from .optimizer import (
+    BatteryInput,
+    EVInput,
     HotWaterInput,
     InfeasiblePlan,
     OptimisationInput,
@@ -56,6 +61,7 @@ from .shadow import (
     TwinOffset,
     call_for_heat,
     cold_degree_hours,
+    controllable_kwh,
     next_offset,
     reference_step,
     shifted_problem,
@@ -134,6 +140,7 @@ class Engine:
         self.guard = PeakGuard(config.ext_control)
         self.guard_decision = GuardDecision(False, "inte utvärderad ännu")
         self.advice = AdviceReport()
+        self.fuse = assess([], config.site.main_fuse_amps)
         self.wood_stove = WoodStoveReport()
         self._wood_stove_lit = False
         self._ext_state: dict[str, bool] = {}
@@ -254,6 +261,46 @@ class Engine:
             self.store.set_setting(f"priority_{room_key}", value)
             _LOGGER.info("priority for %s set to %d", room_key, value)
 
+    # --- setup -------------------------------------------------------------
+    async def discover(self) -> dict[str, Any]:
+        """Every Home Assistant entity hemopt could use, best guess first."""
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            diagnosis = await ha.diagnose()
+            if not diagnosis.get("ok"):
+                return {"online": False}
+            rows = await ha.states_full()
+        found = discover(rows, diagnosis)
+        payload = found.as_dict()
+        payload["online"] = True
+        return payload
+
+    def reconfigure(self, config: Config) -> None:
+        """Adopt a new configuration without a restart.
+
+        Rooms that were added get a model (a saved one if they had it before,
+        otherwise the prior for their floor), removed rooms are dropped, and
+        Home Assistant is told about the new set of entities.
+        """
+        config.save_profile()
+        self.config = config
+        self.tz = ZoneInfo(config.site.timezone)
+        self.guard = PeakGuard(config.ext_control)
+        self.base_load.fallback_kw = config.base_load.default_kw
+        models: dict[str, ThermalModel] = {}
+        for room in config.rooms:
+            models[room.key] = (
+                self.models.get(room.key)
+                or self.store.thermal_model(room.key)
+                or ThermalModel.default(room.resolved_floor_type)
+            )
+        self.models = models
+        self._slab = {key: value for key, value in self._slab.items() if key in models}
+        self.plan = None
+        self.baseline = None
+        if self._mqtt is not None:
+            self._mqtt.reconfigure(config)
+        self.store.set_setting("setup_saved", self._now().isoformat())
+
     # --- data collection --------------------------------------------------
     def _tracked_entities(self) -> list[str]:
         entities: list[str] = []
@@ -263,6 +310,14 @@ class Engine:
                 entities.append(room.humidity_entity)
             if room.climate_entity:
                 entities.append(room.climate_entity)
+        entities.extend(self.config.site.phase_current_entities)
+        battery, ev = self.config.battery, self.config.ev
+        if battery.enabled:
+            entities.extend(e for e in (battery.soc_entity, battery.power_entity) if e)
+        if ev.enabled:
+            entities.extend(
+                e for e in (ev.soc_entity, ev.plugged_entity, ev.charger_power_entity) if e
+            )
         for candidate in (
             self.config.heat_pump.power_entity,
             self.config.heat_pump.outdoor_entity,
@@ -758,6 +813,55 @@ class Engine:
             _LOGGER.info("filled %d hours of consumption from Home Assistant %s", written, source)
         return written
 
+    async def refresh_fuse(self) -> FuseReport:
+        """Update the per-phase history and the verdict on the main fuse."""
+        now = self._now()
+        entities = list(self.config.site.phase_current_entities)
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            online = await ha.ping()
+            if online and not entities:
+                # Adopt the meter's phase currents the first time they exist.
+                found = discover(await ha.states_full())
+                if found.phase_currents:
+                    entities = found.phase_currents
+                    self.config.site.phase_current_entities = entities
+                    self.config.save_profile()
+                    _LOGGER.info("adopted phase currents %s", ", ".join(entities))
+            written = 0
+            if online:
+                for phase, entity in enumerate(entities, start=1):
+                    rows = await ha.statistics(
+                        entity, now - timedelta(days=400), types=("max", "mean")
+                    )
+                    written += self.store.record_phase_hours(
+                        PhaseHour(
+                            moment.astimezone(self.tz),
+                            phase,
+                            abs(values.get("max", values.get("mean", 0.0))),
+                            abs(values.get("mean", values.get("max", 0.0))),
+                        )
+                        for moment, values in rows
+                    )
+        if not written and entities:
+            # No statistics: fall back on hemopt's own minute log.
+            samples = {
+                phase: self.store.samples(entity, now - timedelta(days=120))
+                for phase, entity in enumerate(entities, start=1)
+            }
+            self.store.record_phase_hours(hours_from_samples(samples))
+
+        hours = self.store.phase_hours(now - timedelta(days=400), self.tz)
+        if not entities and not hours:
+            self.fuse = FuseReport(current_amps=int(self.config.site.main_fuse_amps))
+            self.fuse.summary = "Ingen mätning av strömmen per fas."
+            self.fuse.detail = (
+                "hemopt hittade inga fasströmmar i Home Assistant. En mätare på "
+                "elmätarens P1-port (HomeWizard, Tibber Pulse med flera) ger dem."
+            )
+            return self.fuse
+        self.fuse = assess(hours, self.config.site.main_fuse_amps)
+        return self.fuse
+
     async def analyse_loop_mapping(self) -> LoopMappingReport:
         """Temporary diagnostic: detect floor-loop ↔ thermostat cross-wiring.
 
@@ -1027,6 +1131,8 @@ class Engine:
 
         hot_water = self._hot_water_input(states, prices.times, prices.total)
         peak = self._peak_input(prices.times, now)
+        battery = self._battery_input(states)
+        ev = self._ev_input(states, prices.times)
 
         problem = OptimisationInput(
             start=start,
@@ -1045,6 +1151,8 @@ class Engine:
             move_penalty_sek=settings.move_penalty_sek,
             sun=self._weather_plan[0] if self._weather_plan else None,
             wind_ms=self._weather_plan[1] if self._weather_plan else None,
+            battery=battery,
+            ev=ev,
         )
 
         try:
@@ -1099,6 +1207,18 @@ class Engine:
             return
 
         offset = self.shadow_offset
+        # A battery or car whose charge level is not measured cannot anchor
+        # its twin to reality, so it stays out of the ledger rather than
+        # being credited with savings nobody could check.
+        if (problem.battery is not None and not self.config.battery.soc_entity) or (
+            problem.ev is not None and not self.config.ev.soc_entity
+        ):
+            problem = replace(
+                problem,
+                battery=problem.battery if self.config.battery.soc_entity else None,
+                ev=problem.ev if self.config.ev.soc_entity else None,
+            )
+            plan = solve(problem) if self.status.control_enabled else plan
         if self.status.control_enabled:
             # The real house follows the plan; the reference twin is the real
             # house minus the heat hemopt has shifted, run on the setpoints
@@ -1109,7 +1229,6 @@ class Engine:
             reference = reference_step(problem, self._thermostat_setpoints())
             optimised = solve(shifted_problem(problem, offset, +1.0))
 
-        dt = problem.step_hours
         day_points = await price_client.fetch_day(step_start.date()) or []
         day_spot = [point.spot_sek_per_kwh for point in day_points]
         hour = step_start.replace(minute=0, second=0, microsecond=0)
@@ -1133,7 +1252,7 @@ class Engine:
                 spot_day=sum(day_spot) / len(day_spot) if day_spot else spot,
                 adder=prices.total[0] - spot * vat,
                 reference_kwh=reference.electrical_kwh,
-                optimised_kwh=optimised.heat_pump_kw[0] * dt,
+                optimised_kwh=controllable_kwh(optimised),
                 house_kwh=None,
                 reference_cold_dh=reference.cold_degree_hours,
                 optimised_cold_dh=cold_degree_hours(optimised),
@@ -1407,6 +1526,69 @@ class Engine:
         )
         return self.wood_stove
 
+    def _battery_input(self, states: dict[str, str]) -> BatteryInput | None:
+        """The home battery as the planner sees it, or None when not in use."""
+        cfg = self.config.battery
+        if not cfg.enabled:
+            return None
+        soc = parse_numeric(states.get(cfg.soc_entity)) if cfg.soc_entity else None
+        if soc is None:
+            # Unknown charge: plan from the middle rather than not at all.
+            soc = (cfg.min_soc_pct + cfg.max_soc_pct) / 2.0
+        one_way = cfg.round_trip_efficiency**0.5
+        return BatteryInput(
+            capacity_kwh=cfg.capacity_kwh,
+            max_charge_kw=cfg.max_charge_kw,
+            max_discharge_kw=cfg.max_discharge_kw,
+            efficiency_in=one_way,
+            efficiency_out=one_way,
+            min_kwh=cfg.capacity_kwh * cfg.min_soc_pct / 100.0,
+            max_kwh=cfg.capacity_kwh * cfg.max_soc_pct / 100.0,
+            initial_kwh=cfg.capacity_kwh * max(0.0, min(soc, 100.0)) / 100.0,
+            wear_sek_per_kwh=cfg.wear_sek_per_kwh,
+        )
+
+    def ev_plugged(self, states: dict[str, str]) -> bool:
+        """Whether the car is at the charger, read generously from its entity."""
+        cfg = self.config.ev
+        if not cfg.plugged_entity:
+            # Without a plug sensor, assume the car is home overnight.
+            hour = self._now().hour
+            return hour >= 17 or hour < cfg.departure()[0]
+        raw = str(states.get(cfg.plugged_entity, "")).strip().lower()
+        if raw in {"", "off", "false", "0", "unknown", "unavailable", "disconnected", "none"}:
+            return False
+        return raw not in {"not_connected", "unplugged", "no_car", "idle_disconnected"}
+
+    def _ev_input(self, states: dict[str, str], times: list[datetime]) -> EVInput | None:
+        """The car while plugged in: charge by departure, optionally feed the house."""
+        cfg = self.config.ev
+        if not cfg.enabled or not times or not self.ev_plugged(states):
+            return None
+        soc = parse_numeric(states.get(cfg.soc_entity)) if cfg.soc_entity else None
+        if soc is None:
+            soc = cfg.assumed_soc_pct
+        hour, minute = cfg.departure()
+        departure = times[0].replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if departure <= times[0]:
+            departure += timedelta(days=1)
+        step = timedelta(minutes=self.config.optimiser.step_minutes)
+        available = [moment + step <= departure for moment in times]
+        deadline = max((i for i, ok in enumerate(available) if ok), default=None)
+        one_way = cfg.charge_efficiency
+        return EVInput(
+            capacity_kwh=cfg.battery_kwh,
+            max_charge_kw=cfg.max_charge_kw,
+            charge_efficiency=one_way,
+            initial_kwh=cfg.battery_kwh * max(0.0, min(soc, 100.0)) / 100.0,
+            available=available,
+            target_kwh=cfg.battery_kwh * cfg.target_soc_pct / 100.0,
+            deadline_step=deadline,
+            v2h_max_kw=cfg.v2h_max_discharge_kw if cfg.v2h_enabled else 0.0,
+            v2h_min_kwh=cfg.battery_kwh * cfg.v2h_min_soc_pct / 100.0,
+            discharge_efficiency=one_way,
+        )
+
     def _nominal_heat_kw(self, share: float) -> float:
         total = sum(room.heat_share for room in self.config.rooms) or 1.0
         return self.config.heat_pump.max_thermal_kw * share / total
@@ -1543,6 +1725,41 @@ class Engine:
                 except Exception as exc:  # noqa: BLE001
                     self._record_error(f"hot water setpoint: {exc}")
 
+            applied += await self._apply_storage(ha, index)
+
+        return applied
+
+    async def _apply_storage(self, ha: HomeAssistantClient, index: int) -> int:
+        """Send this step's battery and car power to their controls."""
+        plan = self.plan
+        if plan is None:
+            return 0
+        applied = 0
+        battery = self.config.battery
+        if battery.enabled and battery.control_entity and plan.battery_kw:
+            kw = plan.battery_kw[index]
+            value = kw * 1000.0 if battery.control_unit == "W" else kw
+            try:
+                await ha.set_number(battery.control_entity, round(value, 1))
+                applied += 1
+            except Exception as exc:  # noqa: BLE001
+                self._record_error(f"{battery.name}: {exc}")
+
+        ev = self.config.ev
+        if ev.enabled and plan.ev_kw:
+            kw = plan.ev_kw[index]
+            if ev.charger_control_entity:
+                try:
+                    await set_charger(ha, ev, max(kw, 0.0))
+                    applied += 1
+                except Exception as exc:  # noqa: BLE001
+                    self._record_error(f"{ev.name}, laddning: {exc}")
+            if ev.v2h_enabled and ev.v2h_control_entity:
+                try:
+                    await ha.set_number(ev.v2h_control_entity, round(max(-kw, 0.0) * 1000.0, 0))
+                    applied += 1
+                except Exception as exc:  # noqa: BLE001
+                    self._record_error(f"{ev.name}, V2H: {exc}")
         return applied
 
     def _house_room_setpoint(self, index: int) -> float | None:
@@ -1613,6 +1830,8 @@ class Engine:
             "in_peak_window": _json_bool(in_window),
             "control_enabled": _json_bool(self.status.control_enabled),
             "wood_stove_lit": _json_bool(self.wood_stove.reading.lit),
+            "battery_planned": plan.battery_kw[index] if plan.battery_kw else 0.0,
+            "ev_planned": plan.ev_kw[index] if plan.ev_kw else 0.0,
         }
         try:
             payload |= self.savings_sensors()
@@ -1660,7 +1879,13 @@ class Engine:
         )
 
     async def _lk_arc_loop(self) -> None:
-        """Keep trying until climate.*_thermostat exists (fixes Entity not found)."""
+        """Keep trying until climate.*_thermostat exists (fixes Entity not found).
+
+        Only on houses with LK Systems; the add-on start script says whether
+        that integration is present.
+        """
+        if os.environ.get("HEMOPT_ADDON") == "1" and os.environ.get("HEMOPT_LK") != "1":
+            return
         while True:
             try:
                 async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
@@ -1722,6 +1947,10 @@ class Engine:
                     await self.backfill_power_history()
                 except Exception:  # noqa: BLE001 - history is a nice-to-have
                     _LOGGER.exception("consumption backfill failed")
+                try:
+                    await self.refresh_fuse()
+                except Exception:  # noqa: BLE001
+                    _LOGGER.exception("fuse check failed")
                 await self.refresh_advice()
                 self.store.housekeeping()
             except Exception:  # noqa: BLE001
@@ -1735,6 +1964,23 @@ def _json_bool(value: bool) -> str:
 
 def _to_kw(value: float) -> float:
     return value / 1000.0 if value > 100 else value
+
+
+async def set_charger(ha: HomeAssistantClient, ev, kw: float) -> None:
+    """Ask the charger for `kw`: a current limit if it takes one, else on/off.
+
+    A charger cannot go below its minimum current (6 A on most), so anything
+    under that pauses charging rather than asking for an impossible trickle.
+    """
+    entity = ev.charger_control_entity
+    amps = kw * 1000.0 / (230.0 * max(ev.charger_phases, 1))
+    if entity.startswith("switch."):
+        await ha.call_service(
+            "switch", "turn_on" if amps >= ev.min_charge_amps else "turn_off", {"entity_id": entity}
+        )
+        return
+    target = 0.0 if amps < ev.min_charge_amps else min(round(amps), ev.max_charge_amps)
+    await ha.set_number(entity, target)
 
 
 def hourly_means(
@@ -1836,6 +2082,11 @@ def plan_to_dict(plan: Plan) -> dict[str, Any]:
             if plan.hot_water
             else None
         ),
+        "battery_kw": plan.battery_kw,
+        "battery_soc_kwh": plan.battery_soc_kwh,
+        "ev_kw": plan.ev_kw,
+        "ev_soc_kwh": plan.ev_soc_kwh,
+        "ev_shortfall_kwh": plan.ev_shortfall_kwh,
         "hour_peaks": [
             {
                 "hour_start": hour.hour_start.isoformat(),

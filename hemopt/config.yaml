@@ -1,5 +1,5 @@
 name: Kostnadsoptimering (hemopt)
-version: "0.3.0"
+version: "0.4.0"
 slug: hemopt
 description: >-
   Flyttar uppvarmning och varmvatten till billiga timmar, kapar effekttoppar och

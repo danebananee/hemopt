@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 class PriorityUpdate(BaseModel):
@@ -168,6 +168,11 @@ def status_payload(engine) -> dict[str, Any]:
         "guard_reason": engine.guard_decision.reason,
         "wood_stove_enabled": engine.config.wood_stove.enabled,
         "power_backfill": engine.store.setting("power_backfill"),
+        "needs_setup": not engine.config.rooms,
+        "battery_name": engine.config.battery.name if engine.config.battery.enabled else None,
+        "battery_capacity_kwh": engine.config.battery.capacity_kwh,
+        "ev_name": engine.config.ev.name if engine.config.ev.enabled else None,
+        "ev_capacity_kwh": engine.config.ev.battery_kwh,
         "location_known": engine._location is not None,  # noqa: SLF001
     }
 
@@ -647,6 +652,60 @@ def register_panel_routes(
     async def mark_wood_stove(update: StoveUpdate) -> dict[str, Any]:
         """The household marks a fire as lit or out; the models learn from it."""
         return require_engine().mark_stove(update.lit).as_dict()
+
+    @app.get("/api/setup")
+    async def setup_state() -> dict[str, Any]:
+        """The settings the guide edits, and the checklist of what is done."""
+        from .onboarding import EDITABLE, checklist, is_complete
+
+        engine = require_engine()
+        config = engine.config
+        sections = {
+            section: {name: getattr(getattr(config, section), name) for name in fields}
+            for section, fields in EDITABLE.items()
+        }
+        return {
+            "complete": is_complete(config),
+            "saved_once": engine.store.setting("setup_saved") is not None,
+            "checklist": checklist(config),
+            "settings": sections,
+            "rooms": [room.model_dump(mode="json") for room in config.rooms],
+        }
+
+    @app.get("/api/setup/discover")
+    async def setup_discover() -> dict[str, Any]:
+        """What Home Assistant has that hemopt could use."""
+        return await require_engine().discover()
+
+    @app.put("/api/setup")
+    async def setup_save(request: Request) -> dict[str, Any]:
+        """Save the guide's settings and start planning with them at once."""
+        from .onboarding import apply_setup
+
+        engine = require_engine()
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="förväntade ett JSON-objekt")
+        try:
+            config = apply_setup(engine.config, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"ogiltiga inställningar: {exc}") from exc
+        engine.reconfigure(config)
+        plan = await engine.replan()
+        return {
+            "saved": True,
+            "rooms": len(config.rooms),
+            "planned": plan is not None,
+        }
+
+    @app.get("/api/fuse")
+    async def fuse() -> dict[str, Any]:
+        """Is the main fuse the right size, judged from the current per phase."""
+        return require_engine().fuse.as_dict()
+
+    @app.post("/api/fuse")
+    async def refresh_fuse() -> dict[str, Any]:
+        return (await require_engine().refresh_fuse()).as_dict()
 
     @app.get("/api/advice")
     async def advice() -> dict[str, Any]:

@@ -627,6 +627,12 @@ function renderSummary() {
   const line = $("#summary-line");
   const sub = $("#summary-sub");
   if (!s) return;
+  $("#welcome-card").hidden = !(s.needs_setup && !s.booting);
+  if (s.needs_setup && !s.booting) {
+    line.textContent = "hemopt är installerat men vet ännu inte hur huset ser ut.";
+    sub.textContent = "Öppna guiden. Den hittar termostater och givare själv; du bekräftar bara.";
+    return;
+  }
   if (s.booting || s.starting) {
     line.textContent = "hemopt startar och räknar fram första planen…";
     sub.textContent = "Det kan ta några minuter på en Raspberry Pi.";
@@ -827,7 +833,8 @@ function renderSavings() {
 function renderAdvice(advice) {
   const body = $("#advice-body");
   if (!advice) return;
-  const items = (advice.actions || []).filter((a) => a.title);
+  // Fuse size is judged from the phase currents in its own card instead.
+  const items = (advice.actions || []).filter((a) => a.title && a.key !== "fuse");
   const nodes = [];
   if (items.length) {
     nodes.push(
@@ -1321,6 +1328,476 @@ async function renderPeakSettings() {
   }
 }
 
+/* Fuse ------------------------------------------------------------------- */
+
+const FUSE_LEVEL = {
+  comfortable: ["good", "Gott om marginal"],
+  ok: ["good", "Räcker"],
+  tight: ["warn", "Nära gränsen"],
+  too_small: ["bad", "För liten"],
+};
+
+function renderFuse(report) {
+  const body = $("#fuse-body");
+  if (!report) return;
+  const tone = { too_small: "bad", tight: "warn", can_downsize: "good", right: "good" }[report.status] || "neutral";
+  const nodes = [
+    el(
+      "div",
+      { class: "fuse-head" },
+      report.current_amps ? el("span", { class: `pill ${tone}`, text: `${report.current_amps} A nu` }) : null,
+      el("b", { text: report.summary || "" }),
+    ),
+    report.detail ? el("p", { class: "muted", text: report.detail }) : null,
+  ];
+  const verdicts = (report.verdicts || []).filter((v) => v.amps >= 10 && v.amps <= Math.max(35, report.current_amps || 0));
+  if (verdicts.length) {
+    nodes.push(
+      el(
+        "div",
+        { class: "fuse-scale" },
+        ...verdicts.map((v) => {
+          const [cls, word] = FUSE_LEVEL[v.level] || ["neutral", v.level];
+          return el(
+            "div",
+            { class: `fuse-size ${cls} ${v.amps === report.current_amps ? "current" : ""}`, title: `Toppar på ${fmt0.format(v.peak_share * 100)} % av säkringen` },
+            el("b", { text: `${v.amps} A` }),
+            el("small", { text: word }),
+          );
+        }),
+      ),
+    );
+  }
+  if (report.peak_a) {
+    const at = report.peak_at ? new Date(report.peak_at) : null;
+    nodes.push(
+      el(
+        "dl",
+        { class: "facts" },
+        el("dt", { text: "Högsta ström" }),
+        el("dd", { text: `${fmt1.format(report.peak_a)} A på fas L${report.peak_phase}${at ? `, ${dayFmt.format(at)} kl ${hhmm(at)}` : ""}` }),
+        el("dt", { text: "Högsta timsnitt" }),
+        el("dd", { text: `${fmt1.format(report.sustained_a)} A` }),
+        el("dt", { text: "Mätt" }),
+        el("dd", { text: `${fmt0.format(report.days)} dygn${report.winter_covered ? "" : " (ingen vinter än)"}` }),
+      ),
+    );
+  }
+  const calls = report.close_calls || [];
+  if (calls.length) {
+    nodes.push(el("p", { class: "stove-label", text: "Tillfällen nära gränsen:" }));
+    nodes.push(
+      el(
+        "ul",
+        { class: "windows" },
+        ...calls.slice(0, 5).map((c) => {
+          const t = new Date(c.hour_start);
+          return el("li", {}, el("span", { text: `${dayFmt.format(t)} kl ${hhmm(t)}` }), el("span", { class: "muted", text: `L${c.phase}: ${fmt1.format(c.max_a)} A` }));
+        }),
+      ),
+    );
+  }
+  body.replaceChildren(...nodes.filter(Boolean));
+}
+
+async function loadFuse(recompute = false) {
+  const button = $("#fuse-btn");
+  button.disabled = true;
+  try {
+    renderFuse(await api("api/fuse", recompute ? { method: "POST" } : {}));
+  } catch (error) {
+    $("#fuse-body").replaceChildren(el("p", { class: "empty", text: `Kunde inte hämta: ${error.message}` }));
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* Battery and car ---------------------------------------------------------- */
+
+function drawStorage(plan, now) {
+  const card = $("#storage-card");
+  const has = plan && ((plan.battery_kw && plan.battery_kw.length) || (plan.ev_kw && plan.ev_kw.length));
+  card.hidden = !has;
+  if (!has) return;
+  const host = $("#storage-body");
+  host.replaceChildren();
+  const times = plan.times.map((t) => new Date(t));
+  const status = state.status || {};
+  const series = [
+    ["battery_kw", "battery_soc_kwh", status.battery_name || "Husbatteri", status.battery_capacity_kwh],
+    ["ev_kw", "ev_soc_kwh", status.ev_name || "Elbil", status.ev_capacity_kwh],
+  ];
+  for (const [kwKey, socKey, name, capacity] of series) {
+    const kws = plan[kwKey] || [];
+    if (!kws.length) continue;
+    const socs = plan[socKey] || [];
+    const block = el("div", { class: "storage-block" });
+    const charge = kws.filter((v) => v > 0.05).length / 4;
+    const give = kws.filter((v) => v < -0.05).length / 4;
+    const lastSoc = socs.length && capacity ? `${fmt0.format((socs[socs.length - 1] / capacity) * 100)} %` : "";
+    block.append(
+      el("h3", { text: name }),
+      el("p", { class: "muted", text: `Laddar ${fmt1.format(charge)} h${give ? `, ger ström i ${fmt1.format(give)} h` : ""} de kommande ${Math.round(times.length / 4)} timmarna.${lastSoc ? ` Slutar på ${lastSoc}.` : ""}${kwKey === "ev_kw" && plan.ev_shortfall_kwh > 0.1 ? ` Hinner inte ladda ${fmt0.format(plan.ev_shortfall_kwh)} kWh till avgång.` : ""}` }),
+    );
+    const chartHost = el("div", { class: "chart small" });
+    block.append(chartHost);
+    host.append(block);
+    const f = frame(chartHost, { height: 160 });
+    const n = times.length;
+    const stepWidth = (f.x1 - f.x0) / n;
+    const xOf = (i) => f.x0 + i * stepWidth;
+    const peak = Math.max(...kws.map(Math.abs), 1);
+    const kwScale = niceScale(-peak, peak, { count: 4 });
+    const yKw = yScale(f, kwScale);
+    yAxis(f, kwScale, { unit: "kW" });
+    const g = svg("g");
+    kws.forEach((kw, i) => {
+      if (Math.abs(kw) < 0.02) return;
+      const y0 = yKw(0);
+      const y1 = yKw(kw);
+      g.append(svg("rect", { x: xOf(i), width: Math.max(stepWidth - 0.5, 0.6), y: Math.min(y0, y1), height: Math.abs(y1 - y0), fill: kw > 0 ? "var(--good)" : "var(--heat)" }));
+    });
+    f.root.append(g);
+    if (socs.length && capacity) {
+      const pct = socs.map((v) => (v / capacity) * 100);
+      const socScale = niceScale(0, 100, { count: kwScale.ticks.length - 1, fixed: true });
+      const ySoc = yScale(f, socScale);
+      yAxis(f, socScale, { side: "right", unit: "%" });
+      f.root.append(svg("path", { d: stepPath(pct, xOf, ySoc, stepWidth), class: "price-line" }));
+    }
+    timeAxis(f, times, xOf, { every: 6 });
+    const nowIndex = times.findIndex((t, i) => t <= now && (i === n - 1 || times[i + 1] > now));
+    if (nowIndex >= 0) nowMarker(f, xOf(nowIndex));
+    hoverColumns(f, n, xOf, stepWidth, (i) => {
+      const kw = kws[i];
+      const verb = kw > 0.05 ? `Laddar ${kw.toFixed(1)} kW` : kw < -0.05 ? `Ger huset ${(-kw).toFixed(1)} kW` : "Vilar";
+      const soc = socs.length && capacity ? `<br>${fmt0.format((socs[i] / capacity) * 100)} %` : "";
+      return `<b>${relativeDay(times[i], now)} ${hhmm(times[i])}</b><br>${verb}${soc}`;
+    });
+  }
+}
+
+/* Settings ----------------------------------------------------------------- */
+
+const setup = { data: null, found: null, rooms: [] };
+
+function candidateList(role, extra = []) {
+  const found = setup.found && setup.found.roles ? setup.found.roles[role] || [] : [];
+  const seen = new Set();
+  const out = [];
+  for (const c of [...found, ...extra]) {
+    if (!c || !c.entity_id || seen.has(c.entity_id)) continue;
+    seen.add(c.entity_id);
+    out.push(c);
+  }
+  return out;
+}
+
+let datalistCounter = 0;
+function entityField(label, value, role, { help = "", name } = {}) {
+  const id = `dl-${(datalistCounter += 1)}`;
+  const options = candidateList(role);
+  const input = el("input", { type: "text", list: id, value: value || "", placeholder: options.length ? `t.ex. ${options[0].entity_id}` : "entity_id", name });
+  const list = el(
+    "datalist",
+    { id },
+    ...options.map((c) => el("option", { value: c.entity_id, label: `${c.name}${c.state ? ` · ${c.state}${c.unit ? ` ${c.unit}` : ""}` : ""}` })),
+  );
+  const field = el("label", { class: "field" }, el("span", { text: label }), input, list, help ? el("small", { text: help }) : null);
+  field.input = input;
+  return field;
+}
+
+function selectField(label, value, options, help = "") {
+  const select = el("select", {}, ...options.map(([v, text]) => el("option", { value: v, selected: String(v) === String(value), text })));
+  const field = el("label", { class: "field" }, el("span", { text: label }), select, help ? el("small", { text: help }) : null);
+  field.input = select;
+  return field;
+}
+
+function numberField(label, value, { step = "1", min, max, help = "", unit = "" } = {}) {
+  const input = el("input", { type: "number", step, min, max, value: value ?? "" });
+  const field = el("label", { class: "field" }, el("span", { text: unit ? `${label} (${unit})` : label }), input, help ? el("small", { text: help }) : null);
+  field.input = input;
+  return field;
+}
+
+function checkField(label, checked, help = "") {
+  const input = el("input", { type: "checkbox", checked: Boolean(checked) });
+  const field = el("label", { class: "field check" }, input, el("span", { text: label }), help ? el("small", { text: help }) : null);
+  field.input = input;
+  return field;
+}
+
+function fieldset(title, intro, ...fields) {
+  return el("fieldset", { class: "panel setup-section" }, el("legend", { text: title }), intro ? el("p", { class: "muted", text: intro }) : null, el("div", { class: "fields" }, ...fields));
+}
+
+function suggestion(role) {
+  const list = candidateList(role);
+  return list.length ? list[0].entity_id : "";
+}
+
+function roomRowEditor(room) {
+  const tr = el("div", { class: "room-edit" });
+  const fields = {
+    name: el("input", { type: "text", value: room.name || "", placeholder: "Namn" }),
+    temperature_entity: entityField("Temperaturgivare", room.temperature_entity, "temperature"),
+    climate_entity: (() => {
+      const id = `dl-${(datalistCounter += 1)}`;
+      const input = el("input", { type: "text", list: id, value: room.climate_entity || "", placeholder: "climate.… (valfri)" });
+      const rooms = (setup.found && setup.found.rooms) || [];
+      const list = el("datalist", { id }, ...rooms.map((r) => el("option", { value: r.climate_entity, label: r.name })));
+      const f = el("label", { class: "field" }, el("span", { text: "Termostat" }), input, list);
+      f.input = input;
+      return f;
+    })(),
+    floor: el("input", { type: "text", value: room.floor || "", placeholder: "Våning" }),
+    floor_type: selectField("Golv", room.floor_type || "", [["", "Gissa"], ["concrete", "Betongplatta"], ["light", "Lätt bjälklag"]]),
+    comfort_min: numberField("Lägst", room.comfort_min ?? 20, { step: "0.5", unit: "°C" }),
+    comfort_max: numberField("Högst", room.comfort_max ?? 22.5, { step: "0.5", unit: "°C" }),
+    priority: selectField("Prioritet", room.priority || 1, [[1, "Håll"], [2, "Normal"], [3, "Flexibel"]]),
+  };
+  const remove = el("button", { type: "button", class: "btn ghost small", text: "Ta bort" });
+  remove.addEventListener("click", () => {
+    setup.rooms = setup.rooms.filter((r) => r !== room);
+    renderRoomEditors();
+  });
+  tr.append(
+    el("div", { class: "room-edit-head" }, fields.name, remove),
+    el("div", { class: "fields" }, fields.temperature_entity, fields.climate_entity, el("label", { class: "field" }, el("span", { text: "Våning" }), fields.floor), fields.floor_type, fields.comfort_min, fields.comfort_max, fields.priority),
+  );
+  room._read = () => ({
+    key: room.key,
+    name: fields.name.value.trim(),
+    temperature_entity: fields.temperature_entity.input.value.trim(),
+    climate_entity: fields.climate_entity.input.value.trim(),
+    humidity_entity: room.humidity_entity || null,
+    floor: fields.floor.value.trim(),
+    floor_type: fields.floor_type.input.value || null,
+    comfort_min: Number(fields.comfort_min.input.value),
+    comfort_max: Number(fields.comfort_max.input.value),
+    priority: Number(fields.priority.input.value),
+  });
+  return tr;
+}
+
+function renderRoomEditors() {
+  const host = $("#room-editors");
+  if (!host) return;
+  host.replaceChildren(...setup.rooms.map(roomRowEditor));
+  if (!setup.rooms.length) host.append(el("p", { class: "empty", text: "Inga rum ännu. Hämta termostaterna eller lägg till ett rum." }));
+}
+
+function renderSetup() {
+  const form = $("#setup-form");
+  const data = setup.data;
+  if (!data) return;
+  const st = data.settings;
+  const fresh = !data.saved_once && !data.rooms.length;
+  const pick = (value, role) => value || (fresh ? suggestion(role) : "");
+
+  $("#setup-checklist").replaceChildren(
+    ...data.checklist.map((item) =>
+      el(
+        "li",
+        { class: item.done ? "ok" : item.required ? "bad" : "warn" },
+        el("span", { class: "dot" }),
+        el("div", {}, el("b", { text: `${item.title}${item.required ? "" : " (valfritt)"}` }), el("small", { text: item.detail })),
+      ),
+    ),
+  );
+
+  if (!setup.found || setup.found.online === false) {
+    form.replaceChildren(el("p", { class: "panel empty", text: "Home Assistant svarar inte just nu, så hemopt kan inte leta efter givare. Försök igen om en stund." }));
+  }
+
+  const f = {};
+  f.price_area = selectField("Elområde", st.site.price_area, [["SE1", "SE1 Luleå"], ["SE2", "SE2 Sundsvall"], ["SE3", "SE3 Stockholm"], ["SE4", "SE4 Malmö"]], "Står på elräkningen.");
+  f.contract = selectField("Elavtal", st.energy_price.contract, [["monthly", "Månadspris (rörligt)"], ["daily", "Dygnspris"], ["hourly", "Timpris"], ["quarterly", "Kvartspris"], ["fixed", "Fast pris"]], "Hur elhandlaren räknar priset.");
+  f.fuse = selectField("Huvudsäkring", st.site.main_fuse_amps, [10, 13, 16, 20, 25, 35, 50, 63].map((a) => [a, `${a} A`]), "Står på nätfakturan.");
+  f.phases = selectField("Faser", st.site.phases, [[3, "3 (vanligast)"], [1, "1"]]);
+
+  f.outdoor = entityField("Utetemperatur", pick(st.heat_pump.outdoor_entity, "outdoor"), "outdoor", { help: "Helst värmepumpens egen utegivare." });
+  f.hp_power = entityField("Värmepumpens effekt", pick(st.heat_pump.power_entity, "heat_pump_power"), "heat_pump_power", { help: "Valfri, men gör planen noggrannare." });
+  f.house_setpoint = entityField("Husets börvärde", st.heat_pump.room_setpoint_entity, "house_setpoint", { help: "Bara om rummen saknar egna termostater." });
+  f.hw_enabled = checkField("Planera varmvattnet", st.hot_water.enabled);
+  f.hw_top = entityField("Varmvattnets temperatur", pick(st.hot_water.top_temperature_entity, "hot_water_temperature"), "hot_water_temperature");
+  f.hw_setpoint = entityField("Varmvattnets börvärde", pick(st.hot_water.setpoint_entity, "hot_water_setpoint"), "hot_water_setpoint", { help: "Det hemopt skriver till när styrningen är på." });
+
+  f.meter = entityField("Elmätare, hela huset", pick(st.base_load.total_power_entity, "meter"), "meter", { help: "Från P1-porten (HomeWizard, Tibber Pulse …)." });
+  f.weather = entityField("Väderprognos", pick(st.site.weather_entity, "weather"), "weather");
+  const phases = (st.site.phase_current_entities || []).length ? st.site.phase_current_entities : (setup.found && setup.found.phase_currents) || [];
+  f.phase = el("label", { class: "field wide" }, el("span", { text: "Ström per fas" }), el("input", { type: "text", value: phases.join(", "), placeholder: "sensor.…_l1, sensor.…_l2, sensor.…_l3" }), el("small", { text: "Används för att bedöma säkringen. Hittas oftast automatiskt." }));
+  f.phase.input = f.phase.querySelector("input");
+
+  const bat = st.battery;
+  f.bat_enabled = checkField("Jag har ett husbatteri", bat.enabled);
+  f.bat_name = el("label", { class: "field" }, el("span", { text: "Namn" }), el("input", { type: "text", value: bat.name }));
+  f.bat_name.input = f.bat_name.querySelector("input");
+  f.bat_capacity = numberField("Kapacitet", bat.capacity_kwh, { step: "0.5", unit: "kWh" });
+  f.bat_charge = numberField("Max laddeffekt", bat.max_charge_kw, { step: "0.5", unit: "kW" });
+  f.bat_discharge = numberField("Max urladdning", bat.max_discharge_kw, { step: "0.5", unit: "kW" });
+  f.bat_min = numberField("Lägsta laddnivå", bat.min_soc_pct, { unit: "%", help: "Reserv som aldrig används." });
+  f.bat_soc = entityField("Laddnivå", pick(bat.soc_entity, "battery_soc"), "battery_soc");
+  f.bat_power = entityField("Batteriets effekt", pick(bat.power_entity, "battery_power"), "battery_power");
+  f.bat_control = entityField("Styrning (effekt-börvärde)", pick(bat.control_entity, "battery_control"), "battery_control", { help: "Ett tal där plus laddar och minus laddar ur." });
+  f.bat_unit = selectField("Börvärdet anges i", bat.control_unit, [["W", "watt"], ["kW", "kilowatt"]]);
+
+  const ev = st.ev;
+  f.ev_enabled = checkField("Jag har en elbil", ev.enabled);
+  f.ev_name = el("label", { class: "field" }, el("span", { text: "Namn" }), el("input", { type: "text", value: ev.name }));
+  f.ev_name.input = f.ev_name.querySelector("input");
+  f.ev_battery = numberField("Batteri", ev.battery_kwh, { step: "1", unit: "kWh" });
+  f.ev_power = numberField("Max laddeffekt", ev.max_charge_kw, { step: "0.1", unit: "kW" });
+  f.ev_phases = selectField("Laddboxens faser", ev.charger_phases, [[3, "3"], [1, "1"]]);
+  f.ev_amps = numberField("Max ström", ev.max_charge_amps, { unit: "A" });
+  f.ev_departure = el("label", { class: "field" }, el("span", { text: "Avgångstid" }), el("input", { type: "time", value: ev.departure_time }));
+  f.ev_departure.input = f.ev_departure.querySelector("input");
+  f.ev_target = numberField("Laddad till", ev.target_soc_pct, { unit: "%", help: "Vid avgång varje morgon." });
+  f.ev_soc = entityField("Bilens laddnivå", pick(ev.soc_entity, "ev_soc"), "ev_soc", { help: "Från bilens integration. Saknas den antas 40 %." });
+  f.ev_plugged = entityField("Kabel i", pick(ev.plugged_entity, "ev_plugged"), "ev_plugged", { help: "Saknas den antas bilen stå hemma 17–07." });
+  f.ev_control = entityField("Laddboxens styrning", pick(ev.charger_control_entity, "ev_charger_control"), "ev_charger_control", { help: "Strömgräns i ampere, eller en på/av-knapp." });
+  f.ev_charger_power = entityField("Laddeffekt, mätt", pick(ev.charger_power_entity, "ev_charger_power"), "ev_charger_power");
+  f.v2h_enabled = checkField("Bilen får driva huset (V2H)", ev.v2h_enabled, "Kräver en dubbelriktad laddbox.");
+  f.v2h_power = numberField("Max effekt till huset", ev.v2h_max_discharge_kw, { step: "0.5", unit: "kW" });
+  f.v2h_min = numberField("Lämna minst", ev.v2h_min_soc_pct, { unit: "%", help: "Bilen går aldrig under detta för huset." });
+  f.v2h_control = entityField("V2H-styrning", ev.v2h_control_entity, "ev_charger_control", { help: "Effekt i watt som bilen ska ge huset." });
+
+  f.stove_name = el("label", { class: "field" }, el("span", { text: "Namn" }), el("input", { type: "text", value: st.wood_stove.name }));
+  f.stove_name.input = f.stove_name.querySelector("input");
+  f.stove_temp = entityField("Givare vid kaminen", st.wood_stove.temperature_entity, "stove_temperature", { help: "Valfri. Utan givare trycker du på knappen när du eldar." });
+
+  setup.rooms = data.rooms.length
+    ? data.rooms.map((r) => ({ ...r }))
+    : fresh
+      ? ((setup.found && setup.found.rooms) || []).map((r) => ({ ...r, comfort_min: 20, comfort_max: 22.5, priority: 1 }))
+      : [];
+
+  const fetchRooms = el("button", { type: "button", class: "btn ghost", text: "Hämta termostater från Home Assistant" });
+  fetchRooms.addEventListener("click", () => {
+    const have = new Set(setup.rooms.map((r) => r.climate_entity));
+    for (const r of (setup.found && setup.found.rooms) || []) {
+      if (!have.has(r.climate_entity)) setup.rooms.push({ ...r, comfort_min: 20, comfort_max: 22.5, priority: 1 });
+    }
+    renderRoomEditors();
+  });
+  const addRoom = el("button", { type: "button", class: "btn ghost", text: "Lägg till rum" });
+  addRoom.addEventListener("click", () => {
+    setup.rooms.push({ name: "", comfort_min: 20, comfort_max: 22.5, priority: 1 });
+    renderRoomEditors();
+  });
+
+  const battery = fieldset("Husbatteri", "Laddas när elen är billig och ger huset ström när den är dyr. Säljer aldrig till nätet.", f.bat_enabled, f.bat_name, f.bat_capacity, f.bat_charge, f.bat_discharge, f.bat_min, f.bat_soc, f.bat_power, f.bat_control, f.bat_unit);
+  const car = fieldset("Elbil", "Laddas på de billigaste timmarna så att den är klar till avgång.", f.ev_enabled, f.ev_name, f.ev_battery, f.ev_power, f.ev_phases, f.ev_amps, f.ev_departure, f.ev_target, f.ev_soc, f.ev_plugged, f.ev_control, f.ev_charger_power, f.v2h_enabled, f.v2h_power, f.v2h_min, f.v2h_control);
+  const toggle = (section, check) => {
+    const update = () => {
+      for (const field of section.querySelectorAll(".field")) if (field !== check) field.hidden = !check.input.checked;
+    };
+    check.input.addEventListener("change", update);
+    update();
+  };
+  toggle(battery, f.bat_enabled);
+  toggle(car, f.ev_enabled);
+
+  const status = el("p", { class: "muted save-status" });
+  const save = el("button", { type: "submit", class: "btn", text: "Spara inställningarna" });
+
+  form.replaceChildren(
+    fieldset("Grundläggande", "", f.price_area, f.contract, f.fuse, f.phases),
+    el(
+      "fieldset",
+      { class: "panel setup-section" },
+      el("legend", { text: "Rum" }),
+      el("p", { class: "muted", text: "Ett rum per termostat. Temperaturgivaren är det enda som krävs." }),
+      el("div", { class: "row-actions" }, fetchRooms, addRoom),
+      el("div", { id: "room-editors" }),
+    ),
+    fieldset("Värmepump och varmvatten", "", f.outdoor, f.hp_power, f.house_setpoint, f.hw_enabled, f.hw_top, f.hw_setpoint),
+    fieldset("Elmätare och väder", "", f.meter, f.weather, f.phase),
+    battery,
+    car,
+    fieldset("Braskamin", "", f.stove_name, f.stove_temp),
+    el("div", { class: "save-bar" }, save, status),
+  );
+  renderRoomEditors();
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    status.textContent = "Sparar och räknar om planen…";
+    const val = (field) => field.input.value.trim();
+    const num = (field) => (field.input.value === "" ? null : Number(field.input.value));
+    const payload = {
+      site: {
+        price_area: val(f.price_area),
+        main_fuse_amps: Number(val(f.fuse)),
+        phases: Number(val(f.phases)),
+        weather_entity: val(f.weather),
+        phase_current_entities: val(f.phase).split(/[,\s]+/).filter(Boolean),
+      },
+      energy_price: { contract: val(f.contract) },
+      heat_pump: { outdoor_entity: val(f.outdoor), power_entity: val(f.hp_power), room_setpoint_entity: val(f.house_setpoint) },
+      hot_water: { enabled: f.hw_enabled.input.checked, top_temperature_entity: val(f.hw_top), setpoint_entity: val(f.hw_setpoint) },
+      base_load: { total_power_entity: val(f.meter) },
+      rooms: setup.rooms.map((r) => r._read()),
+      battery: {
+        enabled: f.bat_enabled.input.checked,
+        name: val(f.bat_name),
+        capacity_kwh: num(f.bat_capacity),
+        max_charge_kw: num(f.bat_charge),
+        max_discharge_kw: num(f.bat_discharge),
+        min_soc_pct: num(f.bat_min),
+        soc_entity: val(f.bat_soc),
+        power_entity: val(f.bat_power),
+        control_entity: val(f.bat_control),
+        control_unit: val(f.bat_unit),
+      },
+      ev: {
+        enabled: f.ev_enabled.input.checked,
+        name: val(f.ev_name),
+        battery_kwh: num(f.ev_battery),
+        max_charge_kw: num(f.ev_power),
+        charger_phases: Number(val(f.ev_phases)),
+        max_charge_amps: num(f.ev_amps),
+        departure_time: val(f.ev_departure) || "07:00",
+        target_soc_pct: num(f.ev_target),
+        soc_entity: val(f.ev_soc),
+        plugged_entity: val(f.ev_plugged),
+        charger_control_entity: val(f.ev_control),
+        charger_power_entity: val(f.ev_charger_power),
+        v2h_enabled: f.v2h_enabled.input.checked,
+        v2h_max_discharge_kw: num(f.v2h_power),
+        v2h_min_soc_pct: num(f.v2h_min),
+        v2h_control_entity: val(f.v2h_control),
+      },
+      wood_stove: { name: val(f.stove_name) || "Braskamin", temperature_entity: val(f.stove_temp) },
+    };
+    for (const section of [payload.battery, payload.ev]) {
+      for (const [key, value] of Object.entries(section)) if (value === null) delete section[key];
+    }
+    try {
+      const result = await api("api/setup", { method: "PUT", body: payload });
+      status.textContent = result.planned
+        ? `Sparat. ${result.rooms} rum, planen är omräknad.`
+        : `Sparat. ${result.rooms} rum. Planen räknas när priser och temperaturer finns.`;
+      await Promise.all([loadStatus(), loadPlan(), loadRooms()]);
+      await loadSetup();
+    } catch (error) {
+      status.textContent = `Kunde inte spara: ${error.message}`;
+    } finally {
+      save.disabled = false;
+    }
+  };
+}
+
+async function loadSetup() {
+  const [data, found] = await Promise.all([api("api/setup").catch(() => null), api("api/setup/discover").catch(() => ({ online: false }))]);
+  setup.data = data;
+  setup.found = found;
+  if (data) renderSetup();
+}
+
 /* ----------------------------------------------------------------- loading */
 
 async function loadStatus() {
@@ -1346,6 +1823,7 @@ async function loadPlan() {
   }
   const now = nowDate();
   drawHorizon(state.plan, now);
+  drawStorage(state.plan, now);
   renderPlanNotes();
   renderFigures();
   if (currentTab() === "rooms") {
@@ -1441,11 +1919,13 @@ function currentTab() {
 const TAB_LOADERS = {
   overview: () => {
     drawHorizon(state.plan, nowDate());
+    drawStorage(state.plan, nowDate());
   },
   savings: () => {
     renderSavings();
     loadSavings();
     loadAdvice();
+    loadFuse();
   },
   rooms: () => {
     renderRooms();
@@ -1463,6 +1943,9 @@ const TAB_LOADERS = {
     renderSystems();
     renderMeters();
     renderPeakSettings();
+  },
+  setup: () => {
+    loadSetup();
   },
 };
 
@@ -1533,6 +2016,8 @@ function bind() {
   });
 
   $("#advice-btn").addEventListener("click", () => loadAdvice(true));
+  $("#fuse-btn").addEventListener("click", () => loadFuse(true));
+  $("#welcome-btn").addEventListener("click", () => selectTab("setup"));
 
   bindSegmented("#savings-period", ({ days }) => {
     state.savingsDays = Number(days);

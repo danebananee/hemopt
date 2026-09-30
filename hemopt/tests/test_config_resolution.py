@@ -211,12 +211,37 @@ def test_priority_one_holds_temperature_hardest():
     )
 
 
-def test_addon_seeds_bundled_rooms_when_empty(monkeypatch, isolated_data):
+def test_a_new_installation_starts_empty(monkeypatch, isolated_data):
+    """Nobody else should get the developer's rooms; the setup guide fills them in."""
     monkeypatch.setenv("HEMOPT_ADDON", "1")
     config = Config.resolve()
-    assert len(config.rooms) >= 5
-    assert all(room.priority == 1 for room in config.rooms)
-    assert (isolated_data / "profile.json").exists()
+    assert config.rooms == []
+
+
+def test_the_most_recently_changed_file_wins(isolated_data):
+    import os
+    import time
+
+    yaml_path = isolated_data / "hemopt.yaml"
+    yaml_path.write_text("site:\n  price_area: SE1\n", encoding="utf-8")
+    old = time.time() - 60
+    os.utime(yaml_path, (old, old))
+    Config.model_validate({"site": {"price_area": "SE4"}}).save_profile()
+    assert Config.resolve().site.price_area == "SE4"
+
+
+def test_settings_made_in_the_panel_survive_the_addon_options(monkeypatch, isolated_data):
+    monkeypatch.setenv("HEMOPT_PRICE_AREA", "SE3")
+    monkeypatch.setenv("HEMOPT_WEATHER_ENTITY", "weather.forecast_home")
+    Config.model_validate(
+        {
+            "site": {"price_area": "SE1", "weather_entity": "weather.smhi"},
+            "panel_managed": ["site.price_area", "site.weather_entity"],
+        }
+    ).save_profile()
+    config = Config.resolve()
+    assert config.site.price_area == "SE1"
+    assert config.site.weather_entity == "weather.smhi"
 
 
 def test_house_yaml_is_preferred_over_the_saved_profile(isolated_data):

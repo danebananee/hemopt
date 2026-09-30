@@ -8,12 +8,15 @@ rest of the code only ever sees kW, kWh, SEK/kWh and degrees Celsius.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
+
+_LOGGER = logging.getLogger(__name__)
 
 PriceArea = Literal["SE1", "SE2", "SE3", "SE4"]
 
@@ -133,6 +136,9 @@ class SiteConfig(BaseModel):
     # planner has to assume the current temperature holds for 36 hours, which
     # systematically mis-sizes pre-heating ahead of a cold snap.
     weather_entity: str | None = None
+    # Per-phase current sensors from the electricity meter, for keeping an
+    # eye on whether the main fuse is the right size.
+    phase_current_entities: list[str] = Field(default_factory=list)
     # The house's position, for the sun model. Taken from Home Assistant's
     # own settings when left out.
     latitude: float | None = None
@@ -482,6 +488,70 @@ class WoodStoveConfig(BaseModel):
     manual_session_hours: float = 4.0
 
 
+class BatteryConfig(BaseModel):
+    """A home battery (villabatteri) hemopt may charge and discharge.
+
+    Control goes through one Home Assistant number entity holding a power
+    setpoint: positive charges, negative discharges. Most battery
+    integrations expose such a setpoint, or can with a small helper script.
+    """
+
+    enabled: bool = False
+    name: str = "Husbatteri"
+    capacity_kwh: float = Field(default=10.0, gt=0.0)
+    max_charge_kw: float = Field(default=5.0, ge=0.0)
+    max_discharge_kw: float = Field(default=5.0, ge=0.0)
+    # Energy back out per energy in, for a full cycle.
+    round_trip_efficiency: float = Field(default=0.9, gt=0.0, le=1.0)
+    min_soc_pct: float = Field(default=10.0, ge=0.0, le=100.0)
+    max_soc_pct: float = Field(default=100.0, ge=0.0, le=100.0)
+    # Wear per kWh cycled through the battery. Keeps it from cycling for a
+    # price spread that does not pay for the ageing.
+    wear_sek_per_kwh: float = Field(default=0.25, ge=0.0)
+    soc_entity: str | None = None
+    power_entity: str | None = None
+    control_entity: str | None = None
+    control_unit: Literal["W", "kW"] = "W"
+
+
+class EVConfig(BaseModel):
+    """An electric car, its charger, and optionally the car as a battery (V2H).
+
+    The car must reach `target_soc_pct` by the departure time every day it is
+    plugged in. Charging is steered through the charger's current limit (a
+    number entity in amperes) or, failing that, an on/off switch.
+    """
+
+    enabled: bool = False
+    name: str = "Elbil"
+    battery_kwh: float = Field(default=60.0, gt=0.0)
+    max_charge_kw: float = Field(default=11.0, ge=0.0)
+    charger_phases: int = Field(default=3, ge=1, le=3)
+    min_charge_amps: float = Field(default=6.0, ge=0.0)
+    max_charge_amps: float = Field(default=16.0, ge=0.0)
+    charge_efficiency: float = Field(default=0.9, gt=0.0, le=1.0)
+    departure_time: str = "07:00"
+    target_soc_pct: float = Field(default=80.0, ge=0.0, le=100.0)
+    # Assumed when the car reports no state of charge.
+    assumed_soc_pct: float = Field(default=40.0, ge=0.0, le=100.0)
+    soc_entity: str | None = None
+    plugged_entity: str | None = None
+    charger_control_entity: str | None = None
+    charger_power_entity: str | None = None
+    # Vehicle-to-home: the car's battery feeds the house when that pays.
+    v2h_enabled: bool = False
+    v2h_max_discharge_kw: float = Field(default=5.0, ge=0.0)
+    v2h_min_soc_pct: float = Field(default=50.0, ge=0.0, le=100.0)
+    v2h_control_entity: str | None = None
+
+    def departure(self) -> tuple[int, int]:
+        try:
+            hours, minutes = (int(part) for part in self.departure_time.split(":", 1))
+            return max(0, min(hours, 23)), max(0, min(minutes, 59))
+        except ValueError:
+            return 7, 0
+
+
 class HomeAssistantConfig(BaseModel):
     base_url: str = "http://homeassistant.local:8123"
     token: str = ""
@@ -539,12 +609,17 @@ class Config(BaseModel):
     base_load: BaseLoadConfig = Field(default_factory=BaseLoadConfig)
     ext_control: ExtControlConfig = Field(default_factory=ExtControlConfig)
     wood_stove: WoodStoveConfig = Field(default_factory=WoodStoveConfig)
+    battery: BatteryConfig = Field(default_factory=BatteryConfig)
+    ev: EVConfig = Field(default_factory=EVConfig)
     advice: AdviceConfig = Field(default_factory=AdviceConfig)
     rooms: list[RoomConfig] = Field(default_factory=list)
     home_assistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)
     mqtt: MqttConfig = Field(default_factory=MqttConfig)
     optimiser: OptimiserConfig = Field(default_factory=OptimiserConfig)
     database_path: str = "hemopt.db"
+    # Settings the household has chosen in the panel. The add-on's
+    # Configuration tab no longer overrides these at start-up.
+    panel_managed: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _unique_room_keys(self) -> Config:
@@ -577,22 +652,30 @@ class Config(BaseModel):
         if path is not None:
             config = cls.load(path)
         else:
+            # A hand-edited hemopt.yaml and the profile the panel saves can
+            # both exist. Whichever was changed last is what the household
+            # meant; always preferring the YAML silently threw away every
+            # setting made in the panel at the next restart.
+            sources = [c for c in house_config_candidates() if c.exists()][:1]
+            if (profile := profile_path()).exists():
+                sources.append(profile)
+            sources.sort(key=lambda candidate: candidate.stat().st_mtime, reverse=True)
             config = None
-            for candidate in house_config_candidates():
-                if candidate.exists():
-                    config = cls.load(candidate)
+            for source in sources:
+                try:
+                    if source.suffix == ".json":
+                        config = cls.model_validate_json(source.read_text(encoding="utf-8"))
+                    else:
+                        config = cls.load(source)
                     break
-            if config is None and (profile := profile_path()).exists():
-                config = cls.model_validate_json(profile.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    _LOGGER.warning("could not read %s: %s", source, exc)
             if config is None:
+                # A new installation starts empty; the setup guide in the
+                # panel finds the house's thermostats and sensors.
                 config = cls()
 
-        config = config.with_environment()
-        # Under the add-on, seed the known house layout once so the panel is not
-        # stuck on "inga rum" until the user hand-writes YAML.
-        if not config.rooms and os.environ.get("HEMOPT_ADDON") == "1":
-            config = seed_default_house(config)
-        return config
+        return config.with_environment()
 
     def with_environment(self) -> Config:
         """Overlay the environment on top of this config.
@@ -601,6 +684,11 @@ class Config(BaseModel):
         empty token must not wipe a long-lived token from ``hemopt.yaml``.
         """
         data = self.model_dump(mode="json")
+        managed = set(self.panel_managed)
+
+        def owned_by_panel(key: str) -> bool:
+            section = key.split(".", 1)[0]
+            return key in managed or section in managed
 
         if url := (os.environ.get("HEMOPT_HA_URL") or "").strip():
             data["home_assistant"]["base_url"] = url
@@ -620,9 +708,11 @@ class Config(BaseModel):
             # a broker. Stay quiet until Mosquitto is discoverable.
             data["mqtt"]["enabled"] = False
 
-        if area := os.environ.get("HEMOPT_PRICE_AREA"):
+        if (area := os.environ.get("HEMOPT_PRICE_AREA")) and not owned_by_panel("site.price_area"):
             data["site"]["price_area"] = area
-        if contract := os.environ.get("HEMOPT_CONTRACT"):
+        if (contract := os.environ.get("HEMOPT_CONTRACT")) and not owned_by_panel(
+            "energy_price.contract"
+        ):
             data["energy_price"]["contract"] = contract
         for env_key, field_name in (
             ("HEMOPT_SUPPLIER_MARKUP_ORE", "supplier_markup_ore"),
@@ -660,10 +750,11 @@ class Config(BaseModel):
 
         if entity := os.environ.get("HEMOPT_TOTAL_POWER_ENTITY"):
             entity = entity.strip()
-            if entity:
+            if entity and not owned_by_panel("base_load.total_power_entity"):
                 data["base_load"]["total_power_entity"] = entity
 
-        if weather := (os.environ.get("HEMOPT_WEATHER_ENTITY") or "").strip():
+        weather = (os.environ.get("HEMOPT_WEATHER_ENTITY") or "").strip()
+        if weather and not owned_by_panel("site.weather_entity"):
             data["site"]["weather_entity"] = weather
 
         if data_dir_env := os.environ.get("HEMOPT_DATA"):

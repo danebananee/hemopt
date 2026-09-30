@@ -107,7 +107,22 @@ PY
     fi
 }
 
-install_lk_arc_climate
+# LK Arc Climate only makes sense next to the LK Systems integration. On any
+# other house, copying it in and restarting Home Assistant would be an
+# unwelcome surprise, so it is only done where lksystems is configured.
+HEMOPT_LK=0
+if [[ -f /homeassistant/.storage/core.config_entries ]] \
+    && jq -e '.data.entries[]? | select(.domain == "lksystems")' \
+        /homeassistant/.storage/core.config_entries >/dev/null 2>&1; then
+    HEMOPT_LK=1
+fi
+export HEMOPT_LK
+
+if [[ $HEMOPT_LK == 1 ]]; then
+    install_lk_arc_climate
+else
+    echo "[hemopt] LK Systems finns inte i Home Assistant — LK Arc Climate installeras inte"
+fi
 
 # Ship the Golvvärme dashboard YAML into HA config so the user can point a
 # Lovelace dashboard at it (or replace an old copy that still shows Entity not found).
@@ -129,7 +144,9 @@ install_golvvarme_dashboard() {
     echo "[hemopt]   Settings → Dashboards → lägg till / ersätt med dashboards/golvvarme.yaml"
 }
 
-install_golvvarme_dashboard
+if [[ $HEMOPT_LK == 1 ]]; then
+    install_golvvarme_dashboard
+fi
 
 export HEMOPT_ADDON=1
 export HEMOPT_DATA=/data
@@ -196,7 +213,7 @@ if [[ -n ${HEMOPT_HA_TOKEN:-} ]]; then
         # One-shot: if climate.*_thermostat still missing, restart HA so the
         # freshly copied custom component + injected config entry load.
         boot_marker="/data/.lk_arc_climate_bootstrapped_0_1_27"
-        if [[ ! -f $boot_marker ]]; then
+        if [[ $HEMOPT_LK == 1 && ! -f $boot_marker ]]; then
             climate_count="$(curl -fsS \
                 -H "Authorization: Bearer ${HEMOPT_HA_TOKEN}" \
                 "${HEMOPT_HA_URL%/}/api/states" 2>/dev/null \

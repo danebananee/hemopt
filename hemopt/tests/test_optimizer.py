@@ -7,6 +7,8 @@ import pytest
 
 from hemopt.config import HeatPumpConfig, HotWaterConfig, RoomConfig
 from hemopt.optimizer import (
+    BatteryInput,
+    EVInput,
     HotWaterInput,
     OptimisationInput,
     PeakInput,
@@ -326,3 +328,94 @@ def test_stored_heat_is_not_bought_just_for_the_credit():
     plan = solve(replace(problem, rooms=rooms, outdoor_c=list(reversed(warmer_end))))
     for room in plan.rooms:
         assert max(room.temperature) <= room.comfort_min + 0.1
+
+
+def _battery(initial: float = 5.0) -> BatteryInput:
+    return BatteryInput(
+        capacity_kwh=10.0,
+        max_charge_kw=5.0,
+        max_discharge_kw=5.0,
+        efficiency_in=0.95,
+        efficiency_out=0.95,
+        min_kwh=1.0,
+        max_kwh=10.0,
+        initial_kwh=initial,
+        wear_sek_per_kwh=0.1,
+    )
+
+
+def test_a_home_battery_buys_cheap_and_covers_the_dear_block():
+    from dataclasses import replace
+
+    problem = replace(build_problem(with_hot_water=False, peak_marginal=0.0), battery=_battery())
+    plan = solve(problem)
+    charged = sum(kw for kw in plan.battery_kw[:24] if kw > 0)
+    discharged = -sum(kw for kw in plan.battery_kw[24:40] if kw < 0)
+    assert charged > 5.0
+    assert discharged > 5.0
+    assert all(1.0 - 1e-6 <= soc <= 10.0 + 1e-6 for soc in plan.battery_soc_kwh)
+    # Nothing is sold: the grid draw never goes negative.
+    assert min(plan.total_power_kw) >= -1e-6
+
+
+def test_a_flat_price_leaves_the_battery_alone():
+    from dataclasses import replace
+
+    problem = replace(
+        build_problem(
+            with_hot_water=False, cheap_window=(0, 0), expensive_window=(0, 0), peak_marginal=0.0
+        ),
+        battery=_battery(),
+    )
+    plan = solve(problem)
+    assert sum(abs(kw) for kw in plan.battery_kw) < 0.5
+
+
+def _ev(**overrides) -> EVInput:
+    values = dict(
+        capacity_kwh=60.0,
+        max_charge_kw=11.0,
+        charge_efficiency=0.9,
+        initial_kwh=20.0,
+        available=[True] * 96,
+        target_kwh=48.0,
+        deadline_step=60,
+    )
+    values.update(overrides)
+    return EVInput(**values)
+
+
+def test_the_car_is_charged_by_departure_in_the_cheapest_hours():
+    from dataclasses import replace
+
+    problem = replace(build_problem(with_hot_water=False, peak_marginal=0.0), ev=_ev())
+    plan = solve(problem)
+    assert plan.ev_soc_kwh[60] >= 48.0 - 1e-3
+    assert plan.ev_shortfall_kwh == 0.0
+    cheap = sum(kw for kw in plan.ev_kw[0:24] if kw > 0)
+    dear = sum(kw for kw in plan.ev_kw[24:40] if kw > 0)
+    assert cheap > 0 and dear < 1e-3
+
+
+def test_an_unplugged_car_is_never_charged():
+    from dataclasses import replace
+
+    problem = replace(
+        build_problem(with_hot_water=False),
+        ev=_ev(available=[False] * 96, deadline_step=None),
+    )
+    plan = solve(problem)
+    assert max(plan.ev_kw) <= 1e-6
+
+
+def test_v2h_feeds_the_house_but_keeps_the_reserve():
+    from dataclasses import replace
+
+    problem = replace(
+        build_problem(with_hot_water=False, peak_marginal=0.0),
+        ev=_ev(initial_kwh=50.0, target_kwh=40.0, v2h_max_kw=5.0, v2h_min_kwh=35.0),
+    )
+    plan = solve(problem)
+    # It covers what the house draws, and never exports.
+    assert min(plan.ev_kw[24:40]) <= -0.45, "the car helps during the dear block"
+    assert min(plan.ev_soc_kwh) >= 35.0 - 1e-3

@@ -60,11 +60,16 @@ class TwinOffset:
 
     rooms: dict[str, tuple[float, float]] = field(default_factory=dict)
     tank_c: float = 0.0
+    # Energy the optimised twin holds beyond the reference, in kWh.
+    battery_kwh: float = 0.0
+    ev_kwh: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "rooms": {key: [temp, slab] for key, (temp, slab) in self.rooms.items()},
             "tank_c": self.tank_c,
+            "battery_kwh": self.battery_kwh,
+            "ev_kwh": self.ev_kwh,
         }
 
     @classmethod
@@ -79,11 +84,20 @@ class TwinOffset:
                 continue
             if math.isfinite(temp) and math.isfinite(slab):
                 rooms[str(key)] = (temp, slab)
-        try:
-            tank = float(payload.get("tank_c", 0.0))
-        except (TypeError, ValueError):
-            tank = 0.0
-        return cls(rooms=rooms, tank_c=tank if math.isfinite(tank) else 0.0)
+
+        def number(name: str) -> float:
+            try:
+                value = float(payload.get(name, 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+            return value if math.isfinite(value) else 0.0
+
+        return cls(
+            rooms=rooms,
+            tank_c=number("tank_c"),
+            battery_kwh=number("battery_kwh"),
+            ev_kwh=number("ev_kwh"),
+        )
 
 
 def _clamp(value: float, limit: float) -> float:
@@ -113,7 +127,15 @@ def shifted_problem(
         hot_water = replace(
             hot_water, initial_temperature=hot_water.initial_temperature + sign * offset.tank_c
         )
-    return replace(problem, rooms=rooms, hot_water=hot_water)
+    battery = problem.battery
+    if battery is not None and offset.battery_kwh:
+        shifted = battery.initial_kwh + sign * offset.battery_kwh
+        battery = replace(battery, initial_kwh=max(battery.min_kwh, min(battery.max_kwh, shifted)))
+    ev = problem.ev
+    if ev is not None and offset.ev_kwh:
+        shifted = ev.initial_kwh + sign * offset.ev_kwh
+        ev = replace(ev, initial_kwh=max(0.0, min(ev.capacity_kwh, shifted)))
+    return replace(problem, rooms=rooms, hot_water=hot_water, battery=battery, ev=ev)
 
 
 def call_for_heat(setpoint: float, indoor: float) -> float:
@@ -133,6 +155,8 @@ class ReferenceStep:
     tank_c: float | None
     electrical_kwh: float
     cold_degree_hours: float
+    battery_kwh: float | None = None
+    ev_kwh: float | None = None
 
 
 def reference_step(
@@ -184,8 +208,29 @@ def reference_step(
         electrical += replaced / max(heat_pump.cop(outdoor, hot_water=True), 1e-6)
         tank = hot_water.initial_temperature - offset.tank_c
 
+    # Without hemopt the battery sits idle, and the car charges flat out
+    # from the moment it is plugged in until it reaches its target.
+    battery_kwh = None
+    if problem.battery is not None:
+        battery_kwh = problem.battery.initial_kwh - offset.battery_kwh
+    ev_kwh = None
+    ev = problem.ev
+    if ev is not None:
+        stored = max(0.0, ev.initial_kwh - offset.ev_kwh)
+        charging = 0.0
+        if ev.available and ev.available[0] and stored < ev.target_kwh:
+            needed = (ev.target_kwh - stored) / (dt * ev.charge_efficiency)
+            charging = min(ev.max_charge_kw, needed)
+        electrical += charging * dt
+        ev_kwh = stored + charging * dt * ev.charge_efficiency
+
     return ReferenceStep(
-        rooms=rooms, tank_c=tank, electrical_kwh=electrical, cold_degree_hours=cold
+        rooms=rooms,
+        tank_c=tank,
+        electrical_kwh=electrical,
+        cold_degree_hours=cold,
+        battery_kwh=battery_kwh,
+        ev_kwh=ev_kwh,
     )
 
 
@@ -202,7 +247,25 @@ def next_offset(optimised: Plan, reference: ReferenceStep) -> TwinOffset:
     tank = 0.0
     if optimised.hot_water is not None and reference.tank_c is not None:
         tank = _clamp(optimised.hot_water.temperature[0] - reference.tank_c, MAX_TANK_OFFSET_K)
-    return TwinOffset(rooms=rooms, tank_c=round(tank, 3))
+    battery = 0.0
+    if optimised.battery_soc_kwh and reference.battery_kwh is not None:
+        battery = optimised.battery_soc_kwh[0] - reference.battery_kwh
+    ev = 0.0
+    if optimised.ev_soc_kwh and reference.ev_kwh is not None:
+        ev = optimised.ev_soc_kwh[0] - reference.ev_kwh
+    return TwinOffset(
+        rooms=rooms, tank_c=round(tank, 3), battery_kwh=round(battery, 3), ev_kwh=round(ev, 3)
+    )
+
+
+def controllable_kwh(plan: Plan, index: int = 0) -> float:
+    """Heat pump, battery and car energy the plan draws in one step."""
+    kw = plan.heat_pump_kw[index]
+    if plan.battery_kw:
+        kw += plan.battery_kw[index]
+    if plan.ev_kw:
+        kw += plan.ev_kw[index]
+    return kw * plan.step_minutes / 60.0
 
 
 def cold_degree_hours(plan: Plan) -> float:
