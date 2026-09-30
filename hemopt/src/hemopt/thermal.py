@@ -4,7 +4,8 @@ Each room is a first-order RC network for the air, fed through a first-order
 lag that stands in for the floor:
 
     slab:  ds/dt = (u - s) / tau_slab
-    air:   dT/dt = (T_out - T_in) / tau + k_heat * s + k_stove * stove + k_gain
+    air:   dT/dt = (T_out - T_in) * (1 / tau + k_wind * wind)
+                   + k_heat * s + k_stove * stove + k_sun * sun + k_gain
 
 `u` is how open the room's loop is and `s` is the heat the floor actually
 hands to the room. With `tau_slab = 0` the floor is instantaneous and the model
@@ -17,8 +18,10 @@ expensive block and keeps heating too long into it, and it cannot see the slab
 as the heat store it is.
 
 `tau` is the room's inertia in hours, `k_heat` how fast it climbs with the
-floor fully charged, `k_stove` the extra climb while a wood stove burns and
-`k_gain` solar and internal gains. For every candidate floor lag the rest is
+floor fully charged, `k_stove` the extra climb while a wood stove burns,
+`k_sun` the climb in full sun (see `hemopt.weather`), `k_wind` how much faster
+heat leaks out per m/s of wind, and `k_gain` the internal gains from people
+and appliances. For every candidate floor lag the rest is
 fitted by non-negative least squares on one-step differences; the lag itself is
 chosen by how well the fitted model predicts four hours ahead, which is the
 question the planner actually asks of it.
@@ -84,6 +87,12 @@ class ThermalModel:
     # Root-mean-square error of a four-hour open-loop prediction, in kelvin.
     # This is the number that says whether the plan can be trusted.
     rmse_4h: float | None = None
+    # Weather response: K/h in full sun, and extra loss per m/s of wind as a
+    # fraction of the indoor-outdoor difference per hour.
+    k_sun_per_hour: float = 0.0
+    k_wind_per_hour: float = 0.0
+    # Days of history the fit was made on; grows as hemopt keeps its own log.
+    history_days: float = 0.0
 
     @classmethod
     def default(cls, floor_type: str | None = None) -> ThermalModel:
@@ -103,6 +112,10 @@ class ThermalModel:
     def slab_alpha(self, dt_hours: float) -> float:
         return slab_alpha(self.tau_slab_hours, dt_hours)
 
+    def loss_rate(self, wind_ms: float = 0.0) -> float:
+        """Fraction of the indoor-outdoor gap lost per hour."""
+        return 1.0 / self.tau_hours + self.k_wind_per_hour * max(wind_ms, 0.0)
+
     def advance(
         self,
         indoor: float,
@@ -111,14 +124,17 @@ class ThermalModel:
         heat_fraction: float,
         dt_hours: float,
         stove_on: float = 0.0,
+        sun: float = 0.0,
+        wind_ms: float = 0.0,
     ) -> tuple[float, float]:
         """Advance air and floor one step. Mirrors the optimiser's constraints."""
         slab_next = slab + self.slab_alpha(dt_hours) * (heat_fraction - slab)
-        drift = (outdoor - indoor) / self.tau_hours
+        drift = (outdoor - indoor) * self.loss_rate(wind_ms)
         indoor_next = indoor + dt_hours * (
             drift
             + self.k_heat_per_hour * slab_next
             + self.k_stove_per_hour * stove_on
+            + self.k_sun_per_hour * sun
             + self.k_gain_per_hour
         )
         return indoor_next, slab_next
@@ -145,7 +161,9 @@ class ThermalModel:
             dt_hours * self.k_gain_per_hour,
         )
 
-    def steady_heat_fraction(self, indoor: float, outdoor: float) -> float:
+    def steady_heat_fraction(
+        self, indoor: float, outdoor: float, sun: float = 0.0, wind_ms: float = 0.0
+    ) -> float:
         """Floor output that holds the room where it is.
 
         The best estimate of the slab's state when nothing better is known:
@@ -153,7 +171,11 @@ class ThermalModel:
         """
         if self.k_heat_per_hour <= 0:
             return 0.0
-        needed = (indoor - outdoor) / self.tau_hours - self.k_gain_per_hour
+        needed = (
+            (indoor - outdoor) * self.loss_rate(wind_ms)
+            - self.k_gain_per_hour
+            - self.k_sun_per_hour * sun
+        )
         return max(0.0, min(1.0, needed / self.k_heat_per_hour))
 
     def stored_heat_hours(self) -> float:
@@ -184,6 +206,13 @@ class ThermalSample:
     outdoor: float
     heat_fraction: float
     stove_on: float = 0.0
+    sun: float = 0.0
+    wind_ms: float = 0.0
+
+
+# Recent behaviour counts more than old: a house changes with the seasons
+# (curtains, ventilation, what the sun does) and the fit should follow.
+HALF_LIFE_DAYS = 30.0
 
 
 def _nnls_n(design: np.ndarray, target: np.ndarray) -> np.ndarray:
@@ -251,6 +280,8 @@ def resample(
                     outdoor=latest.outdoor,
                     heat_fraction=latest.heat_fraction,
                     stove_on=latest.stove_on,
+                    sun=latest.sun,
+                    wind_ms=latest.wind_ms,
                 )
             )
         else:
@@ -270,14 +301,21 @@ class _Segment:
     outdoor: np.ndarray
     heat: np.ndarray
     stove: np.ndarray
+    sun: np.ndarray
+    wind: np.ndarray
+    weight: np.ndarray
 
     @classmethod
-    def of(cls, samples: list[ThermalSample]) -> _Segment:
+    def of(cls, samples: list[ThermalSample], newest: datetime) -> _Segment:
+        ages = np.array([(newest - s.moment).total_seconds() / 86400.0 for s in samples])
         return cls(
             indoor=np.array([s.indoor for s in samples], dtype=float),
             outdoor=np.array([s.outdoor for s in samples], dtype=float),
             heat=np.array([s.heat_fraction for s in samples], dtype=float),
             stove=np.array([s.stove_on for s in samples], dtype=float),
+            sun=np.array([s.sun for s in samples], dtype=float),
+            wind=np.array([s.wind_ms for s in samples], dtype=float),
+            weight=np.power(0.5, np.maximum(ages, 0.0) / HALF_LIFE_DAYS),
         )
 
     def slab(self, alpha: float) -> np.ndarray:
@@ -293,27 +331,43 @@ class _Segment:
         return out
 
 
+# Parameters in the order of the design matrix columns.
+_PARAMS = ("a", "b", "s", "c", "g", "w")
+
+
 @dataclass(slots=True)
 class _Fit:
     tau_slab_hours: float
-    a: float
-    b: float
-    s: float
-    c: float
+    theta: dict[str, float]
     r_squared: float
     rmse: float
     rows: int
+
+
+def _columns(segment: _Segment, slab: np.ndarray, index: np.ndarray) -> np.ndarray:
+    gap = segment.outdoor[index] - segment.indoor[index]
+    return np.column_stack(
+        [
+            gap,
+            slab[index],
+            segment.stove[index],
+            np.ones(index.size),
+            segment.sun[index],
+            segment.wind[index] * gap,
+        ]
+    )
 
 
 def _fit_for_lag(
     segments: list[_Segment],
     dt_hours: float,
     tau_slab_hours: float,
-    use_stove: bool,
+    active: list[int],
 ) -> _Fit | None:
     alpha = slab_alpha(tau_slab_hours, dt_hours)
     rows: list[np.ndarray] = []
     targets: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
     slabs: list[np.ndarray] = []
     for segment in segments:
         slab = segment.slab(alpha)
@@ -324,45 +378,34 @@ def _fit_for_lag(
         index = np.arange(warmup, len(segment.indoor) - 1)
         if index.size == 0:
             continue
-        rows.append(
-            np.column_stack(
-                [
-                    segment.outdoor[index] - segment.indoor[index],
-                    slab[index],
-                    segment.stove[index],
-                    np.ones(index.size),
-                ]
-            )
-        )
+        rows.append(_columns(segment, slab, index))
         targets.append(segment.indoor[index + 1] - segment.indoor[index])
+        weights.append(segment.weight[index])
 
     if not rows:
         return None
     design = np.vstack(rows)
     target = np.concatenate(targets)
+    root_weight = np.sqrt(np.concatenate(weights))
 
-    if use_stove:
-        a, b, s, c = (float(v) for v in _nnls_n(design, target))
-    else:
-        # Drop the stove column so quiet data does not invent a fake k_stove.
-        a, b, c = (float(v) for v in _nnls_n(design[:, [0, 1, 3]], target))
-        s = 0.0
-
-    if a <= 1e-9:
+    # Only columns the data can speak to are fitted; the others stay at zero
+    # so quiet data cannot invent a stove or a sun it never saw.
+    solution = _nnls_n(design[:, active] * root_weight[:, None], target * root_weight)
+    theta = dict.fromkeys(_PARAMS, 0.0)
+    for column, value in zip(active, solution, strict=True):
+        theta[_PARAMS[column]] = float(value)
+    if theta["a"] <= 1e-9:
         return None
 
-    coefficients = np.array([a, b, s, c])
-    residual = target - design @ coefficients
+    vector = np.array([theta[name] for name in _PARAMS])
+    residual = target - design @ vector
     variance = float(np.sum((target - target.mean()) ** 2))
     r_squared = 1.0 - float(np.sum(residual**2)) / variance if variance > 0 else 0.0
 
-    rmse = _multi_step_rmse(segments, slabs, dt_hours, a, b, s, c)
+    rmse = _multi_step_rmse(segments, slabs, dt_hours, theta)
     return _Fit(
         tau_slab_hours=tau_slab_hours,
-        a=a,
-        b=b,
-        s=s,
-        c=c,
+        theta=theta,
         r_squared=r_squared,
         rmse=rmse,
         rows=int(design.shape[0]),
@@ -373,36 +416,39 @@ def _multi_step_rmse(
     segments: list[_Segment],
     slabs: list[np.ndarray],
     dt_hours: float,
-    a: float,
-    b: float,
-    s: float,
-    c: float,
+    theta: dict[str, float],
 ) -> float:
     """Open-loop prediction error at the validation horizon.
 
     The room is started from a measured temperature and run forward on the
-    recorded outdoor temperature and loop signal only, the way the planner
-    uses it. The floor state comes from the recorded loop signal, which is
-    known, so only the room itself is being predicted.
+    recorded weather and loop signal only, the way the planner uses it. The
+    floor state comes from the recorded loop signal, which is known, so only
+    the room itself is being predicted. Recent windows weigh more, like in
+    the fit.
     """
     horizon = max(int(round(VALIDATION_HORIZON_HOURS / dt_hours)), 1)
     stride = max(int(round(VALIDATION_STRIDE_HOURS / dt_hours)), 1)
+    a, b, s, c, g, w = (theta[name] for name in _PARAMS)
     errors: list[float] = []
+    weights: list[float] = []
     for segment, slab in zip(segments, slabs, strict=True):
         last_start = len(segment.indoor) - 1 - horizon
         for start in range(0, last_start + 1, stride):
             temperature = float(segment.indoor[start])
             for index in range(start, start + horizon):
+                gap = float(segment.outdoor[index]) - temperature
                 temperature += (
-                    a * (float(segment.outdoor[index]) - temperature)
+                    (a + w * float(segment.wind[index])) * gap
                     + b * float(slab[index])
                     + s * float(segment.stove[index])
+                    + g * float(segment.sun[index])
                     + c
                 )
             errors.append(temperature - float(segment.indoor[start + horizon]))
+            weights.append(float(segment.weight[start + horizon]))
     if not errors:
         return math.inf
-    return float(np.sqrt(np.mean(np.square(errors))))
+    return float(np.sqrt(np.average(np.square(errors), weights=weights)))
 
 
 def identify(
@@ -411,7 +457,7 @@ def identify(
     prior: ThermalModel | None = None,
     floor_type: str | None = None,
 ) -> ThermalModel:
-    """Fit the room and floor model to recorded history.
+    """Fit the room, floor and weather model to recorded history.
 
     Falls back to `prior` when the data cannot support a fit, which is the
     normal state for the first days after installation.
@@ -421,30 +467,43 @@ def identify(
         "tau_slab_hours"
     ]
     dt_hours = step_minutes / 60.0
-    segments = [_Segment.of(segment) for segment in resample(samples, step_minutes)]
+    resampled = resample(samples, step_minutes)
+    if not resampled:
+        return fallback
+    newest = max(segment[-1].moment for segment in resampled)
+    oldest = min(segment[0].moment for segment in resampled)
+    segments = [_Segment.of(segment, newest) for segment in resampled]
     transitions = sum(len(segment.indoor) - 1 for segment in segments)
 
     if transitions < 96:
         _LOGGER.info("thermal fit skipped, only %d usable transitions", transitions)
         return fallback
 
-    heat = np.concatenate([segment.heat for segment in segments])
+    def spread(name: str) -> float:
+        return float(np.ptp(np.concatenate([getattr(segment, name) for segment in segments])))
+
     # A room whose loop never modulated carries no information about k_heat.
-    if float(np.ptp(heat)) < 0.05:
+    if spread("heat") < 0.05:
         _LOGGER.info("thermal fit skipped, heat input never varied")
         return fallback
 
-    stove = np.concatenate([segment.stove for segment in segments])
-    use_stove = float(np.ptp(stove)) >= 0.05
+    active = [0, 1, 3]
+    if spread("stove") >= 0.05:
+        active.append(2)
+    if spread("sun") >= 0.05:
+        active.append(4)
+    if spread("wind") >= 2.0:
+        active.append(5)
+    active.sort()
 
     best: _Fit | None = None
     best_score = math.inf
     for lag in SLAB_CANDIDATES_HOURS:
-        fit = _fit_for_lag(segments, dt_hours, lag, use_stove)
+        fit = _fit_for_lag(segments, dt_hours, lag, active)
         if fit is None or not math.isfinite(fit.rmse):
             continue
-        tau_hours = dt_hours / fit.a
-        k_heat = fit.b / dt_hours
+        tau_hours = dt_hours / fit.theta["a"]
+        k_heat = fit.theta["b"] / dt_hours
         if not MIN_TAU_HOURS <= tau_hours <= MAX_TAU_HOURS:
             continue
         if not MIN_HEAT_RATE <= k_heat <= MAX_HEAT_RATE:
@@ -460,21 +519,25 @@ def identify(
         _LOGGER.info("thermal fit rejected, no floor lag gave a plausible room")
         return fallback
 
-    k_stove = best.s / dt_hours
+    theta = best.theta
+    k_stove = theta["s"] / dt_hours
     if k_stove > MAX_HEAT_RATE:
         _LOGGER.info("thermal fit rejected, stove rate %.3f K/h out of range", k_stove)
         return fallback
 
     return ThermalModel(
-        tau_hours=dt_hours / best.a,
-        k_heat_per_hour=best.b / dt_hours,
-        k_gain_per_hour=best.c / dt_hours,
+        tau_hours=dt_hours / theta["a"],
+        k_heat_per_hour=theta["b"] / dt_hours,
+        k_gain_per_hour=theta["c"] / dt_hours,
         r_squared=best.r_squared,
         samples=best.rows,
         fitted=True,
         k_stove_per_hour=k_stove,
         tau_slab_hours=best.tau_slab_hours,
         rmse_4h=round(best.rmse, 3),
+        k_sun_per_hour=theta["g"] / dt_hours,
+        k_wind_per_hour=theta["w"] / dt_hours,
+        history_days=round((newest - oldest).total_seconds() / 86400.0, 1),
     )
 
 

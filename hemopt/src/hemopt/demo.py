@@ -250,6 +250,13 @@ class DemoEngine(Engine):
 
         return history
 
+    async def fetch_weather_history(self, start: datetime) -> dict[str, list[StatePoint]]:
+        return {}
+
+    async def backfill_power_history(self, days: int = 400) -> int:
+        """The demo has no Home Assistant to fill history from."""
+        return 0
+
     async def apply(self) -> int:
         """Nothing to actuate: the simulation follows the plan directly."""
         return len(self.config.rooms) if self.status.control_enabled else 0

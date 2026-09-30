@@ -29,6 +29,12 @@ DEVICE = {
 }
 
 
+def _money(icon: str) -> dict[str, str]:
+    # Monetary sensors may not have state_class measurement; plain values
+    # still get history graphs in Home Assistant.
+    return {"unit_of_measurement": "SEK", "device_class": "monetary", "icon": icon}
+
+
 class MqttBridge:
     def __init__(self, config: Config, on_command: Callable[[str, str], None] | None = None):
         self._config = config
@@ -143,7 +149,7 @@ class MqttBridge:
             ),
             (
                 "peak_average",
-                "Manadens effektmedel",
+                "Månadens effektmedel",
                 {
                     "unit_of_measurement": "kW",
                     "device_class": "power",
@@ -181,16 +187,16 @@ class MqttBridge:
             ),
             (
                 "model_action",
-                "Vad gor modellen",
+                "Vad gör modellen",
                 {"icon": "mdi:text-box-outline"},
             ),
             (
                 "model_actions",
-                "Modellens atgarder",
+                "Modellens åtgärder",
                 {"icon": "mdi:format-list-bulleted"},
             ),
             ("plan_status", "Planstatus", {"icon": "mdi:calendar-check"}),
-            ("guard_reason", "Effektvaktens skal", {"icon": "mdi:shield-search"}),
+            ("guard_reason", "Effektvaktens skäl", {"icon": "mdi:shield-search"}),
             (
                 "advice_saving",
                 "Möjlig besparing avtal",
@@ -200,7 +206,17 @@ class MqttBridge:
                     "icon": "mdi:file-document-edit",
                 },
             ),
-            ("advice_top", "Basta avtalsradet", {"icon": "mdi:lightbulb-on"}),
+            ("advice_top", "Bästa avtalsrådet", {"icon": "mdi:lightbulb-on"}),
+            # What quarterly pricing plus hemopt would have saved (the ledger).
+            ("saving_today", "Hade sparat idag", _money("mdi:piggy-bank-outline")),
+            ("saving_month", "Hade sparat denna månad", _money("mdi:piggy-bank")),
+            (
+                "saving_month_contract",
+                "Varav kvartspris, månad",
+                _money("mdi:file-document-edit-outline"),
+            ),
+            ("saving_month_control", "Varav styrning, månad", _money("mdi:robot-outline")),
+            ("saving_per_day", "Hade sparat per dygn (30 d)", _money("mdi:calendar-today")),
         ]
 
         for object_id, name, extra in sensors:
@@ -216,10 +232,10 @@ class MqttBridge:
             )
 
         binary_sensors = [
-            ("heating_blocked", "Uppvarmning pausad", "mdi:pause-octagon"),
-            ("preheating", "Forvarmer", "mdi:fire-alert"),
+            ("heating_blocked", "Uppvärmning pausad", "mdi:pause-octagon"),
+            ("preheating", "Förvärmer", "mdi:fire-alert"),
             ("peak_guard", "Effektvakt aktiv", "mdi:shield-flash"),
-            ("in_peak_window", "Inom effektfonster", "mdi:calendar-clock"),
+            ("in_peak_window", "Inom effektfönster", "mdi:calendar-clock"),
         ]
         for object_id, name, icon in binary_sensors:
             self._publish_config(
@@ -239,7 +255,7 @@ class MqttBridge:
             "switch",
             "control_enabled",
             {
-                "name": "Styr varmepumpen",
+                "name": "Styr värmepumpen",
                 "state_topic": state_topic,
                 "value_template": "{{ value_json.control_enabled }}",
                 "command_topic": self._topic("cmd/control_enabled"),
@@ -248,6 +264,24 @@ class MqttBridge:
                 "state_on": "true",
                 "state_off": "false",
                 "icon": "mdi:robot",
+            },
+        )
+
+        # Mark a fire by hand, from a dashboard or the phone. hemopt learns the
+        # stove's effect from these and later recognises fires by itself.
+        self._publish_config(
+            "switch",
+            "wood_stove_lit",
+            {
+                "name": f"{self._config.wood_stove.name} tänd",
+                "state_topic": state_topic,
+                "value_template": "{{ value_json.wood_stove_lit }}",
+                "command_topic": self._topic("cmd/wood_stove_lit"),
+                "payload_on": "true",
+                "payload_off": "false",
+                "state_on": "true",
+                "state_off": "false",
+                "icon": "mdi:fireplace",
             },
         )
 
@@ -285,7 +319,7 @@ class MqttBridge:
                 "sensor",
                 f"inertia_{room.key}",
                 {
-                    "name": f"Troghet {room.name}",
+                    "name": f"Tröghet {room.name}",
                     "state_topic": state_topic,
                     "value_template": f"{{{{ value_json.inertia_{room.key} }}}}",
                     "unit_of_measurement": "h",

@@ -930,7 +930,7 @@ function roomRow(room) {
 
   const m = room.model;
   const fitted = m.fitted
-    ? `Inlärd från ${fmt0.format(m.samples)} kvartar.`
+    ? `Inlärd på ${fmt0.format(m.history_days || m.samples / 96)} dagars data; lärs om var sjätte timme och blir bättre ju längre hemopt körs.`
     : "Inte inlärd ännu – använder startvärden för golvtypen.";
   const quality =
     m.rmse_4h !== null && m.rmse_4h !== undefined
@@ -982,6 +982,10 @@ function roomRow(room) {
         el("dd", { text: m.tau_slab_hours > 0 ? `${fmt1.format(m.tau_slab_hours)} h` : "ingen" }),
         el("dt", { text: "Uppvärmning" }),
         el("dd", { text: `${fmt2.format(m.k_heat_per_hour)} °C/h fullt på` }),
+        m.k_sun_per_hour > 0 ? el("dt", { text: "Sol" }) : null,
+        m.k_sun_per_hour > 0 ? el("dd", { text: `+${fmt2.format(m.k_sun_per_hour)} °C/h i full sol` }) : null,
+        m.k_wind_per_hour > 0 ? el("dt", { text: "Blåst" }) : null,
+        m.k_wind_per_hour > 0 ? el("dd", { text: `tappar värme ${fmt1.format(m.k_wind_per_hour * m.tau_hours * 100)} % snabbare per m/s vind` }) : null,
         m.k_stove_per_hour > 0 ? el("dt", { text: "Braskamin" }) : null,
         m.k_stove_per_hour > 0 ? el("dd", { text: `+${fmt2.format(m.k_stove_per_hour)} °C/h` }) : null,
         el("dt", { text: "Termostat" }),
@@ -1060,17 +1064,39 @@ function renderDhwSub() {
 
 const FLAME = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2.2 1-3.6 2.2-4.8.2 1.6 1 2.6 2 3 0-3.2-1-6.2.8-9.2z"/></svg>';
 
+function stoveButton(lit) {
+  const button = el("button", {
+    type: "button",
+    class: lit ? "btn ghost" : "btn",
+    text: lit ? "Brasan har slocknat" : "Jag har tänt brasan",
+  });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      renderStove(await api("api/wood-stove/lit", { method: "POST", body: { lit: !lit } }));
+      loadStatus();
+    } catch (error) {
+      alert(`Kunde inte markera brasan: ${error.message}`);
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
+const STOVE_SOURCE = {
+  manual: "markerad av dig",
+  model: "upptäckt av hemopt",
+  binary: "enligt givaren",
+  temperature: "enligt givaren",
+};
+
 function renderStove(report) {
   const body = $("#stove-body");
   if (!report) return;
   $("#stove-title").textContent = report.name || "Braskamin";
-  if (!report.enabled) {
-    body.replaceChildren(
-      el("p", { class: "muted", text: "Braskaminen är inte aktiverad. Lägg till en temperaturgivare vid kaminen (eller en på/av-givare) under wood_stove i konfigurationen, så lär sig hemopt hur mycket brasan värmer varje rum." }),
-    );
-    return;
-  }
-  const lit = report.reading && report.reading.lit;
+  const reading = report.reading || {};
+  const lit = Boolean(reading.lit);
+  const source = lit && STOVE_SOURCE[reading.source] ? ` (${STOVE_SOURCE[reading.source]})` : "";
   const nodes = [
     el(
       "div",
@@ -1078,30 +1104,36 @@ function renderStove(report) {
       el("span", { class: `flame ${lit ? "lit" : ""}`, html: FLAME }),
       el(
         "div",
-        {},
-        el("b", { text: report.summary || (lit ? "Brasan brinner" : "Släckt") }),
+        { class: "stove-text" },
+        el("b", { text: `${report.summary || (lit ? "Brasan brinner" : "Släckt")}${source}` }),
         report.detail ? el("p", { class: "muted", text: report.detail }) : null,
       ),
     ),
   ];
+  // With a sensor the stove reports itself; otherwise the button is how
+  // hemopt learns, and it stays useful after that to correct the detector.
+  const hasSensor = reading.source === "binary" || reading.source === "temperature";
+  if (!hasSensor) nodes.push(el("div", { class: "stove-actions" }, stoveButton(lit)));
+
   const effects = (report.effects || []).filter((e) => e.k_stove_per_hour > 0);
   if (effects.length) {
+    nodes.push(el("p", { class: "stove-label", text: "Så mycket värmer brasan:" }));
     nodes.push(
       el(
         "dl",
         { class: "facts" },
         ...effects.flatMap((e) => [
           el("dt", { text: e.room_name }),
-          el("dd", { text: `+${fmt2.format(e.k_stove_per_hour)} °C/h${e.equivalent_kw ? `, motsvarar ${kw(e.equivalent_kw)} golvvärme` : ""}` }),
+          el("dd", { text: `+${fmt2.format(e.k_stove_per_hour)} °C/h${e.equivalent_kw ? `, som ${kw(e.equivalent_kw)} golvvärme` : ""}` }),
         ]),
       ),
     );
-  } else {
-    nodes.push(el("p", { class: "muted", text: `Observerat ${report.sessions_observed || 0} eldningar, ${fmt1.format(report.hours_lit_observed || 0)} timmar. Modellen behöver några kvällar med brasa för att se effekten.` }));
+  } else if (report.status !== "not_started") {
+    nodes.push(el("p", { class: "muted", text: `${report.sessions_observed || 0} brasor, ${fmt1.format(report.hours_lit_observed || 0)} timmar hittills.` }));
   }
   const windows = report.windows || [];
-  if (windows.length) {
-    nodes.push(el("p", { style: "margin-top:12px", text: "Bäst att tända:" }));
+  if (windows.length && effects.length) {
+    nodes.push(el("p", { class: "stove-label", text: "Bäst att tända:" }));
     nodes.push(
       el(
         "ul",
@@ -1109,11 +1141,12 @@ function renderStove(report) {
         ...windows.slice(0, 3).map((w) => {
           const start = new Date(w.start);
           const end = new Date(w.end);
+          const saving = w.saving_sek !== null && w.saving_sek !== undefined && w.saving_sek >= 1 ? `sparar ≈ ${kr(w.saving_sek)}, ` : "";
           return el(
             "li",
             {},
             el("span", { text: `${relativeDay(start)} ${hhmm(start)}–${hhmm(end)}` }),
-            el("span", { class: "muted", text: `${ore(w.mean_price_sek)} öre/kWh, ${deg(w.mean_outdoor_c, 0)} ute` }),
+            el("span", { class: "muted", text: `${saving}${ore(w.mean_price_sek)} öre/kWh, ${deg(w.mean_outdoor_c, 0)} ute` }),
           );
         }),
       ),
@@ -1207,6 +1240,18 @@ function renderSystems() {
     row(s.rooms_with_climate ? "ok" : "warn", `${s.rooms_with_climate || 0} av ${s.rooms_configured || 0} rum har termostat`, s.rooms_with_climate ? "Via LK Arc Climate." : s.room_setpoint_entity ? `Styr hela huset via ${s.room_setpoint_entity}` : "Inget att styra."),
     row(s.hot_water_enabled ? (s.hot_water_setpoint_entity ? "ok" : "warn") : "warn", s.hot_water_enabled ? "Varmvatten planeras" : "Varmvatten planeras inte", s.hot_water_setpoint_entity ? `Börvärde via ${s.hot_water_setpoint_entity}` : "Inget börvärde att skriva till – planen visas men styr inte tanken."),
     row(s.mqtt_online ? "ok" : s.mqtt_configured ? "bad" : "warn", s.mqtt_online ? "MQTT ansluten" : s.mqtt_configured ? "MQTT svarar inte" : "MQTT avstängt", "Sensorerna hemopt_* i Home Assistant kommer härifrån."),
+    row(
+      s.power_backfill && s.power_backfill.seen ? "ok" : "warn",
+      "Förbrukningshistorik från Home Assistant",
+      s.power_backfill
+        ? `${fmt0.format(s.power_backfill.hours)} timmar ifyllda senast, ${s.power_backfill.source === "statistics" ? "ur långtidsstatistiken" : "ur de senaste 10 dagarnas historik"}.`
+        : "Hämtas när en elmätare är vald.",
+    ),
+    row(
+      s.location_known ? "ok" : "warn",
+      s.location_known ? "Solens läge räknas fram" : "Husets position okänd",
+      s.location_known ? "Från Home Assistants inställningar." : "Solinstrålningen kan inte räknas ut. Ange plats i Home Assistant.",
+    ),
     row(s.ext_enabled ? "ok" : "warn", s.ext_enabled ? "Effektvakten får bryta via EXT" : "Effektvakten räknar men bryter inte", s.guard_reason || ""),
   ];
   $("#systems-body").replaceChildren(...rows);

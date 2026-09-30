@@ -33,6 +33,10 @@ PREHEAT_DISCOMFORT_RATIO = 0.08
 # when the horizon ends. Just under one, so storing is never free money.
 TERMINAL_CREDIT_SHARE = 0.95
 
+# How much worse a degree-hour outside the outer band (comfort plus allowed
+# setback or pre-heat) is than one merely outside the comfort band.
+OUTER_BAND_PENALTY = 10.0
+
 
 @dataclass(slots=True)
 class RoomInput:
@@ -45,10 +49,12 @@ class RoomInput:
     # holds the room at its current temperature is assumed.
     initial_slab: float | None = None
 
-    def slab_start(self, outdoor_c: float) -> float:
+    def slab_start(self, outdoor_c: float, sun: float = 0.0, wind_ms: float = 0.0) -> float:
         if self.initial_slab is not None:
             return max(0.0, min(1.0, self.initial_slab))
-        return self.model.steady_heat_fraction(self.initial_temperature, outdoor_c)
+        return self.model.steady_heat_fraction(
+            self.initial_temperature, outdoor_c, sun=sun, wind_ms=wind_ms
+        )
 
 
 @dataclass(slots=True)
@@ -91,6 +97,16 @@ class OptimisationInput:
     solver_time_limit_s: float = 30.0
     mip_gap: float = 0.01
     move_penalty_sek: float = 0.0
+    # Sun reaching the house (0..1, see hemopt.weather) and wind in m/s per
+    # step. Missing means the planner assumes no sun and no wind.
+    sun: list[float] | None = None
+    wind_ms: list[float] | None = None
+
+    def sun_at(self, index: int) -> float:
+        return self.sun[index] if self.sun else 0.0
+
+    def wind_at(self, index: int) -> float:
+        return self.wind_ms[index] if self.wind_ms else 0.0
 
     @property
     def steps(self) -> int:
@@ -216,10 +232,11 @@ def solve(problem: OptimisationInput) -> Plan:
     room_heat: list[list] = []
     room_slab: list[list] = []
     for room in problem.rooms:
-        # The band is widened to cover wherever the room actually is right
-        # now. A room that has drifted outside its limits, or whose comfort
-        # settings were just changed, must still produce a plan that walks it
-        # back rather than reporting the whole house as infeasible.
+        # The outer band (comfort plus the allowed setback and pre-heat) is
+        # enforced by a steep penalty rather than as a hard limit. A room
+        # warmed by a fire or the sun, or still being fed by a warm slab,
+        # cannot always be kept inside it, and one such room must not make
+        # the whole house's plan infeasible.
         hard_floor = min(
             room.config.comfort_min - room.config.max_setback_offset,
             room.initial_temperature - 0.1,
@@ -229,7 +246,13 @@ def solve(problem: OptimisationInput) -> Plan:
             room.initial_temperature + 0.1,
         )
 
-        temps = [solver.addVariable(lb=hard_floor, ub=hard_ceiling) for _ in range(steps + 1)]
+        temps = [solver.addVariable(lb=-50.0, ub=60.0) for _ in range(steps + 1)]
+        for index in range(1, steps + 1):
+            under = solver.addVariable(lb=0.0)
+            over = solver.addVariable(lb=0.0)
+            solver.addConstr(temps[index] >= hard_floor - under)
+            solver.addConstr(temps[index] <= hard_ceiling + over)
+            objective.append(OUTER_BAND_PENALTY * room.config.comfort_weight * dt * (under + over))
         heats = [solver.addVariable(lb=0.0, ub=1.0) for _ in range(steps)]
         solver.addConstr(temps[0] == room.initial_temperature)
 
@@ -237,10 +260,16 @@ def solve(problem: OptimisationInput) -> Plan:
         # linear, so the lag costs nothing in solve time.
         alpha = room.model.slab_alpha(dt)
         slabs = [solver.addVariable(lb=0.0, ub=1.0) for _ in range(steps + 1)]
-        solver.addConstr(slabs[0] == room.slab_start(problem.outdoor_c[0]))
+        solver.addConstr(
+            slabs[0] == room.slab_start(problem.outdoor_c[0], problem.sun_at(0), problem.wind_at(0))
+        )
 
-        a, b, c = room.model.coefficients(dt)
+        _, b, c = room.model.coefficients(dt)
         for index in range(steps):
+            # Wind raises the loss rate and sun adds heat; both are known
+            # forecast numbers per step, so the constraint stays linear.
+            a = min(dt * room.model.loss_rate(problem.wind_at(index)), 1.0)
+            gain = c + dt * room.model.k_sun_per_hour * problem.sun_at(index)
             solver.addConstr(
                 slabs[index + 1] == slabs[index] * (1.0 - alpha) + alpha * heats[index]
             )
@@ -249,7 +278,7 @@ def solve(problem: OptimisationInput) -> Plan:
                 == temps[index] * (1.0 - a)
                 + a * problem.outdoor_c[index]
                 + b * slabs[index + 1]
-                + c
+                + gain
             )
 
         weight = room.config.comfort_weight
@@ -558,6 +587,8 @@ def solve_baseline(problem: OptimisationInput) -> Plan:
         solver_time_limit_s=problem.solver_time_limit_s,
         mip_gap=problem.mip_gap,
         move_penalty_sek=problem.move_penalty_sek,
+        sun=problem.sun,
+        wind_ms=problem.wind_ms,
     )
     plan = solve(baseline)
 

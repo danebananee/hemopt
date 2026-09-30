@@ -97,7 +97,10 @@ def shifted_problem(
     rooms: list[RoomInput] = []
     for room in problem.rooms:
         temp_offset, slab_offset = offset.rooms.get(room.config.key, (0.0, 0.0))
-        slab = room.slab_start(problem.outdoor_c[0]) + sign * slab_offset
+        slab = (
+            room.slab_start(problem.outdoor_c[0], problem.sun_at(0), problem.wind_at(0))
+            + sign * slab_offset
+        )
         rooms.append(
             replace(
                 room,
@@ -154,14 +157,17 @@ def reference_step(
         key = room.config.key
         temp_offset, slab_offset = offset.rooms.get(key, (0.0, 0.0))
         indoor = room.initial_temperature - temp_offset
-        slab = max(0.0, min(1.0, room.slab_start(outdoor) - slab_offset))
+        sun, wind = problem.sun_at(0), problem.wind_at(0)
+        slab = max(0.0, min(1.0, room.slab_start(outdoor, sun, wind) - slab_offset))
         setpoint = setpoints.get(key)
         loop = (
             call_for_heat(setpoint, indoor)
             if setpoint is not None
-            else room.model.steady_heat_fraction(indoor, outdoor)
+            else room.model.steady_heat_fraction(indoor, outdoor, sun=sun, wind_ms=wind)
         )
-        indoor_next, slab_next = room.model.advance(indoor, slab, outdoor, loop, dt)
+        indoor_next, slab_next = room.model.advance(
+            indoor, slab, outdoor, loop, dt, sun=sun, wind_ms=wind
+        )
         rooms[key] = (indoor_next, slab_next)
         thermal_kw += loop * room.nominal_heat_kw
         cold += max(room.config.comfort_min - indoor_next, 0.0) * dt

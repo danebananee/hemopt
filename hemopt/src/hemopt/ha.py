@@ -11,9 +11,12 @@ cannot drop the ``/core`` path segment.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from bisect import bisect_right
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -35,6 +38,8 @@ class StatePoint:
 class ForecastPoint:
     moment: datetime
     temperature: float
+    cloud_coverage: float | None = None
+    wind_ms: float | None = None
 
 
 def parse_numeric(state: str | None) -> float | None:
@@ -56,6 +61,42 @@ def parse_numeric(state: str | None) -> float | None:
         return float(text.replace(",", "."))
     except ValueError:
         return None
+
+
+def _text(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
+def wind_to_ms(value: float, unit: object) -> float:
+    """Wind speed in m/s from whatever unit the weather integration reports."""
+    text = str(unit or "").strip().lower()
+    if text in {"km/h", "kmh", "kph"}:
+        return value / 3.6
+    if text in {"mph"}:
+        return value * 0.44704
+    if text in {"kn", "kt", "knots"}:
+        return value * 0.514444
+    return value
+
+
+def parse_statistics(result: dict, statistic_id: str) -> list[tuple[datetime, float]]:
+    """(hour start, mean kW) rows from a statistics_during_period result.
+
+    Newer Home Assistant versions send `start` as milliseconds since the
+    epoch, older ones as an ISO string; both are accepted.
+    """
+    rows: list[tuple[datetime, float]] = []
+    for row in result.get(statistic_id, []) or []:
+        mean = row.get("mean")
+        start = row.get("start")
+        if mean is None or start is None:
+            continue
+        if isinstance(start, (int, float)):
+            moment = datetime.fromtimestamp(start / 1000.0, tz=UTC)
+        else:
+            moment = datetime.fromisoformat(str(start))
+        rows.append((moment, float(mean)))
+    return rows
 
 
 def is_climate(entity_id: str | None) -> bool:
@@ -166,6 +207,10 @@ class HomeAssistantClient:
             body = {}
         result["ok"] = True
         result["message"] = body.get("location_name") or body.get("version") or "ok"
+        # The home's position is what the sun model needs; it is already here.
+        for key in ("latitude", "longitude"):
+            if isinstance(body.get(key), (int, float)):
+                result[key] = float(body[key])
         return result
 
     async def ping(self) -> bool:
@@ -287,6 +332,112 @@ class HomeAssistantClient:
                         continue
                     points.append(StatePoint(moment=datetime.fromisoformat(stamp), value=value))
                 result[entity_id] = points
+
+    async def history_attributes(
+        self,
+        entity_id: str,
+        attributes: list[str],
+        start: datetime,
+        end: datetime | None = None,
+    ) -> dict[str, list[StatePoint]]:
+        """Recorder history of several numeric attributes of one entity.
+
+        Used for a weather entity, whose cloud cover and wind speed only exist
+        as attributes. Each attribute becomes its own series.
+        """
+        params = {"filter_entity_id": entity_id}
+        if end is not None:
+            params["end_time"] = end.isoformat()
+        result: dict[str, list[StatePoint]] = {name: [] for name in attributes}
+        try:
+            response = await self._http.get(
+                self._url(f"/api/history/period/{start.isoformat()}"),
+                params=params,
+                headers=self._auth_headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            _LOGGER.warning("attribute history failed for %s: %s", entity_id, exc)
+            return result
+        for series in response.json():
+            for row in series or []:
+                stamp = row.get("last_updated") or row.get("last_changed")
+                attrs = row.get("attributes") or {}
+                if stamp is None:
+                    continue
+                moment = datetime.fromisoformat(stamp)
+                for name in attributes:
+                    raw = attrs.get(name)
+                    value = parse_numeric(None if raw is None else str(raw))
+                    if value is None:
+                        continue
+                    if name == "wind_speed":
+                        value = wind_to_ms(value, attrs.get("wind_speed_unit"))
+                    result[name].append(StatePoint(moment=moment, value=value))
+        return result
+
+    def websocket_url(self) -> str:
+        """Where the websocket API lives for the configured base URL."""
+        base = self._base
+        if base.startswith("https://"):
+            scheme, rest = "wss://", base[len("https://") :]
+        elif base.startswith("http://"):
+            scheme, rest = "ws://", base[len("http://") :]
+        else:
+            scheme, rest = "ws://", base
+        # Under the Supervisor the Core websocket is proxied at /core/websocket.
+        path = "/websocket" if rest.rstrip("/").endswith("/core") else "/api/websocket"
+        return f"{scheme}{rest.rstrip('/')}{path}"
+
+    async def hourly_statistics(
+        self, statistic_id: str, start: datetime, end: datetime | None = None
+    ) -> list[tuple[datetime, float]]:
+        """Hourly mean from Home Assistant's long-term statistics, in kW.
+
+        Home Assistant keeps raw history for about ten days but hourly
+        statistics for as long as the database lives, and only offers them
+        over the websocket API. Returns an empty list when the websocket
+        cannot be reached or the sensor has no statistics.
+        """
+        try:
+            import websockets
+        except ImportError:  # pragma: no cover - shipped with uvicorn[standard]
+            _LOGGER.warning("websockets is not installed; long-term statistics unavailable")
+            return []
+
+        request = {
+            "id": 1,
+            "type": "recorder/statistics_during_period",
+            "start_time": start.isoformat(),
+            "statistic_ids": [statistic_id],
+            "period": "hour",
+            "types": ["mean"],
+            "units": {"power": "kW"},
+        }
+        if end is not None:
+            request["end_time"] = end.isoformat()
+        try:
+            async with websockets.connect(
+                self.websocket_url(), max_size=64 * 1024 * 1024, open_timeout=20
+            ) as socket:
+                await socket.recv()  # auth_required
+                await socket.send(json.dumps({"type": "auth", "access_token": self._config.token}))
+                reply = json.loads(await socket.recv())
+                if reply.get("type") != "auth_ok":
+                    _LOGGER.warning("websocket authentication refused: %s", reply.get("message"))
+                    return []
+                await socket.send(json.dumps(request))
+                while True:
+                    message = json.loads(await asyncio.wait_for(socket.recv(), timeout=120))
+                    if message.get("id") == 1:
+                        break
+        except Exception as exc:  # noqa: BLE001 - statistics are a nice-to-have
+            _LOGGER.warning("long-term statistics unavailable: %s", exc)
+            return []
+        if not message.get("success"):
+            _LOGGER.warning("statistics request failed: %s", message.get("error"))
+            return []
+        return parse_statistics(message.get("result") or {}, statistic_id)
 
     async def call_service(self, domain: str, service: str, data: dict | None = None) -> None:
         response = await self._http.post(
@@ -447,17 +598,40 @@ class HomeAssistantClient:
         payload = body.get("service_response", body)
         rows = (payload.get(entity_id) or {}).get("forecast", [])
 
+        # The forecast rows carry wind in the entity's own unit, which only
+        # the entity's attributes name. Asked for only when there is wind.
+        unit = None
+        if any(row.get("wind_speed") is not None for row in rows):
+            unit = ((await self._weather_attributes(entity_id)) or {}).get("wind_speed_unit")
         points: list[ForecastPoint] = []
         for row in rows:
             temperature = row.get("temperature")
             stamp = row.get("datetime")
             if temperature is None or stamp is None:
                 continue
+            cloud = parse_numeric(_text(row.get("cloud_coverage")))
+            wind = parse_numeric(_text(row.get("wind_speed")))
             points.append(
-                ForecastPoint(moment=datetime.fromisoformat(stamp), temperature=float(temperature))
+                ForecastPoint(
+                    moment=datetime.fromisoformat(stamp),
+                    temperature=float(temperature),
+                    cloud_coverage=cloud,
+                    wind_ms=None if wind is None else wind_to_ms(wind, unit),
+                )
             )
         points.sort(key=lambda point: point.moment)
         return points
+
+    async def _weather_attributes(self, entity_id: str) -> dict | None:
+        try:
+            response = await self._http.get(
+                self._url(f"/api/states/{entity_id}"), headers=self._auth_headers()
+            )
+            if response.status_code != 200:
+                return None
+            return response.json().get("attributes") or {}
+        except (httpx.HTTPError, ValueError):
+            return None
 
     async def set_climate_temperature(self, entity_id: str, temperature: float) -> None:
         await self.call_service(
@@ -503,41 +677,38 @@ class HomeAssistantClient:
 
 
 def resample_forecast(
-    points: list[ForecastPoint], times: list[datetime], fallback: float
+    points: list[ForecastPoint],
+    times: list[datetime],
+    fallback: float,
+    field: str = "temperature",
 ) -> list[float]:
     """Interpolate an hourly forecast onto the optimiser's step grid.
 
     Linear interpolation matters here: a step change every hour would make the
-    planner see phantom load spikes on the hour boundary.
+    planner see phantom load spikes on the hour boundary. `field` picks the
+    quantity; points where it is missing are skipped.
     """
-    if not points:
+    ordered = sorted(
+        (point.moment, float(getattr(point, field)))
+        for point in points
+        if getattr(point, field) is not None
+    )
+    if not ordered:
         return [fallback] * len(times)
 
-    ordered = sorted(points, key=lambda point: point.moment)
     result: list[float] = []
-
     for moment in times:
-        if moment <= ordered[0].moment:
-            result.append(ordered[0].temperature)
+        if moment <= ordered[0][0]:
+            result.append(ordered[0][1])
             continue
-        if moment >= ordered[-1].moment:
-            result.append(ordered[-1].temperature)
+        if moment >= ordered[-1][0]:
+            result.append(ordered[-1][1])
             continue
-
-        for earlier, later in zip(ordered, ordered[1:], strict=False):
-            if earlier.moment <= moment <= later.moment:
-                span = (later.moment - earlier.moment).total_seconds()
-                if span <= 0:
-                    result.append(earlier.temperature)
-                else:
-                    ratio = (moment - earlier.moment).total_seconds() / span
-                    result.append(
-                        earlier.temperature + ratio * (later.temperature - earlier.temperature)
-                    )
-                break
-        else:
-            result.append(fallback)
-
+        position = bisect_right([m for m, _ in ordered], moment)
+        (t0, v0), (t1, v1) = ordered[position - 1], ordered[position]
+        span = (t1 - t0).total_seconds()
+        ratio = (moment - t0).total_seconds() / span if span > 0 else 0.0
+        result.append(v0 + ratio * (v1 - v0))
     return result
 
 

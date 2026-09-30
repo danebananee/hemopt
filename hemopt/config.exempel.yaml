@@ -148,22 +148,28 @@ ext_control:
   min_room_temperature: 18.0
 
 # ---------------------------------------------------------------------------
-# Braskamin. hemopt tander den INTE. Den detekterar, lar och tipsar.
+# Braskamin. hemopt tander den INTE. Den lar sig och tipsar.
 #
-# TRANING (styrning AV):
-#   1. enabled: true + temperature_entity eller binary_entity
-#   2. room_keys = rum som blir varma av brasan
-#   3. Eldning 3–5 sessioner (helst >4 h totalt) under kalla kvallar
-#   4. Panel → Braskamin: K/h per rum + VP-ekvivalent + tandrekommendation
+# Ingen givare behovs. Tryck «Jag har tant brasan» i panelen (eller slå på
+# switch.hemopt_wood_stove_lit i Home Assistant) nar du eldar och «Brasan har
+# slocknat» nar den brunnit ut. Efter nagra kvallar (ca 4–8 timmar totalt) vet
+# hemopt hur mycket brasan varmer varje rum, kanner sjalv igen en tand brasa
+# och foreslar nar det lonar sig att elda.
+#
+# Har du en givare vid kaminen gar det annu snabbare: ange temperature_entity
+# eller binary_entity nedan.
 # ---------------------------------------------------------------------------
 wood_stove:
-  enabled: false
+  enabled: true
   name: Braskamin
   # temperature_entity: sensor.braskamin_temperatur   # KONTROLLERA
   # binary_entity: binary_sensor.brasa_tand          # alternativ
   lit_above_c: 40
   lit_below_c: 30
-  room_keys: [vardagsrum, salong]   # rum som kanner brasans varme
+  # Tom lista = alla rum; modellen tar sjalv reda pa vilka som blir varma.
+  room_keys: []
+  # Hur lange en brasa antas brinna om du glommer att markera den slocknad.
+  manual_session_hours: 4
 
 optimiser:
   horizon_hours: 36

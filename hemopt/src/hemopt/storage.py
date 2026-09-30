@@ -143,6 +143,22 @@ class Store:
             )
             return [(_from_ts(row["ts"]), row["value"]) for row in cursor.fetchall()]
 
+    def samples_bucketed(
+        self, entity_id: str, since: datetime, bucket_seconds: int = 300
+    ) -> list[tuple[datetime, float]]:
+        """Samples averaged per time bucket, for training on long spans.
+
+        hemopt logs every minute; weeks of that per entity is more than model
+        fitting needs and more than a Raspberry Pi wants to hold in memory.
+        """
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT (ts / ?) * ? AS bucket, AVG(value) AS value FROM samples"
+                " WHERE entity_id = ? AND ts >= ? GROUP BY bucket ORDER BY bucket",
+                (bucket_seconds, bucket_seconds, entity_id, _to_ts(since)),
+            )
+            return [(_from_ts(row["bucket"]), row["value"]) for row in cursor.fetchall()]
+
     def latest_sample(self, entity_id: str) -> tuple[datetime, float] | None:
         with self._cursor() as cursor:
             cursor.execute(
@@ -184,6 +200,31 @@ class Store:
                 datetime.fromisoformat(row["hour_start"]): row["mean_kw"]
                 for row in cursor.fetchall()
             }
+
+    def fill_hourly_power(self, rows: Iterable[tuple[datetime, float]]) -> int:
+        """Store hourly means where nothing trustworthy is stored yet.
+
+        Hours already holding a real measurement are kept. A stored value
+        below 20 W counts as missing: no heated house draws that little, and
+        versions before 0.2.0 wrote 0 kW for every finished hour.
+        """
+        written = 0
+        with self._cursor() as cursor:
+            for hour_start, mean_kw in rows:
+                cursor.execute(
+                    "SELECT mean_kw FROM hourly_power WHERE hour_start = ?",
+                    (hour_start.isoformat(),),
+                )
+                existing = cursor.fetchone()
+                if existing is not None and existing["mean_kw"] >= 0.02:
+                    continue
+                cursor.execute(
+                    "INSERT OR REPLACE INTO hourly_power (hour_start, mean_kw, month)"
+                    " VALUES (?, ?, ?)",
+                    (hour_start.isoformat(), float(mean_kw), hour_start.strftime("%Y-%m")),
+                )
+                written += 1
+        return written
 
     def hourly_power(self, month: str) -> dict[datetime, float]:
         with self._cursor() as cursor:

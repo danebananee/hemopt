@@ -20,7 +20,7 @@ class WoodStoveReading:
 
     lit: bool = False
     sensor_c: float | None = None
-    source: str = "none"  # binary | temperature | none
+    source: str = "none"  # binary | temperature | manual | model | none
     updated_at: datetime | None = None
 
 
@@ -58,7 +58,8 @@ class WoodStoveReport:
     reading: WoodStoveReading = field(default_factory=WoodStoveReading)
     effects: list[WoodStoveEffect] = field(default_factory=list)
     windows: list[WoodStoveWindow] = field(default_factory=list)
-    status: str = "disabled"  # disabled | need_sensor | need_data | lit | recommend | quiet
+    # not_started | need_data | lit | recommend | quiet
+    status: str = "not_started"
     summary: str = ""
     detail: str = ""
     sessions_observed: int = 0
@@ -121,7 +122,7 @@ def detect_lit(
     previously_lit: bool,
 ) -> WoodStoveReading:
     """Hysteretic on/off from a binary sensor or a temperature probe."""
-    if not config.enabled:
+    if not (config.enabled or config.binary_entity or config.temperature_entity):
         return WoodStoveReading(lit=False, source="none")
 
     if binary_on is not None:
@@ -238,10 +239,18 @@ def build_report(
     *,
     sessions_observed: int = 0,
     hours_lit_observed: float = 0.0,
+    manual_sessions: int = 0,
 ) -> WoodStoveReport:
+    """What the panel says about the stove.
+
+    The stove is considered present once it is configured, has a sensor, or
+    the household has marked a fire by hand. Without a sensor the model learns
+    from the marked fires and then recognises new ones itself.
+    """
+    has_sensor = bool(config.binary_entity or config.temperature_entity)
     report = WoodStoveReport(
-        enabled=config.enabled,
-        configured=bool(config.binary_entity or config.temperature_entity),
+        enabled=config.enabled or has_sensor or manual_sessions > 0,
+        configured=has_sensor or manual_sessions > 0,
         name=config.name,
         reading=reading,
         effects=effects,
@@ -249,42 +258,42 @@ def build_report(
         sessions_observed=sessions_observed,
         hours_lit_observed=hours_lit_observed,
     )
-
-    if not config.enabled:
-        report.status = "disabled"
-        report.summary = "Braskaminen är avstängd i konfigurationen."
-        return report
-
-    if not report.configured:
-        report.status = "need_sensor"
-        report.summary = "Koppla en givare så att hemopt ser när brasan brinner."
-        report.detail = (
-            "Ange temperature_entity (en givare på eller nära kaminen) eller "
-            "binary_entity under wood_stove i hemopt.yaml. Utan den går det inte "
-            "att lära sig hur mycket brasan värmer."
-        )
-        return report
-
     learnt = [e for e in effects if e.k_stove_per_hour > 0.02]
 
     if reading.lit:
         report.status = "lit"
+        how = {
+            "manual": "Du har markerat att brasan brinner.",
+            "model": "hemopt känner igen brasan på att rummen blir varmare än väntat.",
+            "binary": "",
+            "temperature": "",
+        }.get(reading.source, "")
         report.summary = f"{config.name} brinner."
         parts = [f"{e.room_name} +{e.k_stove_per_hour:.2f} °C/h" for e in learnt]
         sensor = ""
         if reading.sensor_c is not None:
             sensor = f"Givaren visar {reading.sensor_c:.0f} °C. "
         learnt_text = "Uppmätt värme från brasan: " + ", ".join(parts) + "." if parts else ""
-        report.detail = (sensor + learnt_text).strip()
+        report.detail = " ".join(x for x in (how, sensor.strip(), learnt_text) if x)
+        return report
+
+    if not report.configured:
+        report.status = "not_started"
+        report.summary = "Tryck på «Jag har tänt brasan» nästa gång du eldar."
+        report.detail = (
+            "hemopt noterar då hur varje rum reagerar och lär sig hur mycket brasan "
+            "värmer. Efter några kvällar känner den igen en tänd brasa själv och "
+            "tipsar om när det lönar sig att elda."
+        )
         return report
 
     if hours_lit_observed < 4 or not learnt:
         report.status = "need_data"
         report.summary = "hemopt lär sig fortfarande hur mycket brasan värmer."
         report.detail = (
-            f"{hours_lit_observed:.0f} timmar med brasa observerade, helst 4–8 timmar "
-            "fördelat på några kvällar. Därefter får varje rum ett uppmätt bidrag och "
-            "tipsen nedan en uppskattad besparing i kronor."
+            f"{sessions_observed} brasor och {hours_lit_observed:.0f} timmar hittills. "
+            "Ungefär 4–8 timmar fördelat på några kvällar räcker. Markera varje brasa "
+            "med knappen så går det fortare."
         )
         return report
 
@@ -315,3 +324,121 @@ def build_report(
         "sparar inte mycket. Tänd för mysets skull."
     )
     return report
+
+
+# --- Fires marked by hand ---------------------------------------------------
+#
+# Without a sensor on the stove, the household tells hemopt when a fire is lit
+# by pressing a button. Those sessions are what the room models learn the
+# stove's effect from. Once they have, hemopt recognises a fire on its own:
+# the rooms near the stove warm faster than heating, sun and weather explain.
+
+
+@dataclass(slots=True)
+class StoveSession:
+    start: datetime
+    end: datetime | None = None
+
+    def until(self, default_hours: float) -> datetime:
+        return self.end or self.start + timedelta(hours=default_hours)
+
+
+def sessions_from_setting(raw: object) -> list[StoveSession]:
+    sessions: list[StoveSession] = []
+    if not isinstance(raw, list):
+        return sessions
+    for row in raw:
+        try:
+            start = datetime.fromisoformat(row[0])
+            end = datetime.fromisoformat(row[1]) if row[1] else None
+        except (TypeError, ValueError, IndexError):
+            continue
+        sessions.append(StoveSession(start, end))
+    sessions.sort(key=lambda session: session.start)
+    return sessions
+
+
+def sessions_to_setting(sessions: list[StoveSession], keep: int = 400) -> list[list]:
+    return [
+        [session.start.isoformat(), session.end.isoformat() if session.end else None]
+        for session in sessions[-keep:]
+    ]
+
+
+def open_session(sessions: list[StoveSession], now: datetime, default_hours: float):
+    """The session burning at `now`, if any."""
+    for session in reversed(sessions):
+        if session.start <= now < session.until(default_hours):
+            return session
+    return None
+
+
+def lit_at(sessions: list[StoveSession], moment: datetime, default_hours: float) -> bool:
+    return any(s.start <= moment < s.until(default_hours) for s in sessions)
+
+
+def session_totals(
+    sessions: list[StoveSession], now: datetime, default_hours: float
+) -> tuple[int, float]:
+    """Number of fires and hours burnt so far."""
+    hours = 0.0
+    for session in sessions:
+        end = min(session.until(default_hours), now)
+        hours += max((end - session.start).total_seconds() / 3600.0, 0.0)
+    return len(sessions), hours
+
+
+@dataclass(frozen=True, slots=True)
+class RoomExcess:
+    """How much faster a room warmed than the model expected without a fire."""
+
+    k_stove_per_hour: float
+    observed_rise: float
+    predicted_rise: float
+    hours: float
+
+
+def fire_signal(rooms: list[RoomExcess]) -> float | None:
+    """Estimated fire strength from the rooms' unexplained warming, ~0..1.
+
+    Each room's excess warming is divided by what a full fire does to that
+    room, and rooms the fire affects most count most.
+    """
+    total_weight = 0.0
+    total = 0.0
+    for room in rooms:
+        if room.k_stove_per_hour <= 0 or room.hours <= 0:
+            continue
+        excess = room.observed_rise - room.predicted_rise
+        estimate = excess / (room.k_stove_per_hour * room.hours)
+        total += room.k_stove_per_hour * estimate
+        total_weight += room.k_stove_per_hour
+    if total_weight <= 0:
+        return None
+    return total / total_weight
+
+
+@dataclass(slots=True)
+class FireDetector:
+    """Hysteresis around the fire signal so one warm gust is not a fire."""
+
+    on_above: float = 0.5
+    off_below: float = 0.2
+    confirm: int = 2
+    release: int = 3
+    lit: bool = False
+    _streak: int = 0
+
+    def update(self, signal: float | None) -> bool:
+        if signal is None:
+            self._streak = 0
+            return self.lit
+        if not self.lit:
+            self._streak = self._streak + 1 if signal >= self.on_above else 0
+            if self._streak >= self.confirm:
+                self.lit, self._streak = True, 0
+        else:
+            self._streak = self._streak + 1 if signal <= self.off_below else 0
+            if self._streak >= self.release:
+                self.lit, self._streak = False, 0
+        return self.lit

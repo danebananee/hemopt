@@ -95,7 +95,7 @@ def test_recommend_windows_picks_expensive_cold_stretch():
     assert windows[0].start.hour >= 16
 
 
-def test_build_report_need_sensor():
+def test_build_report_asks_for_the_first_marked_fire():
     cfg = WoodStoveConfig(enabled=True)
     report = build_report(
         cfg,
@@ -103,7 +103,8 @@ def test_build_report_need_sensor():
         [],
         [],
     )
-    assert report.status == "need_sensor"
+    assert report.status == "not_started"
+    assert "Jag har tänt brasan" in report.summary
 
 
 def test_a_learnt_stove_is_priced_in_kronor():

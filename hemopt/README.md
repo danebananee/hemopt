@@ -47,9 +47,22 @@ huset hade kostat med kvartspris, dels med samma förbrukning, dels med
 hemopts styrning, och visar skillnaden per dag under fliken *Besparing*. Se
 [Besparingskalkylen](#besparingskalkylen).
 
-**Tipsar om braskaminen.** Med en givare vid kaminen lär sig hemopt hur många
-grader i timmen brasan ger varje rum, och pekar ut de kvällar då en brasa
-ersätter mest dyr värmepumpsel, med en uppskattning i kronor.
+**Lär sig vädret.** Varje rum lär sig hur mycket solen värmer det (utifrån
+solhöjd och molnighet) och hur mycket snabbare det tappar värme när det
+blåser. hemopt sparar själv sina mätningar i månader, så modellen tränas om
+var sjätte timme på allt längre historik, med nyare data viktad tyngst.
+
+**Lär sig braskaminen.** Tryck *Jag har tänt brasan* i panelen, eller slå på
+`switch.hemopt_wood_stove_lit` i Home Assistant, när du eldar. Efter några
+kvällar vet hemopt hur många grader i timmen brasan ger varje rum. Sedan
+känner den själv igen en tänd brasa, på att rummen blir varmare än värme, sol
+och väder förklarar, och pekar ut de kvällar då en brasa ersätter mest dyr
+värmepumpsel, med en uppskattning i kronor. En givare vid kaminen fungerar
+också och går fortare.
+
+**Fyller i förbrukningshistoriken.** Timmar som saknas hämtas ur Home
+Assistants långtidsstatistik för elmätaren, så effekttoppar och avtalsråd
+bygger på hela historiken från start.
 
 **Planerar mot vädret.** Utetemperaturen hämtas som timprognos från en
 weather-entitet. Utan prognos måste planeraren anta att det är lika varmt om
@@ -208,6 +221,12 @@ Med MQTT påslaget dyker enheten **Kostnadsoptimering** upp via autodiscovery:
 | `binary_sensor.hemopt_peak_guard` | Effektvakten begränsar just nu |
 | `sensor.hemopt_guard_reason` | Varför vakten gör som den gör |
 | `switch.hemopt_control_enabled` | Släpper in styrningen |
+| `switch.hemopt_wood_stove_lit` | Markera att brasan är tänd eller slocknad |
+| `sensor.hemopt_saving_today` | Vad kvartspris och styrning hade sparat idag |
+| `sensor.hemopt_saving_month` | Samma sak denna månad |
+| `sensor.hemopt_saving_month_contract` | Varav avtalsbytet, denna månad |
+| `sensor.hemopt_saving_month_control` | Varav styrningen, denna månad |
+| `sensor.hemopt_saving_per_day` | Snitt per dygn, senaste 30 dagarna |
 | `number.hemopt_priority_<rum>` | Rummets prioritet: 1 håll, 2 normal, 3 flexibel |
 
 Dashboardvyn ligger i `../dashboards/kostnadsoptimering.yaml`.
@@ -266,11 +285,14 @@ rumsluften:
 
 ```
 golv:  ds/dt = (u - s) / tau_golv
-luft:  dT/dt = (T_ute - T_inne) / tau + k_värme · s + k_brasa · brasa + k_gain
+luft:  dT/dt = (T_ute - T_inne) · (1/tau + k_vind · vind)
+               + k_värme · s + k_sol · sol + k_brasa · brasa + k_gain
 ```
 
 `u` är hur öppen slingan är, `s` hur mycket värme golvet faktiskt avger,
-`tau` rummets tröghet i timmar och `k_gain` sol- och internlaster. Med
+`tau` rummets tröghet i timmar, `sol` hur mycket sol som når huset (0–1,
+räknat ur solhöjden och prognosens molnighet), `vind` vinden i m/s och
+`k_gain` internlaster från människor och apparater. Med
 `tau_golv = 0` blir det den vanliga enkla rumsmodellen. För varje tänkbar
 golvfördröjning anpassas resten med minstakvadrat mot historiken, med
 icke-negativa koefficienter så att en brusig vecka inte kan producera ett rum

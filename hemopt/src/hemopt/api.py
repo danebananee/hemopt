@@ -115,6 +115,10 @@ async def _bootstrap(engine: Engine) -> None:
     except Exception:  # noqa: BLE001
         _LOGGER.exception("initial planning failed")
     try:
+        await engine.backfill_power_history()
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("consumption backfill failed")
+    try:
         await engine.refresh_advice()
     except Exception:  # noqa: BLE001
         _LOGGER.exception("initial advice failed")

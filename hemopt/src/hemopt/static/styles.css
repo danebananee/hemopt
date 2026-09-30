@@ -989,6 +989,16 @@ table.data tr.current td {
   fill: var(--heat);
 }
 
+.stove-actions {
+  margin: 4px 0 14px;
+}
+
+.stove-label {
+  margin-top: 12px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
 .windows {
   list-style: none;
   margin: 10px 0 0;

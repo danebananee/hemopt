@@ -24,10 +24,12 @@ from .explain import explain_plan, explain_upcoming, headline
 from .guard import GuardDecision, PeakGuard
 from .ha import (
     HomeAssistantClient,
+    StatePoint,
     climate_setpoints,
     is_climate,
     parse_numeric,
     resample_forecast,
+    wind_to_ms,
 )
 from .hotwater import TankSample, UsageProfile, build_profile, estimate_draws
 from .loop_mapping import (
@@ -69,16 +71,30 @@ from .thermal import (
     slab_alpha,
 )
 from .timeutil import floor_to_step, is_peak_window
+from .weather import sun_factor
 from .woodstove import (
+    FireDetector,
+    RoomExcess,
+    StoveSession,
     WoodStoveEffect,
     WoodStoveReading,
     WoodStoveReport,
     build_report,
     detect_lit,
+    fire_signal,
+    lit_at,
+    open_session,
     recommend_windows,
+    session_totals,
+    sessions_from_setting,
+    sessions_to_setting,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# How far back the room models are fitted, from hemopt's own log.
+TRAINING_DAYS = 60
+WEATHER_SAMPLE_IDS = ("weather:cloud_coverage", "weather:wind_ms")
 
 
 @dataclass(slots=True)
@@ -132,6 +148,17 @@ class Engine:
         self._step_covered_h = 0.0
         self._step_last: tuple[datetime, float] | None = None
         self.shadow_offset = TwinOffset.from_dict(self.store.setting("shadow_offset"))
+        # Weather: where the house is, what it is like now, and the forecast
+        # sun and wind per plan step.
+        self._location: tuple[float, float] | None = None
+        self._weather_now: dict[str, float] = {}
+        self._weather_plan: tuple[list[float], list[float]] | None = None
+        # Fires marked by hand, and the detector that learns to see them.
+        self.stove_sessions: list[StoveSession] = sessions_from_setting(
+            self.store.setting("stove_sessions")
+        )
+        self._fire_detector = FireDetector()
+        self._fire_checked: datetime | None = None
 
         self._mqtt: MqttBridge | None = None
         self._http: httpx.AsyncClient | None = None
@@ -204,6 +231,12 @@ class Engine:
             self._http = None
 
     def _handle_command(self, key: str, payload: str) -> None:
+        if key == "wood_stove_lit":
+            lit = payload.strip().lower() in {"true", "on", "1"}
+            self.mark_stove(lit)
+            _LOGGER.info("wood stove marked %s via MQTT", "lit" if lit else "out")
+            return
+
         if key == "control_enabled":
             enabled = payload.strip().lower() in {"true", "on", "1"}
             self.status.control_enabled = enabled
@@ -253,7 +286,35 @@ class Engine:
                 return None
             rows = await ha.states_full()
         self._setpoints = climate_setpoints(rows)
+        self._read_weather(rows, diagnosis)
         return {row["entity_id"]: row["state"] for row in rows}
+
+    def _read_weather(self, rows: list[dict], diagnosis: dict | None) -> None:
+        """Pick the house position and the current cloud and wind out of HA."""
+        site = self.config.site
+        if site.latitude is not None and site.longitude is not None:
+            self._location = (site.latitude, site.longitude)
+        elif diagnosis and "latitude" in diagnosis and "longitude" in diagnosis:
+            self._location = (float(diagnosis["latitude"]), float(diagnosis["longitude"]))
+        entity = site.weather_entity
+        if not entity:
+            return
+        row = next((r for r in rows if r.get("entity_id") == entity), None)
+        attrs = (row or {}).get("attributes") or {}
+        weather: dict[str, float] = {}
+        cloud = parse_numeric(
+            None if attrs.get("cloud_coverage") is None else str(attrs["cloud_coverage"])
+        )
+        if cloud is not None:
+            weather["cloud_coverage"] = cloud
+        wind = parse_numeric(None if attrs.get("wind_speed") is None else str(attrs["wind_speed"]))
+        if wind is not None:
+            weather["wind_ms"] = wind_to_ms(wind, attrs.get("wind_speed_unit"))
+        self._weather_now = weather
+
+    def sun_now(self, moment: datetime) -> float:
+        lat, lon = self._location if self._location else (None, None)
+        return sun_factor(moment, lat, lon, self._weather_now.get("cloud_coverage"))
 
     async def fetch_history(self, start: datetime) -> dict[str, list]:
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
@@ -276,10 +337,13 @@ class Engine:
                 value = parse_numeric(states.get(entity_id))
             if value is not None:
                 rows.append((entity_id, now, value))
+        for key, value in self._weather_now.items():
+            rows.append((f"weather:{key}", now, value))
         self.store.record_samples(rows)
         self.status.last_sample = now
-        self._update_wood_stove_reading(states, now)
         self._update_slab_estimates(states, now)
+        self._check_for_fire(states, now)
+        self._update_wood_stove_reading(states, now)
 
         total_entity = self.config.base_load.total_power_entity
         total_kw = parse_numeric(states.get(total_entity)) if total_entity else None
@@ -445,11 +509,71 @@ class Engine:
         _LOGGER.info("EXT heating block %s", "engaged" if block else "released")
 
     # --- learning ---------------------------------------------------------
+    async def fetch_weather_history(self, start: datetime) -> dict[str, list[StatePoint]]:
+        """Cloud cover and wind from the weather entity's recorder history."""
+        entity = self.config.site.weather_entity
+        if not entity:
+            return {}
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            if not await ha.ping():
+                return {}
+            series = await ha.history_attributes(entity, ["cloud_coverage", "wind_speed"], start)
+        return {
+            "weather:cloud_coverage": series.get("cloud_coverage", []),
+            "weather:wind_ms": series.get("wind_speed", []),
+        }
+
+    async def _training_history(self, now: datetime) -> dict[str, list[StatePoint]]:
+        """Everything known about the house, as far back as it goes.
+
+        Home Assistant keeps raw history for about ten days. hemopt logs the
+        same sensors itself every minute and keeps them for months, so each
+        refit sees a longer stretch of seasons and weather than the last.
+        """
+        ha_start = now - timedelta(days=self.config.home_assistant.history_days)
+        history: dict[str, list[StatePoint]] = dict(await self.fetch_history(ha_start) or {})
+        try:
+            history |= {k: v for k, v in (await self.fetch_weather_history(ha_start)).items() if v}
+        except Exception:  # noqa: BLE001 - weather history is optional
+            _LOGGER.exception("weather history unavailable")
+
+        since = now - timedelta(days=TRAINING_DAYS)
+        for entity in [*self._tracked_entities(), *WEATHER_SAMPLE_IDS]:
+            stored = self.store.samples_bucketed(entity, since, bucket_seconds=300)
+            if is_climate(entity):
+                # Before 0.2.0 a thermostat was logged as its mode, 1.0.
+                stored = [(moment, value) for moment, value in stored if value >= 5.0]
+            if not stored:
+                continue
+            merged = {point.moment: point.value for point in history.get(entity, [])}
+            for moment, value in stored:
+                merged.setdefault(moment, value)
+            history[entity] = [
+                StatePoint(moment, value) for moment, value in sorted(merged.items())
+            ]
+        return history
+
+    def _stove_lit_at(
+        self, moment: datetime, sensor: dict[datetime, float], sensor_times: list[datetime]
+    ) -> float:
+        """1.0 if a fire burned at `moment`, by sensor or by the household's mark."""
+        if sensor_times:
+            value = nearest_value(sensor, sensor_times, moment)
+            if value is not None and value >= 0.5:
+                return 1.0
+        hours = self.config.wood_stove.manual_session_hours
+        return 1.0 if lit_at(self.stove_sessions, moment, hours) else 0.0
+
+    def stove_rooms(self) -> list[str]:
+        """Rooms the fire is fitted for: the configured ones, or all of them."""
+        keys = self.config.wood_stove.room_keys
+        return list(keys) if keys else [room.key for room in self.config.rooms]
+
     async def train(self) -> None:
         """Refit the thermal models, hot water profile and base load."""
+        now = self._now()
         history_days = self.config.home_assistant.history_days
-        start = self._now() - timedelta(days=history_days)
-        history = await self.fetch_history(start)
+        history = await self._training_history(now)
         if not history:
             return
 
@@ -458,25 +582,37 @@ class Engine:
         outdoor_series = {point.moment: point.value for point in outdoor}
         outdoor_times = sorted(outdoor_series)
 
-        stove_on_by_time, stove_times = self._stove_history_series(history)
-        if stove_times:
-            sessions = 0
-            previous = False
-            for moment in stove_times:
-                lit = stove_on_by_time.get(moment, 0.0) >= 0.5
-                if lit and not previous:
-                    sessions += 1
-                previous = lit
-            hours_lit = 0.0
-            for earlier, later in zip(stove_times, stove_times[1:], strict=False):
-                if stove_on_by_time.get(earlier, 0.0) >= 0.5:
-                    hours_lit += max((later - earlier).total_seconds() / 3600.0, 0.0)
-            self.store.set_setting(
-                "wood_stove_stats",
-                {"sessions": sessions, "hours_lit": round(hours_lit, 2)},
-            )
+        cloud_series = {p.moment: p.value for p in history.get("weather:cloud_coverage", [])}
+        cloud_times = sorted(cloud_series)
+        wind_series = {p.moment: p.value for p in history.get("weather:wind_ms", [])}
+        wind_times = sorted(wind_series)
+        lat, lon = self._location if self._location else (None, None)
 
-        stove_rooms = set(self.config.wood_stove.room_keys)
+        sensor_on, sensor_times = self._stove_history_series(history)
+        sensor_sessions, sensor_hours = 0, 0.0
+        if sensor_times:
+            previous = False
+            for moment in sensor_times:
+                lit = sensor_on.get(moment, 0.0) >= 0.5
+                if lit and not previous:
+                    sensor_sessions += 1
+                previous = lit
+            for earlier, later in zip(sensor_times, sensor_times[1:], strict=False):
+                if sensor_on.get(earlier, 0.0) >= 0.5:
+                    sensor_hours += max((later - earlier).total_seconds() / 3600.0, 0.0)
+        manual_count, manual_hours = session_totals(
+            self.stove_sessions, now, self.config.wood_stove.manual_session_hours
+        )
+        self.store.set_setting(
+            "wood_stove_stats",
+            {
+                "sessions": sensor_sessions + manual_count,
+                "hours_lit": round(sensor_hours + manual_hours, 2),
+            },
+        )
+
+        stove_rooms = set(self.stove_rooms())
+        any_fire = bool(sensor_times) or bool(self.stove_sessions)
 
         for room in self.config.rooms:
             indoor = history.get(room.temperature_entity, [])
@@ -496,9 +632,10 @@ class Engine:
                     climate_by_time, climate_times, point.moment, point.value
                 )
                 stove_on = 0.0
-                if room.key in stove_rooms and stove_times:
-                    stove_val = nearest_value(stove_on_by_time, stove_times, point.moment)
-                    stove_on = 1.0 if stove_val is not None and stove_val >= 0.5 else 0.0
+                if any_fire and room.key in stove_rooms:
+                    stove_on = self._stove_lit_at(point.moment, sensor_on, sensor_times)
+                cloud = nearest_value(cloud_series, cloud_times, point.moment, 7200.0)
+                wind = nearest_value(wind_series, wind_times, point.moment, 7200.0)
                 samples.append(
                     ThermalSample(
                         moment=point.moment,
@@ -506,6 +643,8 @@ class Engine:
                         outdoor=nearest_outdoor,
                         heat_fraction=heat_fraction,
                         stove_on=stove_on,
+                        sun=sun_factor(point.moment, lat, lon, cloud),
+                        wind_ms=wind or 0.0,
                     )
                 )
 
@@ -519,14 +658,17 @@ class Engine:
                 self.models[room.key] = model
                 self.store.save_thermal_model(room.key, model)
                 _LOGGER.info(
-                    "%s: tau %.1f h, floor lag %.1f h, heat %.2f K/h, stove %.2f K/h, "
-                    "4 h error %.2f K",
+                    "%s: tau %.1f h, floor lag %.1f h, heat %.2f K/h, sun %.2f K/h, "
+                    "wind %.4f, stove %.2f K/h, 4 h error %.2f K over %.0f days",
                     room.name,
                     model.tau_hours,
                     model.tau_slab_hours,
                     model.k_heat_per_hour,
+                    model.k_sun_per_hour,
+                    model.k_wind_per_hour,
                     model.k_stove_per_hour,
                     model.rmse_4h if model.rmse_4h is not None else float("nan"),
+                    model.history_days,
                 )
 
         tank_entity = self.config.hot_water.top_temperature_entity
@@ -545,8 +687,14 @@ class Engine:
                 for point in history[tank_entity]
             ]
             events = estimate_draws(tank_samples, self.config.hot_water)
+            tank_points = history[tank_entity]
+            observed_days = (
+                (tank_points[-1].moment - tank_points[0].moment).total_seconds() / 86400.0
+                if len(tank_points) > 1
+                else history_days
+            )
             self.hot_water_profile = build_profile(
-                events, days_observed=history_days, prior=self.hot_water_profile
+                events, days_observed=max(observed_days, 1.0), prior=self.hot_water_profile
             )
             self.store.save_hot_water_profile(self.hot_water_profile)
             _LOGGER.info(
@@ -568,6 +716,47 @@ class Engine:
             _LOGGER.info("base load profile built from %d samples", self.base_load.samples)
 
         self.status.last_training = self._now()
+
+    async def backfill_power_history(self, days: int = 400) -> int:
+        """Fill missing or zeroed hours from Home Assistant's own records.
+
+        Long-term statistics reach back as far as Home Assistant has kept
+        them; where they are missing, the last ten days of raw history are
+        averaged per hour instead. Only closed hours are written, and only
+        where hemopt has nothing trustworthy of its own.
+        """
+        meter = self.config.base_load.total_power_entity
+        if not meter:
+            return 0
+        now = self._now()
+        current_hour = now.replace(minute=0, second=0, microsecond=0)
+        start = current_hour - timedelta(days=days)
+
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            if not await ha.ping():
+                return 0
+            rows = await ha.hourly_statistics(meter, start)
+            source = "statistics"
+            if not rows:
+                history = await ha.history([meter], now - timedelta(days=10))
+                rows = hourly_means(
+                    [(p.moment, _to_kw(p.value)) for p in history.get(meter, [])], current_hour
+                )
+                source = "history"
+
+        local = [
+            (moment.astimezone(self.tz).replace(minute=0, second=0, microsecond=0), kw)
+            for moment, kw in rows
+        ]
+        closed = [(moment, kw) for moment, kw in local if moment < current_hour and kw >= 0]
+        written = self.store.fill_hourly_power(closed)
+        self.store.set_setting(
+            "power_backfill",
+            {"at": now.isoformat(), "hours": written, "source": source, "seen": len(closed)},
+        )
+        if written:
+            _LOGGER.info("filled %d hours of consumption from Home Assistant %s", written, source)
+        return written
 
     async def analyse_loop_mapping(self) -> LoopMappingReport:
         """Temporary diagnostic: detect floor-loop ↔ thermostat cross-wiring.
@@ -635,10 +824,32 @@ class Engine:
             measured = parse_numeric(states.get(self.config.heat_pump.outdoor_entity))
 
         entity = self.config.site.weather_entity
+        lat, lon = self._location if self._location else (None, None)
+        # Without a forecast, assume today's cloud and wind hold.
+        cloud_now = self._weather_now.get("cloud_coverage")
+        wind_now = self._weather_now.get("wind_ms", 0.0)
+        self._weather_plan = (
+            [sun_factor(t, lat, lon, cloud_now) for t in times],
+            [wind_now] * len(times),
+        )
         if entity:
             async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
                 points = await ha.weather_forecast(entity)
             if points:
+                clouds = resample_forecast(
+                    points,
+                    times,
+                    fallback=cloud_now if cloud_now is not None else -1.0,
+                    field="cloud_coverage",
+                )
+                winds = resample_forecast(points, times, fallback=wind_now, field="wind_ms")
+                self._weather_plan = (
+                    [
+                        sun_factor(t, lat, lon, cloud if cloud >= 0 else None)
+                        for t, cloud in zip(times, clouds, strict=True)
+                    ],
+                    winds,
+                )
                 series = resample_forecast(points, times, fallback=measured or 0.0)
                 if measured is not None:
                     bias = measured - series[0]
@@ -832,6 +1043,8 @@ class Engine:
             solver_time_limit_s=settings.solver_time_limit_s,
             mip_gap=settings.mip_gap,
             move_penalty_sek=settings.move_penalty_sek,
+            sun=self._weather_plan[0] if self._weather_plan else None,
+            wind_ms=self._weather_plan[1] if self._weather_plan else None,
         )
 
         try:
@@ -965,37 +1178,154 @@ class Engine:
         payload["control_enabled"] = self.status.control_enabled
         return payload
 
-    def _update_wood_stove_reading(self, states: dict[str, str], now: datetime) -> None:
-        cfg = self.config.wood_stove
-        if not cfg.enabled:
-            self.wood_stove = build_report(cfg, WoodStoveReading(), [], [])
-            return
-        binary = None
-        if cfg.binary_entity:
-            raw = parse_numeric(states.get(cfg.binary_entity))
-            binary = None if raw is None else raw >= 0.5
-        temp = None
-        if cfg.temperature_entity:
-            temp = parse_numeric(states.get(cfg.temperature_entity))
-        reading = detect_lit(
-            cfg,
-            binary_on=binary,
-            temperature_c=temp,
-            previously_lit=self._wood_stove_lit,
+    def savings_sensors(self) -> dict[str, float]:
+        """Headline savings figures for Home Assistant sensors.
+
+        Today and this month are calendar periods; the daily average is over
+        the last 30 days so it is not dragged around by a half-finished month.
+        """
+        now = self._now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        since = min(month_start, now - timedelta(days=30))
+        steps = self.store.shadow_steps(since, self.tz)
+        month = summarise([s for s in steps if s.start >= month_start], self.config, self.tz)
+        recent = summarise(
+            [s for s in steps if s.start >= now - timedelta(days=30)], self.config, self.tz
         )
+        today = next((day for day in month["days"] if day["day"] == now.date().isoformat()), None)
+        return {
+            "saving_today": round(today["total_sek"], 2) if today else 0.0,
+            "saving_month": round(month["totals"]["total_sek"], 2),
+            "saving_month_contract": round(month["totals"]["contract_effect_sek"], 2),
+            "saving_month_control": round(month["totals"]["control_effect_sek"], 2),
+            "saving_per_day": round(recent["saving_per_day_sek"] or 0.0, 2),
+        }
+
+    def _has_stove_sensor(self) -> bool:
+        cfg = self.config.wood_stove
+        return bool(cfg.binary_entity or cfg.temperature_entity)
+
+    def _update_wood_stove_reading(self, states: dict[str, str], now: datetime) -> None:
+        """Is a fire burning? A sensor decides if there is one; otherwise the
+        household's mark, and failing that the model's own detection."""
+        cfg = self.config.wood_stove
+        if self._has_stove_sensor():
+            binary = None
+            if cfg.binary_entity:
+                raw = parse_numeric(states.get(cfg.binary_entity))
+                binary = None if raw is None else raw >= 0.5
+            temp = None
+            if cfg.temperature_entity:
+                temp = parse_numeric(states.get(cfg.temperature_entity))
+            reading = detect_lit(
+                cfg,
+                binary_on=binary,
+                temperature_c=temp,
+                previously_lit=self._wood_stove_lit,
+            )
+        elif open_session(self.stove_sessions, now, cfg.manual_session_hours) is not None:
+            reading = WoodStoveReading(lit=True, source="manual")
+        elif self._fire_detector.lit:
+            reading = WoodStoveReading(lit=True, source="model")
+        else:
+            reading = WoodStoveReading(lit=False, source="model" if self._fire_rooms() else "none")
         reading.updated_at = now
+        changed = reading.lit != self._wood_stove_lit
         self._wood_stove_lit = reading.lit
-        # Keep effects/windows from last refresh; only update live reading.
+        # Keep effects/windows from last refresh; only update the live reading.
         self.wood_stove.reading = reading
-        if reading.lit and self.wood_stove.status not in {"lit", "disabled"}:
+        if changed:
             self.refresh_wood_stove()
+
+    def _fire_rooms(self) -> list[tuple[str, ThermalModel]]:
+        """Rooms whose models have learnt a clear response to the fire."""
+        rooms = []
+        for key in self.stove_rooms():
+            model = self.models.get(key)
+            if model is not None and model.fitted and model.k_stove_per_hour >= 0.1:
+                rooms.append((key, model))
+        return rooms
+
+    def _check_for_fire(self, states: dict[str, str], now: datetime) -> None:
+        """Recognise a fire from rooms warming faster than the model explains.
+
+        Runs every five minutes once the fire's effect has been learnt from
+        marked fires, and only when no stove sensor is configured. Each room's
+        last 30 minutes are replayed through its model without a fire; the
+        unexplained warming, scaled by what a fire does to that room, is the
+        fire signal.
+        """
+        if self._has_stove_sensor():
+            return
+        if self._fire_checked is not None and now - self._fire_checked < timedelta(minutes=5):
+            return
+        self._fire_checked = now
+        fire_rooms = self._fire_rooms()
+        if not fire_rooms:
+            return
+        outdoor = (
+            parse_numeric(states.get(self.config.heat_pump.outdoor_entity))
+            if self.config.heat_pump.outdoor_entity
+            else None
+        )
+        if outdoor is None:
+            return
+        wind = self._weather_now.get("wind_ms", 0.0)
+        sun = self.sun_now(now)
+        since = now - timedelta(minutes=30)
+        excess: list[RoomExcess] = []
+        for key, model in fire_rooms:
+            room = self.config.room(key)
+            readings = self.store.samples(room.temperature_entity, since)
+            if len(readings) < 5:
+                continue
+            (first_at, first), (last_at, last) = readings[0], readings[-1]
+            hours = (last_at - first_at).total_seconds() / 3600.0
+            if hours < 0.4:
+                continue
+            setpoint = self._setpoints.get(room.climate_entity or "")
+            loop = (
+                call_for_heat(setpoint, first)
+                if setpoint is not None
+                else model.steady_heat_fraction(first, outdoor, sun=sun, wind_ms=wind)
+            )
+            predicted = first
+            slab = self._slab.get(key, loop)
+            steps = max(int(round(hours / 0.25)), 1)
+            for _ in range(steps):
+                predicted, slab = model.advance(
+                    predicted, slab, outdoor, loop, hours / steps, sun=sun, wind_ms=wind
+                )
+            excess.append(
+                RoomExcess(model.k_stove_per_hour, last - first, predicted - first, hours)
+            )
+        self._fire_detector.update(fire_signal(excess))
+
+    def mark_stove(self, lit: bool) -> WoodStoveReport:
+        """The household says a fire has been lit, or has gone out."""
+        now = self._now()
+        hours = self.config.wood_stove.manual_session_hours
+        current = open_session(self.stove_sessions, now, hours)
+        if lit and current is None:
+            self.stove_sessions.append(StoveSession(start=now))
+        elif not lit and current is not None:
+            current.end = now
+        if not lit:
+            # Marked out by hand: trust that over the detector.
+            self._fire_detector.lit = False
+        self.store.set_setting("stove_sessions", sessions_to_setting(self.stove_sessions))
+        self.wood_stove.reading = WoodStoveReading(lit=lit, source="manual", updated_at=now)
+        self._wood_stove_lit = lit
+        report = self.refresh_wood_stove()
+        if self.plan is not None:
+            # Let the switch in Home Assistant follow at once, not next plan.
+            self._publish(self.plan, now)
+        return report
 
     def _stove_history_series(
         self, history: dict[str, list]
     ) -> tuple[dict[datetime, float], list[datetime]]:
         cfg = self.config.wood_stove
-        if not cfg.enabled:
-            return {}, []
         series: dict[datetime, float] = {}
         if cfg.binary_entity and cfg.binary_entity in history:
             for point in history[cfg.binary_entity]:
@@ -1015,12 +1345,15 @@ class Engine:
         cfg = self.config.wood_stove
         reading = self.wood_stove.reading
         effects: list[WoodStoveEffect] = []
-        for key in cfg.room_keys:
+        for key in self.stove_rooms():
             try:
                 room = self.config.room(key)
             except KeyError:
                 continue
-            model = self.models.get(key, ThermalModel.default())
+            model = self.models.get(key) or ThermalModel.default(room.resolved_floor_type)
+            if not cfg.room_keys and model.k_stove_per_hour <= 0.02:
+                # With every room a candidate, list only those the fire reaches.
+                continue
             eq = None
             if model.k_heat_per_hour > 0.05 and model.k_stove_per_hour > 0.0:
                 eq = (model.k_stove_per_hour / model.k_heat_per_hour) * self._nominal_heat_kw(
@@ -1070,6 +1403,7 @@ class Engine:
             windows,
             sessions_observed=sessions,
             hours_lit_observed=hours,
+            manual_sessions=len(self.stove_sessions),
         )
         return self.wood_stove
 
@@ -1278,7 +1612,12 @@ class Engine:
             ),
             "in_peak_window": _json_bool(in_window),
             "control_enabled": _json_bool(self.status.control_enabled),
+            "wood_stove_lit": _json_bool(self.wood_stove.reading.lit),
         }
+        try:
+            payload |= self.savings_sensors()
+        except Exception:  # noqa: BLE001 - a ledger hiccup must not stop publishing
+            _LOGGER.exception("savings sensors failed")
 
         for room_plan in plan.rooms:
             payload[f"setpoint_{room_plan.key}"] = room_plan.setpoint[index]
@@ -1379,6 +1718,10 @@ class Engine:
         while True:
             try:
                 await self.train()
+                try:
+                    await self.backfill_power_history()
+                except Exception:  # noqa: BLE001 - history is a nice-to-have
+                    _LOGGER.exception("consumption backfill failed")
                 await self.refresh_advice()
                 self.store.housekeeping()
             except Exception:  # noqa: BLE001
@@ -1392,6 +1735,30 @@ def _json_bool(value: bool) -> str:
 
 def _to_kw(value: float) -> float:
     return value / 1000.0 if value > 100 else value
+
+
+def hourly_means(
+    points: list[tuple[datetime, float]], until: datetime
+) -> list[tuple[datetime, float]]:
+    """Time-weighted mean power per clock hour from state changes.
+
+    A sensor's state holds until it changes, so each reading counts for the
+    time until the next one. Hours covered for less than half are dropped.
+    """
+    ordered = sorted(points)
+    energy: dict[datetime, float] = {}
+    covered: dict[datetime, float] = {}
+    for (moment, kw), (following, _) in zip(ordered, [*ordered[1:], (until, 0.0)], strict=True):
+        cursor = moment
+        end = min(following, until, moment + timedelta(hours=2))
+        while cursor < end:
+            hour = cursor.replace(minute=0, second=0, microsecond=0)
+            slice_end = min(end, hour + timedelta(hours=1))
+            hours = (slice_end - cursor).total_seconds() / 3600.0
+            energy[hour] = energy.get(hour, 0.0) + kw * hours
+            covered[hour] = covered.get(hour, 0.0) + hours
+            cursor = slice_end
+    return [(hour, energy[hour] / covered[hour]) for hour in sorted(energy) if covered[hour] >= 0.5]
 
 
 def _heat_fraction(

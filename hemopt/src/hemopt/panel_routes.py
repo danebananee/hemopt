@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 
 
 class PriorityUpdate(BaseModel):
@@ -34,6 +34,10 @@ class ComfortUpdate(BaseModel):
 
 class ControlUpdate(BaseModel):
     enabled: bool
+
+
+class StoveUpdate(BaseModel):
+    lit: bool
 
 
 class MeterUpdate(BaseModel):
@@ -163,6 +167,8 @@ def status_payload(engine) -> dict[str, Any]:
         "guard_blocking": engine.guard_decision.block,
         "guard_reason": engine.guard_decision.reason,
         "wood_stove_enabled": engine.config.wood_stove.enabled,
+        "power_backfill": engine.store.setting("power_backfill"),
+        "location_known": engine._location is not None,  # noqa: SLF001
     }
 
     # Spot is independent of Home Assistant — surface it even before a plan.
@@ -248,6 +254,9 @@ def rooms_payload(engine) -> list[dict[str, Any]]:
                     "k_stove_per_hour": round(model.k_stove_per_hour, 3),
                     "r_squared": round(model.r_squared, 3),
                     "rmse_4h": model.rmse_4h,
+                    "k_sun_per_hour": round(model.k_sun_per_hour, 3),
+                    "k_wind_per_hour": round(model.k_wind_per_hour, 5),
+                    "history_days": model.history_days,
                     "samples": model.samples,
                     "fitted": model.fitted,
                 },
@@ -633,6 +642,11 @@ def register_panel_routes(
         engine = require_engine()
         engine.refresh_wood_stove()
         return engine.wood_stove.as_dict()
+
+    @app.post("/api/wood-stove/lit")
+    async def mark_wood_stove(update: StoveUpdate) -> dict[str, Any]:
+        """The household marks a fire as lit or out; the models learn from it."""
+        return require_engine().mark_stove(update.lit).as_dict()
 
     @app.get("/api/advice")
     async def advice() -> dict[str, Any]:

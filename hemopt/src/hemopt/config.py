@@ -133,6 +133,10 @@ class SiteConfig(BaseModel):
     # planner has to assume the current temperature holds for 36 hours, which
     # systematically mis-sizes pre-heating ahead of a cold snap.
     weather_entity: str | None = None
+    # The house's position, for the sun model. Taken from Home Assistant's
+    # own settings when left out.
+    latitude: float | None = None
+    longitude: float | None = None
 
     @property
     def fuse_limit_kw(self) -> float:
@@ -470,8 +474,12 @@ class WoodStoveConfig(BaseModel):
     binary_entity: str | None = None
     lit_above_c: float = 40.0
     lit_below_c: float = 30.0
-    # Rooms that actually feel the fire. Empty = none (must be set).
+    # Rooms that feel the fire. Empty means every room: the model then works
+    # out from the data which rooms the fire actually reaches.
     room_keys: list[str] = Field(default_factory=list)
+    # How long a fire marked lit by hand is assumed to burn if nobody marks
+    # it out again.
+    manual_session_hours: float = 4.0
 
 
 class HomeAssistantConfig(BaseModel):
