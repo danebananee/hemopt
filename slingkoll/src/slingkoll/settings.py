@@ -35,14 +35,46 @@ class Settings:
     hp_boost_max: float = 3.0
     max_blocks: int = 2
     configured: bool = False
+    # Floor name -> "slow" or "fast". Loops only heat rooms on their own floor.
+    floor_kinds: dict[str, str] = field(default_factory=dict)
+    # Test one floor at a time; None tests every selected thermostat at once.
+    test_floor: str | None = None
+
+    @property
+    def floors(self) -> list[str]:
+        seen: list[str] = []
+        for item in self.thermostats + self.extra_sensors:
+            floor = item.get("floor") or ""
+            if floor and floor not in seen:
+                seen.append(floor)
+        return seen
+
+    def test_thermostats(self) -> list[dict[str, str]]:
+        if not self.test_floor:
+            return list(self.thermostats)
+        return [t for t in self.thermostats if t.get("floor") == self.test_floor]
+
+    def test_sensors(self) -> list[dict[str, str]]:
+        if not self.test_floor:
+            return list(self.extra_sensors)
+        return [s for s in self.extra_sensors if s.get("floor") in {"", None, self.test_floor}]
 
     @property
     def phase_hours(self) -> float:
-        return FLOOR_PHASE_HOURS.get(self.floor, 3.0)
+        if self.test_floor:
+            kind = self.floor_kinds.get(self.test_floor, self.floor)
+        elif self.floor_kinds:
+            # Every floor at once: the slowest floor sets the pace.
+            kind = "slow" if "slow" in self.floor_kinds.values() else "fast"
+        else:
+            kind = self.floor
+        return FLOOR_PHASE_HOURS.get(kind, 3.0)
 
     def as_dict(self) -> dict[str, Any]:
         out = asdict(self)
         out["phase_hours"] = self.phase_hours
+        out["floors"] = self.floors
+        out["test_count"] = len(self.test_thermostats())
         return out
 
     @classmethod
@@ -59,6 +91,7 @@ class Settings:
                 if not str(item.get("entity_id", "")).strip():
                     raise ValueError("En vald givare saknar entitet.")
                 item["name"] = str(item.get("name") or item["entity_id"]).strip()
+                item["floor"] = str(item.get("floor") or "").strip()
         ids = [item["entity_id"] for item in self.thermostats + self.extra_sensors]
         if len(ids) != len(set(ids)):
             raise ValueError("Samma entitet är vald två gånger.")
@@ -75,6 +108,14 @@ class Settings:
         if self.floor not in FLOOR_PHASE_HOURS:
             self.floor = "slow"
         self.max_blocks = max(1, min(5, int(self.max_blocks)))
+        floors = self.floors
+        self.floor_kinds = {
+            str(name): kind
+            for name, kind in dict(self.floor_kinds or {}).items()
+            if name in floors and kind in FLOOR_PHASE_HOURS
+        }
+        if self.test_floor not in floors:
+            self.test_floor = None
 
 
 def load_settings(path: Path | None = None) -> Settings:

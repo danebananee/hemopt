@@ -312,8 +312,16 @@ def analyse(
     tz: tzinfo | None = None,
     source: str = "test",
     block_minutes: int = BLOCK_MINUTES,
+    floors: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Verdict per thermostat, and what to change, as a JSON-ready dict."""
+    """Verdict per thermostat, and what to change, as a JSON-ready dict.
+
+    `floors` maps thermostat and sensor keys to a floor. A loop is then only
+    considered for rooms on its own floor: loops on separate manifolds cannot
+    heat each other's rooms, and leaving them out removes most of what
+    otherwise passes for heat from the wrong floor.
+    """
+    floors = {key: value for key, value in (floors or {}).items() if value}
     thermos = [Place(key, name, True) for key, name in thermostats]
     places = thermos + [Place(key, name, False) for key, name in extra_rooms]
     names = {p.key: p.name for p in places}
@@ -351,7 +359,14 @@ def analyse(
     fits: dict[str, RoomFit] = {}
     if varying:
         for place in places:
-            fit = _fit_room(place.key, data, varying, dt_h, tz, with_daily=hours >= 36)
+            candidates = [
+                tk
+                for tk in varying
+                if not floors.get(tk) or not floors.get(place.key) or floors[tk] == floors[place.key]
+            ]
+            if not candidates:
+                continue
+            fit = _fit_room(place.key, data, candidates, dt_h, tz, with_daily=hours >= 36)
             if fit is not None:
                 fits[place.key] = fit
     for place in places:
@@ -373,6 +388,7 @@ def analyse(
                 "z": round(fit.effects[tk] / fit.errors[tk], 1),
             }
             for key, fit in fits.items()
+            if tk in fit.effects
         }
         for tk in varying
     }
@@ -432,7 +448,11 @@ def _verdict(
     thermo: Place, fits: dict[str, RoomFit], names: dict[str, str], *, capped: bool
 ) -> dict[str, Any]:
     ranked = sorted(
-        ((key, fit.effects[thermo.key], fit.errors[thermo.key]) for key, fit in fits.items()),
+        (
+            (key, fit.effects[thermo.key], fit.errors[thermo.key])
+            for key, fit in fits.items()
+            if thermo.key in fit.effects
+        ),
         key=lambda item: item[1],
         reverse=True,
     )

@@ -244,7 +244,7 @@ function renderResult(run, active) {
     $("result-sub").textContent =
       `Efter ${Math.round(result.hours)} timmar. Svaren blir säkrare för varje fas.`;
   } else {
-    $("result-title").textContent = "Resultat";
+    $("result-title").textContent = run.floor ? `Resultat, ${run.floor.toLowerCase()}` : "Resultat";
     $("result-sub").textContent =
       `Test ${fmtWhen(run.started)} – ${fmtWhen(run.ended)}, ${Math.round(result.hours)} timmars mätning.` +
       (settled ? "" : " Alla svar blev inte säkra; kör gärna om testet en kallare dag.");
@@ -347,6 +347,10 @@ function renderSetupSummary() {
   const s = state.status.settings;
   const parts = [];
   parts.push(s.thermostats.length ? `${s.thermostats.length} termostater` : "Inga termostater valda");
+  if (s.floors.length) {
+    const count = (floor) => s.thermostats.filter((t) => t.floor === floor).length;
+    parts.push(s.floors.map((floor) => `${count(floor)} på ${floor.toLowerCase()}`).join(", "));
+  }
   if (s.extra_sensors.length) parts.push(`${s.extra_sensors.length} extra givare`);
   parts.push(s.supply_entity ? "framledning mäts" : "ingen framledningsgivare");
   parts.push(s.hp_setpoint_entity ? "värmepumpen kan höjas vid behov" : "värmepumpen styrs inte");
@@ -357,11 +361,15 @@ function renderSetupSummary() {
 
 function renderHow() {
   const s = state.status.settings;
-  const n = s.thermostats.length;
+  const n = s.test_count;
+  renderFloorChoice(s);
   const phases = Math.max(8, 4 * Math.ceil((n + 1) / 4));
   const hours = phases * s.phase_hours;
   const items = [
-    `Termostaterna ställs omväxlande på ${s.open_setpoint} °C (slingan öppen) och ${s.closed_setpoint} °C (stängd), ` +
+    (s.test_floor
+      ? `Bara ${s.test_floor.toLowerCase()} testas; övriga termostater går som vanligt. Testa nästa våning när den här är klar. `
+      : "") +
+      `Termostaterna ställs omväxlande på ${s.open_setpoint} °C (slingan öppen) och ${s.closed_setpoint} °C (stängd), ` +
       `i ${phases} faser à ${s.phase_hours} timmar – ungefär ${fmtDuration(hours * 3600)}. Hälften av slingorna är på åt gången.`,
     "Slingkoll ser vilka rum som blir varmare när en viss termostat är på, och räknar ut vilken slinga som hör till vilket rum.",
     `Rummen hålls mellan ${s.min_temp} och ${s.max_temp} °C. Blir ett rum kallare eller varmare pausas testet och allt går som vanligt tills det har hämtat sig.`,
@@ -374,6 +382,40 @@ function renderHow() {
   items.push("Bäst resultat när det är kallt ute. Låt dörrarna vara som vanligt och elda inte i kaminen under testet.");
   $("how").replaceChildren(...items.map((text) => el("li", { text })));
   $("start-btn").disabled = n < 2 || state.busy;
+}
+
+function renderFloorChoice(s) {
+  const box = $("floor-choice");
+  if (!s.floors.length) {
+    box.replaceChildren();
+    return;
+  }
+  const count = (floor) => (floor ? s.thermostats.filter((t) => t.floor === floor).length : s.thermostats.length);
+  const choose = async (floor) => {
+    if ((floor || null) === (s.test_floor || null)) return;
+    try {
+      await api("api/settings", { method: "PUT", body: { test_floor: floor } });
+      await refresh();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  const options = [...s.floors.map((floor) => [floor, floor]), [null, "Alla våningar"]];
+  box.replaceChildren(
+    el("span", { class: "muted small", text: "Testa:" }),
+    el(
+      "div",
+      { class: "segmented", role: "group", "aria-label": "Våning att testa" },
+      options.map(([floor, label]) =>
+        el("button", {
+          type: "button",
+          "aria-pressed": String((floor || null) === (s.test_floor || null)),
+          text: `${label} (${count(floor)})`,
+          onclick: () => choose(floor),
+        }),
+      ),
+    ),
+  );
 }
 
 async function openEditor() {
@@ -401,6 +443,8 @@ function buildForm() {
   const form = $("settings-form");
   const chosen = new Map(s.thermostats.map((t) => [t.entity_id, t.name]));
   const extra = new Map(s.extra_sensors.map((t) => [t.entity_id, t.name]));
+  const floorOf = new Map([...s.thermostats, ...s.extra_sensors].map((t) => [t.entity_id, t.floor || ""]));
+  const floorNames = [...new Set(["Övervåning", "Bottenvåning", ...s.floors])];
 
   const pickRow = (group, item, checked, name) =>
     el(
@@ -408,8 +452,32 @@ function buildForm() {
       { class: "pick" },
       el("input", { type: "checkbox", "data-group": group, "data-entity": item.entity_id, checked }),
       el("input", { type: "text", value: name, "data-name-for": item.entity_id, "aria-label": `Namn på ${item.entity_id}` }),
+      el("input", {
+        type: "text",
+        list: "floor-names",
+        placeholder: "Våning",
+        value: floorOf.get(item.entity_id) || "",
+        "data-floor-for": item.entity_id,
+        "aria-label": `Våning för ${item.entity_id}`,
+      }),
       el("small", { text: item.entity_id }),
     );
+
+  const kindRows = s.floors.length
+    ? s.floors.map((floor, index) =>
+        el(
+          "label",
+          { class: "field" },
+          el("span", { text: floor }),
+          el(
+            "select",
+            { id: `f-kind-${index}`, "data-floor": floor },
+            el("option", { value: "slow", selected: (s.floor_kinds[floor] || s.floor) === "slow", text: "Betongplatta – 3 timmar per fas" }),
+            el("option", { value: "fast", selected: (s.floor_kinds[floor] || s.floor) === "fast", text: "Trägolv på bjälklag/spånskiva – 2 timmar per fas" }),
+          ),
+        ),
+      )
+    : null;
 
   const select = (id, label, options, value, hint) =>
     el(
@@ -435,7 +503,13 @@ function buildForm() {
       "fieldset",
       {},
       el("legend", { text: "Termostater som ska testas" }),
-      el("p", { class: "muted small", text: "Namnet är rummet där termostaten sitter. Ändra om det inte stämmer." }),
+      el("p", {
+        class: "muted small",
+        text:
+          "Namnet är rummet där termostaten sitter. Våningen anger vilka rum slingan kan ligga i: " +
+          "en slinga räknas bara mot rum på samma våning. Har våningarna egna fördelningsskåp, ange dem.",
+      }),
+      el("datalist", { id: "floor-names" }, floorNames.map((name) => el("option", { value: name }))),
       thermos,
     ),
     el(
@@ -473,18 +547,22 @@ function buildForm() {
         el("label", { class: "field" }, el("span", { text: "Lägsta rumstemperatur" }), el("input", { type: "number", id: "f-min", step: "0.5", value: s.min_temp })),
         el("label", { class: "field" }, el("span", { text: "Högsta rumstemperatur" }), el("input", { type: "number", id: "f-max", step: "0.5", value: s.max_temp })),
       ),
-      el(
-        "label",
-        { class: "radio" },
-        el("input", { type: "radio", name: "floor", value: "slow", checked: s.floor === "slow" }),
-        el("span", {}, el("strong", { text: "Betongplatta någonstans i huset" }), " – 3 timmar per fas"),
-      ),
-      el(
-        "label",
-        { class: "radio" },
-        el("input", { type: "radio", name: "floor", value: "fast", checked: s.floor === "fast" }),
-        el("span", {}, el("strong", { text: "Bara trägolv på bjälklag eller spånskiva" }), " – 2 timmar per fas"),
-      ),
+      kindRows
+        ? el("div", { class: "field-row" }, kindRows)
+        : [
+            el(
+              "label",
+              { class: "radio" },
+              el("input", { type: "radio", name: "floor", value: "slow", checked: s.floor === "slow" }),
+              el("span", {}, el("strong", { text: "Betongplatta någonstans i huset" }), " – 3 timmar per fas"),
+            ),
+            el(
+              "label",
+              { class: "radio" },
+              el("input", { type: "radio", name: "floor", value: "fast", checked: s.floor === "fast" }),
+              el("span", {}, el("strong", { text: "Bara trägolv på bjälklag eller spånskiva" }), " – 2 timmar per fas"),
+            ),
+          ],
     ),
     el("div", { class: "actions" }, el("button", { type: "submit", class: "btn primary", text: "Spara" })),
   );
@@ -497,9 +575,12 @@ async function saveSettings(event) {
     [...form.querySelectorAll(`input[data-group="${group}"]:checked`)].map((box) => {
       const entity = box.dataset.entity;
       const name = form.querySelector(`input[data-name-for="${CSS.escape(entity)}"]`).value.trim();
-      return { entity_id: entity, name: name || entity };
+      const floor = form.querySelector(`input[data-floor-for="${CSS.escape(entity)}"]`).value.trim();
+      return { entity_id: entity, name: name || entity, floor };
     });
   const floor = form.querySelector('input[name="floor"]:checked');
+  const floorKinds = {};
+  form.querySelectorAll("select[data-floor]").forEach((box) => (floorKinds[box.dataset.floor] = box.value));
   const body = {
     thermostats: collect("thermo"),
     extra_sensors: collect("extra"),
@@ -509,7 +590,8 @@ async function saveSettings(event) {
     hemopt_switch_entity: $("f-hemopt").value || null,
     min_temp: Number($("f-min").value),
     max_temp: Number($("f-max").value),
-    floor: floor ? floor.value : "slow",
+    floor: floor ? floor.value : state.status.settings.floor,
+    floor_kinds: floorKinds,
   };
   try {
     await api("api/settings", { method: "PUT", body });

@@ -30,7 +30,7 @@ from zoneinfo import ZoneInfo
 
 from .analysis import Sample, analyse, inferred_valve
 from .design import make_design
-from .discovery import default_settings, discover
+from .discovery import default_settings, discover, fill_floors
 from .ha import HAError, number
 from .settings import Settings, data_dir, load_settings, save_settings
 
@@ -137,6 +137,8 @@ class Runner:
                 if not self.settings.configured:
                     self.settings = default_settings(self.found, self.settings)
                     save_settings(self.settings, self.dir / "settings.json")
+                elif fill_floors(self.settings):
+                    save_settings(self.settings, self.dir / "settings.json")
                 _LOGGER.info(
                     "found %d thermostats, %d selected",
                     len(self.found["thermostats"]),
@@ -183,11 +185,12 @@ class Runner:
             if self.run and self.run.get("status") in ACTIVE:
                 raise ValueError("Ett test pågår redan.")
             settings = self.settings
-            if len(settings.thermostats) < 2:
-                raise ValueError("Välj minst två termostater.")
+            chosen = settings.test_thermostats()
+            if len(chosen) < 2:
+                raise ValueError("Välj minst två termostater att testa.")
             states = {s["entity_id"]: s for s in self.ha.states()}
             originals: dict[str, float] = {}
-            for thermo in settings.thermostats:
+            for thermo in chosen:
                 state = states.get(thermo["entity_id"])
                 target = number((state or {}).get("attributes", {}).get("temperature"))
                 if target is None:
@@ -213,9 +216,10 @@ class Runner:
                 "status": "running",
                 "started": now,
                 "ended": None,
-                "thermostats": [dict(t) for t in settings.thermostats],
-                "extra": [dict(s) for s in settings.extra_sensors],
-                "design": make_design(len(settings.thermostats), seed=1),
+                "thermostats": [dict(t) for t in chosen],
+                "extra": [dict(s) for s in settings.test_sensors()],
+                "floor": settings.test_floor,
+                "design": make_design(len(chosen), seed=1),
                 "blocks": 1,
                 "phase": 0,
                 "phase_active_s": 0.0,
@@ -236,7 +240,9 @@ class Runner:
                 self._call("switch", "turn_off", {"entity_id": switch})
                 self._event("hemopt:s styrning är avstängd under testet.")
             self._event(
-                f"Testet startade med {len(settings.thermostats)} termostater, "
+                f"Testet startade med {len(chosen)} termostater"
+                + (f" på {settings.test_floor.lower()}" if settings.test_floor else "")
+                + ", "
                 f"{len(self.run['design'])} faser à {settings.phase_hours:g} h."
             )
             self._save_run()
@@ -301,6 +307,8 @@ class Runner:
                 self.found = discover(list(states.values()))
                 if not self.settings.configured:
                     self.settings = default_settings(self.found, self.settings)
+                    save_settings(self.settings, self.dir / "settings.json")
+                elif fill_floors(self.settings):
                     save_settings(self.settings, self.dir / "settings.json")
             self._update_live(states)
             run = self.run
@@ -564,6 +572,7 @@ class Runner:
             [(s["entity_id"], s["name"]) for s in run["extra"]],
             tz=self.tz,
             source="test",
+            floors=_floor_map(run["thermostats"] + run["extra"]),
         )
 
     def quick_check(self, days: float = 7.0) -> dict[str, Any]:
@@ -586,6 +595,7 @@ class Runner:
             [(s["entity_id"], s["name"]) for s in settings.extra_sensors],
             tz=self.tz,
             source="history",
+            floors=_floor_map(thermos + settings.extra_sensors),
         )
         result["symptoms"] = symptoms(samples, thermos)
         result["days"] = days
@@ -636,6 +646,7 @@ class Runner:
                     "extra",
                     "hp",
                     "tolerated",
+                    "floor",
                 )
             }
             payload["run"].update(
@@ -670,6 +681,10 @@ class Runner:
                     }
                 )
             return {"points": points}
+
+
+def _floor_map(items: list[dict[str, str]]) -> dict[str, str]:
+    return {item["entity_id"]: item.get("floor") or "" for item in items}
 
 
 def _setpoint_of(state: dict[str, Any] | None) -> float | None:

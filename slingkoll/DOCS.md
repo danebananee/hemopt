@@ -27,6 +27,10 @@ bort, eller om namnen inte stämmer med rummen termostaterna sitter i. Har du
 temperaturgivare i rum utan egen termostat, till exempel hall eller badrum,
 kryssa i dem också. Då syns det om en slinga egentligen värmer ett sådant rum.
 
+Ange också **våning** för varje termostat. En slinga räknas bara mot rum på
+samma våning, vilket är rätt när våningarna har egna fördelningsskåp. Under
+**Under testet** väljer du golvtyp per våning.
+
 **2. Snabbkoll i historiken (valfritt).** Letar på några sekunder efter
 typiska tecken i det Home Assistant sparat senaste veckan. En termostat vars
 slinga ligger i ett annat rum begär värme nästan jämt men blir aldrig varm,
@@ -38,8 +42,11 @@ omväxlande på 28 °C, så att slingan öppnar, och 10 °C, så att den stänge
 ett mönster där hälften av slingorna är på åt gången. Varje fas är tre timmar
 (två om huset bara har trägolv). Slingkoll ser vilka rum som blir varmare när
 en viss termostat är på, och räknar ut vilken slinga som hör till vilket rum.
-Testet tar ungefär ett och ett halvt dygn, och förlängs om svaret inte är
-säkert.
+Har termostaterna våningar väljer du **Testa: Övervåning / Bottenvåning /
+Alla våningar** ovanför startknappen. Testa en våning i taget: med färre
+slingor blir svaret både snabbare (ungefär 16–24 timmar per våning) och
+säkrare, och den andra våningen går som vanligt under tiden. Testet förlängs
+om svaret inte är säkert.
 
 Under testet:
 

@@ -541,7 +541,7 @@ section {
 
 .pick {
   display: grid;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: 22px 1fr minmax(110px, 160px);
   align-items: center;
   gap: 8px;
 }
@@ -551,7 +551,7 @@ section {
 }
 
 .pick small {
-  grid-column: 2;
+  grid-column: 2 / -1;
   color: var(--ink-3);
   margin-top: -6px;
 }
@@ -680,4 +680,44 @@ select {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.floor-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.floor-choice:empty {
+  display: none;
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.segmented button {
+  font: inherit;
+  font-size: 14px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.segmented button:last-child {
+  border-right: 0;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: 600;
 }

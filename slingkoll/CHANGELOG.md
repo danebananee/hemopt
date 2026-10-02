@@ -1,5 +1,14 @@
 # Ändringar
 
+## 0.1.5
+
+- Våningar: varje termostat har en våning, och en slinga räknas bara mot rum
+  på samma våning. Golvtyp per våning.
+- Testa en våning i taget (övriga termostater går som vanligt): färre
+  slingor per test ger snabbare och säkrare svar.
+- Förinställt: sju termostater på övervåningen (trägolv, 2 h per fas) och
+  Salong, Lekrum, Entré och Tvättstuga på bottenvåningen (betong, 3 h).
+
 ## 0.1.4
 
 - Starta/avsluta frågar på sidan i stället för i en ruta som Home

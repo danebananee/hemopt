@@ -1,5 +1,5 @@
 name: Slingkoll
-version: "0.1.4"
+version: "0.1.5"
 slug: slingkoll
 description: >-
   Kontrollerar att varje termostat styr golvvärmeslingan i sitt eget rum, och

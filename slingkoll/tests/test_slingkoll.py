@@ -244,7 +244,7 @@ def test_hemopt_house_is_preset_when_its_thermostats_exist():
             "state": "heat",
             "attributes": {"friendly_name": "LK", "temperature": 21, "current_temperature": 20.5},
         }
-        for entity, _ in HEMOPT_HOUSE
+        for entity, _, _ in HEMOPT_HOUSE
     ] + [
         {"entity_id": "sensor.h66_hpradiator_forward", "state": "31", "attributes": {}},
         {"entity_id": "climate.h66_hproom_temp_setpoint", "state": "heat", "attributes": {"temperature": 21}},
@@ -256,3 +256,78 @@ def test_hemopt_house_is_preset_when_its_thermostats_exist():
     assert settings.hp_setpoint_entity == "climate.h66_hproom_temp_setpoint"
     assert settings.outdoor_entity is None
     assert settings.floor == "slow"
+
+
+FLOORS = {"vardagsrum": "Nere", "kok": "Nere", "tvatt": "Nere", "sovrum_bv": "Nere", "hall": "Nere"}
+
+
+def _floor_of(entity: str) -> str:
+    slug = entity.split(".", 1)[1].removesuffix("_thermostat").removesuffix("_temperatur")
+    return FLOORS.get(slug, "Uppe")
+
+
+def test_floors_rule_out_loops_on_other_floors():
+    ha = SimHA(demo_house(start=START))
+    thermos = [(t.entity_id, t.name) for t in ha.house.thermostats]
+    samples = _drive(ha, make_design(len(thermos), seed=1), 3.0)
+    keys = [t for t, _ in thermos] + ["sensor.hall_temperatur"]
+    floors = {key: _floor_of(key) for key in keys}
+    result = analyse(samples, thermos, [("sensor.hall_temperatur", "Hall")], tz=TZ, floors=floors)
+    found = {v["name"]: (v["status"], v["heats_name"]) for v in result["thermostats"]}
+    assert found == TRUTH
+    for thermo, row in result["matrix"].items():
+        assert {floors[room] for room in row} == {floors[thermo]}
+
+
+def test_preset_and_migration_give_the_house_its_floors():
+    from slingkoll.discovery import HEMOPT_HOUSE, LOWER, UPPER, fill_floors
+    from slingkoll.settings import Settings
+
+    states = [
+        {
+            "entity_id": entity,
+            "state": "heat",
+            "attributes": {"friendly_name": "LK", "temperature": 21, "current_temperature": 20.5},
+        }
+        for entity, _, _ in HEMOPT_HOUSE
+    ]
+    settings = default_settings(discover(states))
+    assert settings.test_floor == UPPER
+    assert settings.as_dict()["test_count"] == 7
+    assert settings.phase_hours == 2.0
+    settings.test_floor = LOWER
+    assert [t["name"] for t in settings.test_thermostats()] == ["Salong", "Lekrum", "Entré", "Tvättstuga"]
+    assert settings.phase_hours == 3.0
+
+    old = Settings(thermostats=[{"entity_id": e, "name": n} for e, n, _ in HEMOPT_HOUSE], configured=True)
+    assert fill_floors(old)
+    assert old.floors == [UPPER, LOWER]
+    assert old.test_floor == UPPER
+    assert not fill_floors(old)
+
+
+def test_one_floor_at_a_time(runner):
+    house = runner.ha.house
+    thermostats = [
+        {"entity_id": t.entity_id, "name": t.name, "floor": _floor_of(t.entity_id)} for t in house.thermostats
+    ]
+    runner.update_settings(
+        {
+            "thermostats": thermostats,
+            "extra_sensors": [{"entity_id": "sensor.hall_temperatur", "name": "Hall", "floor": "Nere"}],
+            "floor_kinds": {"Nere": "slow", "Uppe": "fast"},
+            "test_floor": "Nere",
+        }
+    )
+    runner.start_test()
+    downstairs = {t.entity_id for t in house.thermostats if _floor_of(t.entity_id) == "Nere"}
+    for thermo in house.thermostats:
+        if thermo.entity_id in downstairs:
+            assert thermo.target in {10.0, 28.0}
+        else:
+            assert thermo.target == 21.0
+    assert len(runner.run["design"]) == 8
+    _run_until_done(runner)
+    assert {t.target for t in house.thermostats} == {21.0}
+    found = {v["name"]: (v["status"], v["heats_name"]) for v in runner.run["result"]["thermostats"]}
+    assert found == {name: TRUTH[name] for name in ("Vardagsrum", "Kök", "Tvättstuga", "Sovrum BV")}
