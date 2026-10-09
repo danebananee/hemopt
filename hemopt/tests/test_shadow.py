@@ -129,3 +129,56 @@ def test_ledger_rows_round_trip_through_the_store(tmp_path):
     assert row.house_kwh == pytest.approx(0.9)
     assert row.optimised_kwh == pytest.approx(0.2)
     assert row.start == start
+
+
+def _watch(problem_for, setpoints, steps, price):
+    """Run the ledger in watch mode; the real house is the reference twin."""
+    from hemopt.shadow import anchored_problem, controllable_kwh
+
+    problem = problem_for()
+    temps = {room.config.key: room.initial_temperature for room in problem.rooms}
+    slabs: dict[str, float | None] = {room.config.key: None for room in problem.rooms}
+    offset = TwinOffset()
+    totals = {"ref_kwh": 0.0, "opt_kwh": 0.0, "ref_sek": 0.0, "opt_sek": 0.0}
+    for step in range(steps):
+        prices = [price(step + k) for k in range(len(problem.outdoor_c))]
+        rooms = [
+            replace(
+                room,
+                initial_temperature=temps[room.config.key],
+                initial_slab=slabs[room.config.key],
+            )
+            for room in problem.rooms
+        ]
+        current = replace(problem, rooms=rooms, price_sek_per_kwh=prices)
+        reference = reference_step(current, setpoints)
+        optimised = solve(anchored_problem(current, setpoints, offset))
+        totals["ref_kwh"] += reference.electrical_kwh
+        totals["opt_kwh"] += controllable_kwh(optimised)
+        totals["ref_sek"] += reference.electrical_kwh * prices[0]
+        totals["opt_sek"] += controllable_kwh(optimised) * prices[0]
+        offset = next_offset(optimised, reference)
+        for key, (temp, slab) in reference.rooms.items():
+            temps[key], slabs[key] = temp, slab
+    return totals, offset
+
+
+def test_hemopt_twin_keeps_the_household_comfort_not_the_configured_band():
+    """Thermostats below the configured band must not make hemopt look dearer."""
+
+    def problem_for():
+        base = build_problem(with_hot_water=False, steps=48)
+        rooms = [replace(room, initial_temperature=19.0) for room in base.rooms]
+        return replace(base, rooms=rooms, outdoor_c=[8.0] * 48)
+
+    setpoints = {"vardagsrum": 19.0, "garage": 19.0}  # band is 20–22
+    flat, offset = _watch(problem_for, setpoints, 48, lambda _: 1.0)
+    assert flat["ref_kwh"] > 1.0
+    assert flat["opt_kwh"] <= flat["ref_kwh"] * 1.005
+    assert all(abs(temp) < 0.3 for temp, _ in offset.rooms.values())
+
+    def price(index: int) -> float:
+        return 0.4 if (index // 16) % 2 == 0 else 2.0
+
+    varying, _ = _watch(problem_for, setpoints, 48, price)
+    assert varying["opt_sek"] < varying["ref_sek"]

@@ -352,7 +352,15 @@ Två modellhus körs sida vid sida, en kvart i taget:
 * **referenshuset** värms som utan hemopt: varje slinga öppnar så mycket som
   termostatens avvikelse från börvärdet säger, och tanken fylls på i takt med
   att vatten tappas;
-* **det optimerade huset** följer hemopts plan.
+* **det optimerade huset** följer hemopts plan, med kravet att varje rum
+  hålls minst lika varmt som termostaterna skulle ha hållit det (*Normal*
+  får vara 0,3 °C svalare och *Flexibel* 0,6 °C, *Håll* inte alls). Hemopts
+  egna komfortband används inte i kalkylen, så besparingen kan inte komma av
+  att huset hålls kallare, och ingen kostnad kan komma av att det hålls
+  varmare än hushållet själv vill. Att följa termostaterna är alltid en
+  tillåten plan, så på modellen kan det optimerade huset aldrig bli dyrare.
+  Varmvattnet hålls på samma nivå som i referenshuset, utan extra
+  legionellacykel.
 
 Det verkliga huset är alltid ett av dem, uppmätt på nytt varje kvart, så
 modellfel kan inte växa över veckor. Så länge styrningen är av är det

@@ -442,6 +442,11 @@ class Store:
                 (_to_ts(start), float(kwh)),
             )
 
+    def reset_shadow_ledger(self) -> None:
+        """Forget every booked step; the ledger starts over."""
+        with self._cursor() as cursor:
+            cursor.execute("DELETE FROM shadow_steps")
+
     def shadow_steps(self, since: datetime, tz: timezone | None = None) -> list[LedgerStep]:
         """Fully priced ledger steps since `since`, oldest first."""
         with self._cursor() as cursor:

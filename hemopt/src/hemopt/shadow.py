@@ -138,6 +138,85 @@ def shifted_problem(
     return replace(problem, rooms=rooms, hot_water=hot_water, battery=battery, ev=ev)
 
 
+# How far below the household's own temperature the optimised twin may let a
+# room drift, by priority (1 hold, 2 normal, 3 flexible). Heat can always be
+# banked above it; going below is the only comfort hemopt may trade.
+SHADOW_FLEX_K = {1: 0.0, 2: 0.3, 3: 0.6}
+# Room for pre-heating above the household's own temperature.
+SHADOW_PREHEAT_K = 1.0
+
+
+def reference_trajectory(
+    problem: OptimisationInput, setpoints: dict[str, float | None]
+) -> dict[str, list[float]]:
+    """Each room's temperature after every step, heated by its thermostat alone."""
+    dt = problem.step_hours
+    out: dict[str, list[float]] = {}
+    for room in problem.rooms:
+        key = room.config.key
+        indoor = room.initial_temperature
+        slab = room.slab_start(problem.outdoor_c[0], problem.sun_at(0), problem.wind_at(0))
+        setpoint = setpoints.get(key)
+        path: list[float] = []
+        for index, outdoor in enumerate(problem.outdoor_c):
+            sun, wind = problem.sun_at(index), problem.wind_at(index)
+            if setpoint is not None:
+                loop = call_for_heat(setpoint, indoor)
+            else:
+                loop = room.model.steady_heat_fraction(
+                    room.initial_temperature, outdoor, sun=sun, wind_ms=wind
+                )
+            indoor, slab = room.model.advance(
+                indoor, slab, outdoor, loop, dt, sun=sun, wind_ms=wind
+            )
+            path.append(indoor)
+        out[key] = path
+    return out
+
+
+def anchored_problem(
+    problem: OptimisationInput,
+    setpoints: dict[str, float | None],
+    offset: TwinOffset,
+) -> OptimisationInput:
+    """The optimised twin's problem, aiming at the household's own comfort.
+
+    `problem` is the real house, which in watch mode is the reference twin.
+    The optimised twin starts from it plus `offset` and must keep every room
+    at least as warm as the thermostats would have, less a small allowance
+    for flexible rooms. Following the thermostats is then always a feasible
+    plan, so on the model the optimised twin can never cost more than the
+    reference; it can only move the same heat to cheaper quarters.
+
+    The configured comfort bands are deliberately ignored here: if they ask
+    for a warmer house than the thermostats keep, the ledger would bill
+    hemopt for comfort the household never had.
+    """
+    path = reference_trajectory(problem, setpoints)
+    shifted = shifted_problem(problem, offset, +1.0)
+    rooms: list[RoomInput] = []
+    for room in shifted.rooms:
+        reference = path[room.config.key]
+        flex = SHADOW_FLEX_K.get(room.config.priority, 0.3)
+        rooms.append(
+            replace(
+                room,
+                comfort_floor=[temp - flex for temp in reference],
+                comfort_ceiling=[temp + SHADOW_PREHEAT_K for temp in reference],
+            )
+        )
+    hot_water = shifted.hot_water
+    if hot_water is not None and problem.hot_water is not None:
+        # The heat pump's own control holds the tank where it is; neither
+        # twin gets a legionella cycle the other does not pay for.
+        level = problem.hot_water.initial_temperature
+        config = hot_water.config.model_copy(
+            update={"target_temperature": min(hot_water.config.target_temperature, level)}
+        )
+        hot_water = replace(hot_water, config=config, legionella_step=None)
+    return replace(shifted, rooms=rooms, hot_water=hot_water)
+
+
 def call_for_heat(setpoint: float, indoor: float) -> float:
     """Loop opening implied by a thermostat's setpoint error, 0..1.
 

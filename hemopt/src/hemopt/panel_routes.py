@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 
 class PriorityUpdate(BaseModel):

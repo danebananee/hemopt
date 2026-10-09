@@ -59,12 +59,12 @@ from .prices import PriceClient, PriceSeries
 from .shadow import (
     LedgerStep,
     TwinOffset,
+    anchored_problem,
     call_for_heat,
     cold_degree_hours,
     controllable_kwh,
     next_offset,
     reference_step,
-    shifted_problem,
     summarise,
 )
 from .storage import Store
@@ -96,6 +96,8 @@ from .woodstove import (
     sessions_to_setting,
 )
 
+# Bumped when the savings ledger changes in a way that makes old rows wrong.
+LEDGER_VERSION = 2
 _LOGGER = logging.getLogger(__name__)
 
 # How far back the room models are fitted, from hemopt's own log.
@@ -154,6 +156,13 @@ class Engine:
         self._step_energy_kwh = 0.0
         self._step_covered_h = 0.0
         self._step_last: tuple[datetime, float] | None = None
+        if self.store.setting("ledger_version") != LEDGER_VERSION:
+            # Version 2 aims both twins at the same comfort. Rows booked by
+            # the old ledger compared a warmer optimised house with the
+            # household's own and are not comparable, so they are dropped.
+            self.store.reset_shadow_ledger()
+            self.store.set_setting("shadow_offset", None)
+            self.store.set_setting("ledger_version", LEDGER_VERSION)
         self.shadow_offset = TwinOffset.from_dict(self.store.setting("shadow_offset"))
         # Weather: where the house is, what it is like now, and the forecast
         # sun and wind per plan step.
@@ -1226,8 +1235,10 @@ class Engine:
             optimised = plan
             reference = reference_step(problem, self._manual_setpoints(), offset)
         else:
-            reference = reference_step(problem, self._thermostat_setpoints())
-            optimised = solve(shifted_problem(problem, offset, +1.0))
+            setpoints = self._thermostat_setpoints()
+            reference = reference_step(problem, setpoints)
+            # Same comfort as the thermostats keep, so only timing can differ.
+            optimised = solve(anchored_problem(problem, setpoints, offset))
 
         day_points = await price_client.fetch_day(step_start.date()) or []
         day_spot = [point.spot_sek_per_kwh for point in day_points]

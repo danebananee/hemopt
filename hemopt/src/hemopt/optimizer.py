@@ -51,6 +51,22 @@ class RoomInput:
     # output. None means unknown, in which case the steady-state value that
     # holds the room at its current temperature is assumed.
     initial_slab: float | None = None
+    # Per-step comfort limits for the temperature after each step, used
+    # instead of the configured band when given. The savings ledger sets them
+    # from the household's own thermostats, so both twins aim at the same
+    # comfort and only the timing of the heat differs.
+    comfort_floor: list[float] | None = None
+    comfort_ceiling: list[float] | None = None
+
+    def floor_at(self, index: int) -> float:
+        if self.comfort_floor:
+            return self.comfort_floor[min(index, len(self.comfort_floor) - 1)]
+        return self.config.comfort_min
+
+    def ceiling_at(self, index: int) -> float:
+        if self.comfort_ceiling:
+            return self.comfort_ceiling[min(index, len(self.comfort_ceiling) - 1)]
+        return self.config.comfort_max
 
     def slab_start(self, outdoor_c: float, sun: float = 0.0, wind_ms: float = 0.0) -> float:
         if self.initial_slab is not None:
@@ -286,17 +302,16 @@ def solve(problem: OptimisationInput) -> Plan:
         # warmed by a fire or the sun, or still being fed by a warm slab,
         # cannot always be kept inside it, and one such room must not make
         # the whole house's plan infeasible.
-        hard_floor = min(
-            room.config.comfort_min - room.config.max_setback_offset,
-            room.initial_temperature - 0.1,
-        )
-        hard_ceiling = max(
-            room.config.comfort_max + room.config.max_preheat_offset,
-            room.initial_temperature + 0.1,
-        )
-
         temps = [solver.addVariable(lb=-50.0, ub=60.0) for _ in range(steps + 1)]
         for index in range(1, steps + 1):
+            hard_floor = min(
+                room.floor_at(index - 1) - room.config.max_setback_offset,
+                room.initial_temperature - 0.1,
+            )
+            hard_ceiling = max(
+                room.ceiling_at(index - 1) + room.config.max_preheat_offset,
+                room.initial_temperature + 0.1,
+            )
             under = solver.addVariable(lb=0.0)
             over = solver.addVariable(lb=0.0)
             solver.addConstr(temps[index] >= hard_floor - under)
@@ -334,8 +349,8 @@ def solve(problem: OptimisationInput) -> Plan:
         for index in range(steps):
             below = solver.addVariable(lb=0.0)
             above = solver.addVariable(lb=0.0)
-            solver.addConstr(temps[index + 1] >= room.config.comfort_min - below)
-            solver.addConstr(temps[index + 1] <= room.config.comfort_max + above)
+            solver.addConstr(temps[index + 1] >= room.floor_at(index) - below)
+            solver.addConstr(temps[index + 1] <= room.ceiling_at(index) + above)
             objective.append(weight * dt * below)
             objective.append(weight * PREHEAT_DISCOMFORT_RATIO * dt * above)
 
@@ -560,7 +575,7 @@ def solve(problem: OptimisationInput) -> Plan:
         objective.append(
             -heat_value
             * capacity_kwh_per_k
-            * (room_temp[position][steps] - room.config.comfort_min)
+            * (room_temp[position][steps] - room.floor_at(steps - 1))
         )
         # Heat already in the floor reaches the room after the horizon ends.
         # It was bought, so it is credited the same way as warmth in the air.
@@ -613,7 +628,7 @@ def solve(problem: OptimisationInput) -> Plan:
                 key=room.config.key,
                 name=room.config.name,
                 priority=room.config.priority,
-                temperature=[round(t, 2) for t in temperatures],
+                temperature=[round(t, 4) for t in temperatures],
                 setpoint=[round(s, 1) for s in setpoints],
                 heat_fraction=[round(f, 3) for f in fractions],
                 comfort_min=room.config.comfort_min,
@@ -627,7 +642,7 @@ def solve(problem: OptimisationInput) -> Plan:
         kwh_per_degree = dhw.config.kwh_per_degree
         hot_water_plan = HotWaterPlan(
             temperature=[
-                round(dhw.config.min_temperature + value_of(v) / kwh_per_degree, 2)
+                round(dhw.config.min_temperature + value_of(v) / kwh_per_degree, 3)
                 for v in tank_energy[1:]
             ],
             charge_fraction=[round(value_of(v), 3) for v in dhw_charge],
