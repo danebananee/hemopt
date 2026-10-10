@@ -23,9 +23,10 @@ jobs:
       - name: pytest
         shell: bash
         run: |
-          set -o pipefail
-          uv run pytest -q -rfE 2>&1 | tee pytest.log
-          status=${PIPESTATUS[0]}
+          set +e
+          uv run pytest -q -rfE > pytest.log 2>&1
+          status=$?
+          cat pytest.log
           # Failing tests as annotations, readable without the full log.
           grep -E "^(FAILED|ERROR) |^E  " pytest.log | head -40 | sed 's/^/::error::/' || true
           exit $status
