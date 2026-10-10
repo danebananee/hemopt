@@ -14,6 +14,12 @@ from hemopt.demo import DemoEngine, demo_config
 async def client(tmp_path):
     config = demo_config(database_path=str(tmp_path / "test.db"))
     config.optimiser.horizon_hours = 12
+    # Billable around the clock, so the peak tests do not depend on the
+    # weekday or hour the suite happens to run.
+    window = config.peak_tariff.window
+    window.weekdays_only = False
+    window.exclude_holidays = False
+    window.hour_start, window.hour_end = 0, 24
     engine = DemoEngine(config)
     app = create_app(engine, run_loops=False)
 
