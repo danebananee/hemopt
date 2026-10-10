@@ -261,6 +261,39 @@ class DemoEngine(Engine):
         """The demo has no phase currents; keep the empty report."""
         return self.fuse
 
+    async def refresh_curve(self, *, allow_write: bool = True):
+        """A simulated autumn: a curve a little too low for the coldest room."""
+        from .curve import CurveRoom, HourSample, Knob, RoomHour, analyse, propose
+
+        now = self._now()
+        hours = []
+        for index in range(14 * 24):
+            moment = now - timedelta(hours=14 * 24 - index)
+            outdoor = 7.0 - 5.0 * index / (14 * 24) + 3.0 * math.sin(index / 24 * 2 * math.pi)
+            supply = 21.0 + 0.45 * (20.0 - outdoor)
+            sample = HourSample(moment=moment, outdoor=outdoor, supply=supply, target=supply)
+            for position, room in enumerate(self.config.rooms):
+                setpoint = room.comfort_min + 0.5
+                need = setpoint + (0.5 + 0.05 * position) * (20.0 - outdoor) * 1.0
+                ratio = (supply - setpoint) / max(need - setpoint, 0.1)
+                duty = min(1.0, 0.8 / max(ratio, 0.05))
+                temperature = setpoint - (0.0 if ratio >= 1 else (1 - ratio) * 1.5)
+                sample.rooms[room.key] = RoomHour(temperature, setpoint, duty)
+            hours.append(sample)
+        report = analyse(
+            hours,
+            [CurveRoom(r.key, r.name, r.priority) for r in self.config.rooms],
+            now=now,
+            since=None,
+        )
+        knob = Knob("number.demo_curve_fine", 0.0, -10.0, 10.0, 0.5, gain=1.0)
+        self.curve = report
+        self.curve_knobs = {knob.entity: knob}
+        self.curve_proposal = propose(
+            report, fine=knob, curve=None, original={}, max_daily_c=1.5, max_total_c=6.0
+        )
+        return report
+
     async def backfill_power_history(self, days: int = 400) -> int:
         """The demo has no Home Assistant to fill history from."""
         return 0

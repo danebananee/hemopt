@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 
 
 class PriorityUpdate(BaseModel):
@@ -702,6 +702,29 @@ def register_panel_routes(
     async def fuse() -> dict[str, Any]:
         """Is the main fuse the right size, judged from the current per phase."""
         return require_engine().fuse.as_dict()
+
+    @app.get("/api/curve")
+    async def curve() -> dict[str, Any]:
+        """The heating curve: what the house needs against what the curve gives."""
+        return require_engine().curve_payload()
+
+    @app.post("/api/curve")
+    async def refresh_curve() -> dict[str, Any]:
+        engine = require_engine()
+        await engine.refresh_curve(allow_write=False)
+        return engine.curve_payload()
+
+    @app.post("/api/curve/apply")
+    async def apply_curve() -> dict[str, Any]:
+        engine = require_engine()
+        await engine.apply_curve_now()
+        return engine.curve_payload()
+
+    @app.post("/api/curve/restore")
+    async def restore_curve() -> dict[str, Any]:
+        engine = require_engine()
+        await engine.restore_curve()
+        return engine.curve_payload()
 
     @app.post("/api/fuse")
     async def refresh_fuse() -> dict[str, Any]:

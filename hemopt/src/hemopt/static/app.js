@@ -1412,6 +1412,163 @@ async function loadFuse(recompute = false) {
   }
 }
 
+/* Heating curve ------------------------------------------------------------- */
+
+const CURVE_TONE = { too_cold: "warn", too_warm: "good", ok: "good", no_heat: "bad" };
+
+function drawCurve(host, report) {
+  const bands = report.bands || [];
+  const cur = report.current_line;
+  const need = report.need_line;
+  if (!cur || !bands.length) {
+    host.replaceChildren();
+    return;
+  }
+  const xs = bands.map((b) => b.outdoor);
+  const xLo = Math.min(-15, Math.floor(Math.min(...xs) - 2));
+  const xHi = Math.max(15, Math.ceil(Math.max(...xs) + 2));
+  const at = (line, x) => line.a + line.b * x;
+  const ys = [at(cur, xLo), at(cur, xHi), ...bands.map((b) => b.need), ...bands.map((b) => b.supply)];
+  if (need) ys.push(at(need, xLo), at(need, xHi));
+  const f = frame(host, { height: 240, left: 40, right: 16, bottom: 34 });
+  const yS = niceScale(Math.min(...ys) - 1, Math.max(...ys) + 1);
+  const xS = niceScale(xLo, xHi, { count: 6 });
+  const X = (v) => f.x0 + ((v - xS.min) / (xS.max - xS.min)) * (f.x1 - f.x0);
+  const Y = yScale(f, yS);
+  yAxis(f, yS, { unit: "°C fram" });
+  const axis = svg("g", { class: "axis" });
+  for (const v of xS.ticks) axis.append(svg("text", { x: X(v), y: f.y0 + 16, "text-anchor": "middle" }, `${v}`));
+  axis.append(svg("text", { x: f.x1, y: f.y0 + 30, "text-anchor": "end" }, "°C ute"));
+  f.root.append(axis);
+  const line = (l, cls) =>
+    svg("line", { x1: X(xS.min), x2: X(xS.max), y1: Y(at(l, xS.min)), y2: Y(at(l, xS.max)), class: cls });
+  f.root.append(line(cur, "curve-now"));
+  if (need) f.root.append(line(need, "curve-need"));
+  for (const b of bands) {
+    const dot = svg("circle", { cx: X(b.outdoor), cy: Y(b.need), r: Math.min(7, 3 + Math.sqrt(b.hours) / 3), class: "curve-dot" });
+    dot.addEventListener("mousemove", (e) =>
+      showTip(e, `<b>${fmt1.format(b.outdoor)} °C ute</b><br>Behövs ${fmt1.format(b.need)} °C, gav ${fmt1.format(b.supply)} °C<br>Styrande rum: ${b.limiting}<br>${b.hours} timmar`),
+    );
+    dot.addEventListener("mouseleave", hideTip);
+    f.root.append(dot);
+  }
+  if (report.outdoor_now !== null && report.outdoor_now !== undefined) {
+    const x = X(report.outdoor_now);
+    f.root.append(svg("line", { x1: x, x2: x, y1: f.y1, y2: f.y0, class: "baseline" }));
+    f.root.append(svg("text", { x: x + 4, y: f.y1 + 10, class: "axis-note" }, "nu"));
+  }
+}
+
+function renderCurve(payload) {
+  const body = $("#curve-body");
+  if (!payload) return;
+  const report = payload.report || {};
+  if (payload.mode === "off") {
+    body.replaceChildren(el("p", { class: "muted", text: "Avstängd. Slå på under Inställningar → Värmekurva." }));
+    return;
+  }
+  const tone = CURVE_TONE[report.status] || "neutral";
+  const nodes = [
+    el("div", { class: "fuse-head" }, el("span", { class: `pill ${tone}`, text: { too_cold: "För låg", too_warm: "Kan sänkas", ok: "Rätt", no_heat: "Ingen värme", need_data: "Lär sig" }[report.status] || "—" }), el("b", { text: report.summary || "" })),
+    report.detail ? el("p", { class: "muted", text: report.detail }) : null,
+  ];
+  if ((report.bands || []).length && report.current_line) {
+    const chart = el("div", { class: "chart small" });
+    nodes.push(
+      el("div", { class: "legend" }, el("span", {}, el("i", { class: "sw sw-line" }), "Kurvan nu"), el("span", {}, el("i", { class: "sw sw-heat" }), "Det huset behöver")),
+      chart,
+    );
+    requestAnimationFrame(() => drawCurve(chart, report));
+  }
+  const rooms = (report.rooms || []).filter((r) => r.counted);
+  if (rooms.length) {
+    nodes.push(
+      el(
+        "ul",
+        { class: "windows" },
+        ...rooms
+          .sort((a, b) => (b.need ?? 0) - (a.need ?? 0))
+          .slice(0, 5)
+          .map((r) =>
+            el(
+              "li",
+              {},
+              el("span", { text: r.name }),
+              el("span", { class: "muted", text: `slingan öppen ${fmt0.format(r.duty * 100)} %${r.below > 0.3 ? `, ${fmt1.format(r.below)} °C under börvärdet` : ""}` }),
+            ),
+          ),
+      ),
+    );
+  }
+  const p = payload.proposal;
+  const actions = el("div", { class: "row-actions" });
+  if (p) {
+    nodes.push(el("p", {}, el("b", { text: "Förslag: " }), `${p.reason} Det ger ungefär ${p.expected_c > 0 ? "+" : ""}${fmt1.format(p.expected_c)} °C framledning.`));
+    if (payload.mode === "auto") {
+      nodes.push(el("p", { class: "muted", text: "Görs automatiskt, högst en ändring per dygn." }));
+    } else {
+      const apply = el("button", { type: "button", class: "btn", text: "Gör ändringen nu" });
+      apply.onclick = async () => {
+        apply.disabled = true;
+        try {
+          renderCurve(await api("api/curve/apply", { method: "POST" }));
+          toast("Kurvan är ändrad i värmepumpen.");
+        } catch (error) {
+          toast(error.message);
+          apply.disabled = false;
+        }
+      };
+      actions.append(apply);
+    }
+  } else if (!payload.writable && ["too_cold", "too_warm"].includes(report.status)) {
+    nodes.push(
+      el("p", { class: "muted", text: "Kurvinställningarna går inte att skriva från Home Assistant än. Gör H66-inställningen (MQTT_SUBS = 1 och number-blocket i husdata_h66.yaml) och välj dem under Inställningar → Värmekurva, eller ändra kurvan på värmepumpen enligt förslaget ovan." }),
+    );
+  }
+  if (Object.keys(payload.original || {}).length) {
+    const restore = el("button", { type: "button", class: "btn ghost", text: "Återställ kurvan" });
+    restore.onclick = async () => {
+      restore.disabled = true;
+      try {
+        renderCurve(await api("api/curve/restore", { method: "POST" }));
+        toast("Kurvan är återställd.");
+      } catch (error) {
+        toast(error.message);
+        restore.disabled = false;
+      }
+    };
+    actions.append(restore);
+  }
+  if (actions.childNodes.length) nodes.push(actions);
+  const log = payload.log || [];
+  if (log.length) {
+    nodes.push(el("p", { class: "stove-label", text: "Senaste ändringar:" }));
+    nodes.push(
+      el(
+        "ul",
+        { class: "windows" },
+        ...log.slice(0, 5).map((row) => {
+          const t = new Date(row.at);
+          return el("li", {}, el("span", { text: `${dayFmt.format(t)} kl ${hhmm(t)}` }), el("span", { class: "muted", text: `${row.entity.split(".")[1]}: ${row.old ?? "—"} → ${row.new}` }));
+        }),
+      ),
+    );
+  }
+  body.replaceChildren(...nodes.filter(Boolean));
+}
+
+async function loadCurve(recompute = false) {
+  const button = $("#curve-btn");
+  button.disabled = true;
+  try {
+    renderCurve(await api("api/curve", recompute ? { method: "POST" } : {}));
+  } catch (error) {
+    $("#curve-body").replaceChildren(el("p", { class: "empty", text: `Kunde inte hämta: ${error.message}` }));
+  } finally {
+    button.disabled = false;
+  }
+}
+
 /* Battery and car ---------------------------------------------------------- */
 
 function drawStorage(plan, now) {
@@ -1619,6 +1776,12 @@ function renderSetup() {
   f.phases = selectField("Faser", st.site.phases, [[3, "3 (vanligast)"], [1, "1"]]);
 
   f.outdoor = entityField("Utetemperatur", pick(st.heat_pump.outdoor_entity, "outdoor"), "outdoor", { help: "Helst värmepumpens egen utegivare." });
+  const hc = st.heat_curve || {};
+  f.hc_mode = selectField("Kurvjustering", hc.mode || "advice", [["off", "Av"], ["advice", "Bara förslag"], ["auto", "Justera automatiskt, högst en gång per dygn"]]);
+  f.hc_supply = entityField("Framledning till golvet", pick(hc.supply_entity, "supply_temperature"), "supply_temperature", { help: "Vattnets temperatur ut i slingorna." });
+  f.hc_target = entityField("Kurvans börvärde", pick(hc.target_entity, "curve_target"), "curve_target", { help: "Framledningen kurvan begär (H66 0107). Valfri, men gör justeringen säkrare." });
+  f.hc_curve = entityField("Värmekurva", pick(hc.curve_entity, "curve"), "curve", { help: "Skrivbar number-entitet (H66 2205)." });
+  f.hc_fine = entityField("Kurvans finjustering", pick(hc.fine_entity, "curve_fine"), "curve_fine", { help: "Skrivbar number-entitet (H66 0207). Används först." });
   f.hp_power = entityField("Värmepumpens effekt", pick(st.heat_pump.power_entity, "heat_pump_power"), "heat_pump_power", { help: "Valfri, men gör planen noggrannare." });
   f.house_setpoint = entityField("Husets börvärde", st.heat_pump.room_setpoint_entity, "house_setpoint", { help: "Bara om rummen saknar egna termostater." });
   f.hw_enabled = checkField("Planera varmvattnet", st.hot_water.enabled);
@@ -1714,6 +1877,7 @@ function renderSetup() {
       el("div", { id: "room-editors" }),
     ),
     fieldset("Värmepump och varmvatten", "", f.outdoor, f.hp_power, f.house_setpoint, f.hw_enabled, f.hw_top, f.hw_setpoint),
+    fieldset("Värmekurva", "Hittar den lägsta kurva som håller alla rum varma, och ställer in den i värmepumpen.", f.hc_mode, f.hc_supply, f.hc_target, f.hc_curve, f.hc_fine),
     fieldset("Elmätare och väder", "", f.meter, f.weather, f.phase),
     battery,
     car,
@@ -1740,6 +1904,7 @@ function renderSetup() {
       heat_pump: { outdoor_entity: val(f.outdoor), power_entity: val(f.hp_power), room_setpoint_entity: val(f.house_setpoint) },
       hot_water: { enabled: f.hw_enabled.input.checked, top_temperature_entity: val(f.hw_top), setpoint_entity: val(f.hw_setpoint) },
       base_load: { total_power_entity: val(f.meter) },
+      heat_curve: { mode: val(f.hc_mode), supply_entity: val(f.hc_supply), target_entity: val(f.hc_target), curve_entity: val(f.hc_curve), fine_entity: val(f.hc_fine) },
       rooms: setup.rooms.map((r) => r._read()),
       battery: {
         enabled: f.bat_enabled.input.checked,
@@ -1933,6 +2098,7 @@ const TAB_LOADERS = {
     drawDhw(state.plan, nowDate());
     renderDhwSub();
     loadStove();
+    loadCurve();
   },
   energy: () => {
     loadPrices();
@@ -2017,6 +2183,7 @@ function bind() {
 
   $("#advice-btn").addEventListener("click", () => loadAdvice(true));
   $("#fuse-btn").addEventListener("click", () => loadFuse(true));
+  $("#curve-btn").addEventListener("click", () => loadCurve(true));
   $("#welcome-btn").addEventListener("click", () => selectTab("setup"));
 
   bindSegmented("#savings-period", ({ days }) => {

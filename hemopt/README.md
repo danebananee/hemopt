@@ -84,6 +84,18 @@ liten, har liten marginal, är rätt, eller om en mindre skulle räcka med
 marginal. Råd om mindre säkring ges först efter två veckors mätning, och
 panelen säger till om ingen vintermånad ingår än.
 
+**Ställer in värmekurvan.** Ur hur länge varje rums slinga står öppen och om
+rummet når sitt börvärde räknas den framledningstemperatur huset behöver vid
+varje utetemperatur. Golvet avger värme i proportion till hur mycket varmare
+vattnet är än rummet, och rummets behov vid börvärdet är det det fick, skalat
+med förlusten vid börvärdet mot förlusten det faktiskt hade. Det ger per rum
+den framledning där rummet når börvärdet med slingan öppen 80 % av tiden; det
+mest krävande rummet bestämmer. hemopt föreslår, eller skriver själv,
+värmepumpens kurva och finjustering i små steg, högst en gång per dygn. Den
+första ändringen av varje inställning är samtidigt en mätning av hur mycket
+den flyttar kurvans börvärde. Kurvan ligger kvar i värmepumpen även när Home
+Assistant är avstängt. Se `curve.py`.
+
 **Planerar mot vädret.** Utetemperaturen hämtas som timprognos från en
 weather-entitet. Utan prognos måste planeraren anta att det är lika varmt om
 36 timmar som just nu, vilket felbedömer varenda förvärmning inför ett

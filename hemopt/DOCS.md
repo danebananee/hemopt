@@ -100,6 +100,41 @@ när den brunnit ut. Efter några kvällar vet hemopt hur mycket brasan värmer
 varje rum, känner själv igen en tänd brasa och tipsar om när det lönar sig
 att elda. Har du en givare vid kaminen kan den anges i Inställningar.
 
+## Värmekurva
+
+Under **Rum och värme → Värmekurva** räknar hemopt ut den lägsta värmekurva
+som ändå håller varje rum varmt, och jämför med kurvan värmepumpen har nu.
+Den tittar på hur stor del av tiden varje rums termostat har slingan öppen och
+om rummet når sitt börvärde, vid olika utetemperaturer:
+
+- når något rum inte sitt börvärde fast slingan står öppen är kurvan för låg;
+- står även det mest krävande rummets slinga stängd en stor del av tiden kan
+  kurvan sänkas, vilket ger bättre verkningsgrad (ungefär 2–3 % mindre el per
+  grad lägre framledning).
+
+Rum med prioritet *Flexibel* styr inte kurvan. Ett rum som behöver mycket mer
+värme än alla andra pekas ut i stället, eftersom det oftare är en felkopplad
+slinga än en fel kurva.
+
+Kurvan ställs in i själva värmepumpen och gäller även när Home Assistant är
+avstängt. Under **Inställningar → Värmekurva** väljer du:
+
+- **Bara förslag** (standard): hemopt visar vad som bör ändras och en knapp,
+  **Gör ändringen nu**.
+- **Justera automatiskt**: högst en liten ändring per dygn (högst 1,5 °C
+  framledning), och aldrig mer än 6 °C från där kurvan började.
+  **Återställ kurvan** sätter tillbaka ursprungsvärdena.
+
+För att hemopt ska kunna skriva kurvan måste den finnas som en skrivbar
+`number`-entitet. Med Husdata H66: sätt `MQTT_SUBS = 1` i H66 och se till att
+registren 2205 (värmekurva) och 0207 (finjustering) finns som `number` i Home
+Assistant. Finns de bara som sensorer visar hemopt förslaget, som du då gör på
+värmepumpen.
+
+Hittar hemopt att rummen begär värme men att vattnet till golvet är lika
+svalt som rummen säger den till: då står värmepumpen troligen i sommarläge
+eller stoppar värmen över en viss utetemperatur (värmestopp).
+
 ## Sensorer i Home Assistant
 
 Med MQTT får du bland annat:

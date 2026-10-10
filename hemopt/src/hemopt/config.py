@@ -465,6 +465,29 @@ class ExtControlConfig(BaseModel):
     min_room_temperature: float = 18.0
 
 
+class HeatCurveConfig(BaseModel):
+    """The heat pump's own heating curve, tuned from how the rooms respond.
+
+    `mode`: "off", "advice" (show what to change) or "auto" (write small
+    changes to the heat pump, at most once a day). Changes written to the
+    heat pump stay there when Home Assistant is off.
+    """
+
+    mode: Literal["off", "advice", "auto"] = "advice"
+    # Floor-loop supply temperature, measured.
+    supply_entity: str | None = None
+    # The supply temperature the curve asks for (H66 register 0107).
+    target_entity: str | None = None
+    # Writable curve settings: the curve itself (2205) and its parallel
+    # fine adjustment (0207). number.* or input_number.* entities.
+    curve_entity: str | None = None
+    fine_entity: str | None = None
+    max_daily_change_c: float = Field(default=1.5, gt=0.0, le=5.0)
+    max_total_change_c: float = Field(default=6.0, gt=0.0, le=15.0)
+    # Local hour after which the day's change may be written.
+    write_hour: int = Field(default=11, ge=0, le=23)
+
+
 class WoodStoveConfig(BaseModel):
     """Optional wood stove / fireplace that the household lights by hand.
 
@@ -609,6 +632,7 @@ class Config(BaseModel):
     base_load: BaseLoadConfig = Field(default_factory=BaseLoadConfig)
     ext_control: ExtControlConfig = Field(default_factory=ExtControlConfig)
     wood_stove: WoodStoveConfig = Field(default_factory=WoodStoveConfig)
+    heat_curve: HeatCurveConfig = Field(default_factory=HeatCurveConfig)
     battery: BatteryConfig = Field(default_factory=BatteryConfig)
     ev: EVConfig = Field(default_factory=EVConfig)
     advice: AdviceConfig = Field(default_factory=AdviceConfig)

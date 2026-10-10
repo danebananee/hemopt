@@ -125,6 +125,10 @@ async def _bootstrap(engine: Engine) -> None:
     except Exception:  # noqa: BLE001
         _LOGGER.exception("fuse check failed")
     try:
+        await engine.refresh_curve(allow_write=False)
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("heat curve check failed")
+    try:
         await engine.refresh_advice()
     except Exception:  # noqa: BLE001
         _LOGGER.exception("initial advice failed")

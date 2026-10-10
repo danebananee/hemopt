@@ -1370,3 +1370,27 @@ table.data tr.current td {
     transition: none !important;
   }
 }
+
+/* Heating curve */
+.curve-now {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.curve-need {
+  stroke: var(--heat);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.curve-dot {
+  fill: var(--heat);
+  fill-opacity: 0.75;
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.axis-note {
+  font-size: 11px;
+  fill: var(--ink-3);
+}

@@ -27,6 +27,7 @@ EDITABLE: dict[str, tuple[str, ...]] = {
     "hot_water": ("enabled", "top_temperature_entity", "setpoint_entity"),
     "base_load": ("total_power_entity",),
     "wood_stove": ("name", "temperature_entity", "binary_entity"),
+    "heat_curve": ("mode", "supply_entity", "target_entity", "curve_entity", "fine_entity"),
     "battery": (
         "enabled",
         "name",

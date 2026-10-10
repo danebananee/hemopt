@@ -398,6 +398,43 @@ def discover(rows: list[dict], diagnosis: dict | None = None) -> Discovery:
     roles["ev_charger_power"] = ranked(
         [(1, row) for row in power_rows if _has(_words(row), *_CHARGER, *_CAR)]
     )
+    roles["supply_temperature"] = ranked(
+        [
+            (
+                3
+                if _has(_words(row), "radiator_forward", "radiator forward", "framledning")
+                else 2
+                if _has(_words(row), "supply", "flow_temp", "forward", "fram")
+                else 0,
+                row,
+            )
+            for row in temperatures
+            if _has(_words(row), "forward", "framledning", "supply", "flow_temp", "fram")
+            and not _has(_words(row), "setpoint", "borvarde", "target")
+        ]
+    )
+    roles["curve_target"] = ranked(
+        [
+            (2 if _has(_words(row), "heating_setpoint", "heating setpoint") else 1, row)
+            for row in rows
+            if _domain(row) == "sensor"
+            and _is_numeric(row)
+            and _has(_words(row), "heating_setpoint", "heating setpoint", "berakn", "calculated")
+            and not _has(_words(row), "_2", "setpoint 2", "warm", "water", "vatten")
+        ]
+    )
+    curve_rows = [
+        row
+        for row in rows
+        if _domain(row) in {"number", "input_number"}
+        and _has(_words(row), "curve", "kurva", "kurvan")
+    ]
+    roles["curve"] = ranked(
+        [(1, row) for row in curve_rows if not _has(_words(row), "fine", "fin", "parallel")]
+    )
+    roles["curve_fine"] = ranked(
+        [(1, row) for row in curve_rows if _has(_words(row), "fine", "fin", "parallel")]
+    )
     roles["stove_temperature"] = ranked(
         [
             (1, row)

@@ -21,6 +21,8 @@ from . import baseload
 from .advice import AdviceReport, build_advice, samples_from_hourly
 from .climate_ids import repair_room_climate_entities, resolve_climate_entity
 from .config import Config, clamp_priority
+from .curve import CurveReport, CurveRoom, Knob, Proposal, build_hours, learn_gain, propose
+from .curve import analyse as analyse_curve
 from .discovery import discover
 from .explain import explain_plan, explain_upcoming, headline
 from .fuse import FuseReport, PhaseHour, assess, hours_from_samples
@@ -143,6 +145,9 @@ class Engine:
         self.guard_decision = GuardDecision(False, "inte utvärderad ännu")
         self.advice = AdviceReport()
         self.fuse = assess([], config.site.main_fuse_amps)
+        self.curve = CurveReport()
+        self.curve_proposal: Proposal | None = None
+        self.curve_knobs: dict[str, Knob] = {}
         self.wood_stove = WoodStoveReport()
         self._wood_stove_lit = False
         self._ext_state: dict[str, bool] = {}
@@ -334,6 +339,10 @@ class Engine:
             self.config.base_load.total_power_entity,
             self.config.wood_stove.temperature_entity,
             self.config.wood_stove.binary_entity,
+            self.config.heat_curve.supply_entity,
+            self.config.heat_curve.target_entity,
+            self.config.heat_curve.curve_entity,
+            self.config.heat_curve.fine_entity,
         ):
             if candidate:
                 entities.append(candidate)
@@ -821,6 +830,294 @@ class Engine:
         if written:
             _LOGGER.info("filled %d hours of consumption from Home Assistant %s", written, source)
         return written
+
+    # --- heating curve ----------------------------------------------------
+    def _curve_state(self) -> dict[str, Any]:
+        state = self.store.setting("heat_curve_state")
+        return dict(state) if isinstance(state, dict) else {}
+
+    def _save_curve_state(self, state: dict[str, Any]) -> None:
+        self.store.set_setting("heat_curve_state", state)
+
+    async def _adopt_curve_entities(self, ha: HomeAssistantClient) -> list[dict]:
+        """Fill in the curve entities the first time they can be found."""
+        rows = await ha.states_full()
+        cfg = self.config.heat_curve
+        found = discover(rows).roles
+        changed = False
+        for attr, role in (
+            ("supply_entity", "supply_temperature"),
+            ("target_entity", "curve_target"),
+            ("curve_entity", "curve"),
+            ("fine_entity", "curve_fine"),
+        ):
+            if not getattr(cfg, attr) and found.get(role):
+                setattr(cfg, attr, found[role][0].entity_id)
+                changed = True
+        if changed:
+            self.config.save_profile()
+            _LOGGER.info(
+                "heat curve entities: supply=%s target=%s curve=%s fine=%s",
+                cfg.supply_entity,
+                cfg.target_entity,
+                cfg.curve_entity,
+                cfg.fine_entity,
+            )
+        return rows
+
+    def _knob(self, rows: dict[str, dict], entity: str | None, gain: float | None) -> Knob | None:
+        if not entity or entity not in rows:
+            return None
+        row = rows[entity]
+        value = parse_numeric(row.get("state"))
+        if value is None:
+            return None
+        attrs = row.get("attributes") or {}
+        writable = entity.split(".", 1)[0] in {"number", "input_number"}
+        if not writable:
+            return None
+        return Knob(
+            entity=entity,
+            value=value,
+            minimum=float(attrs.get("min", -100.0)),
+            maximum=float(attrs.get("max", 100.0)),
+            step=float(attrs.get("step", 0.1) or 0.1),
+            gain=gain,
+        )
+
+    async def refresh_curve(self, *, allow_write: bool = True) -> CurveReport:
+        """Judge the heating curve from history and, in auto mode, nudge it.
+
+        At most one change a day, in small steps, within a total budget from
+        where the curve started. The first change of each setting doubles as
+        a measurement of how far it moves the supply temperature.
+        """
+        cfg = self.config.heat_curve
+        if cfg.mode == "off":
+            self.curve = CurveReport(summary="Kurvjusteringen är avstängd.")
+            self.curve_proposal = None
+            return self.curve
+        now = self._now()
+        state = self._curve_state()
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            if not await ha.ping():
+                return self.curve
+            rows = {row["entity_id"]: row for row in await self._adopt_curve_entities(ha)}
+
+            history = await self._training_history(now)
+            start = now - timedelta(days=21)
+
+            def points(entity: str | None) -> list[tuple[datetime, float]]:
+                if not entity:
+                    return []
+                return [(p.moment, p.value) for p in history.get(entity, []) if p.moment >= start]
+
+            rooms = {
+                room.key: (points(room.temperature_entity), points(room.climate_entity))
+                for room in self.config.rooms
+                if room.climate_entity
+            }
+            hours = build_hours(
+                outdoor=points(self.config.heat_pump.outdoor_entity),
+                supply=points(cfg.supply_entity),
+                target=points(cfg.target_entity),
+                rooms=rooms,
+                start=start,
+                end=now,
+            )
+            since = None
+            if state.get("last_write"):
+                since = datetime.fromisoformat(state["last_write"]) + timedelta(hours=1)
+            report = analyse_curve(
+                hours,
+                [CurveRoom(r.key, r.name, clamp_priority(r.priority)) for r in self.config.rooms],
+                now=now,
+                since=since,
+            )
+            if not cfg.supply_entity:
+                report.status = "need_data"
+                report.summary = "Välj framledningstemperaturen under Inställningar."
+
+            self._learn_curve_gain(state, rows, report, now)
+            gains = state.get("gains") or {}
+            fine = self._knob(rows, cfg.fine_entity, gains.get(cfg.fine_entity or ""))
+            curve = self._knob(rows, cfg.curve_entity, gains.get(cfg.curve_entity or ""))
+            self.curve_knobs = {k.entity: k for k in (fine, curve) if k is not None}
+            original = state.get("original") or {}
+            proposal = propose(
+                report,
+                fine=fine,
+                curve=curve,
+                original=original,
+                max_daily_c=cfg.max_daily_change_c,
+                max_total_c=cfg.max_total_change_c,
+            )
+            self.curve = report
+            self.curve_proposal = proposal
+
+            due = not state.get("last_write") or now - datetime.fromisoformat(
+                state["last_write"]
+            ) >= timedelta(hours=20)
+            local = now.astimezone(self.tz)
+            if (
+                allow_write
+                and cfg.mode == "auto"
+                and proposal is not None
+                and due
+                and local.hour >= cfg.write_hour
+            ):
+                await self._write_curve(ha, proposal, state, rows, report, now)
+        return self.curve
+
+    def _learn_curve_gain(
+        self, state: dict[str, Any], rows: dict[str, dict], report: CurveReport, now: datetime
+    ) -> None:
+        """After a write, measure how far the curve's own target moved."""
+        probe = state.get("probe")
+        target = self.config.heat_curve.target_entity
+        if not probe or not target or target not in rows:
+            return
+        if now - datetime.fromisoformat(probe["at"]) < timedelta(minutes=20):
+            return
+        after = parse_numeric(rows[target].get("state"))
+        outdoor_entity = self.config.heat_pump.outdoor_entity
+        outdoor = (
+            parse_numeric(rows.get(outdoor_entity, {}).get("state")) if outdoor_entity else None
+        )
+        state.pop("probe", None)
+        if after is None or outdoor is None or probe.get("target") is None:
+            self._save_curve_state(state)
+            return
+        slope = report.current_line[1] if report.current_line else 0.0
+        gain = learn_gain(
+            before=probe["target"],
+            after=after,
+            outdoor_before=probe["outdoor"],
+            outdoor_after=outdoor,
+            slope=slope,
+            delta_units=probe["delta"],
+        )
+        if gain is not None:
+            gains = state.setdefault("gains", {})
+            old = gains.get(probe["entity"])
+            gains[probe["entity"]] = round(gain if old is None else 0.5 * (old + gain), 3)
+            _LOGGER.info("heat curve: %s moves the supply %.2f °C per unit", probe["entity"], gain)
+        self._save_curve_state(state)
+
+    async def _write_curve(
+        self,
+        ha: HomeAssistantClient,
+        proposal: Proposal,
+        state: dict[str, Any],
+        rows: dict[str, dict],
+        report: CurveReport,
+        now: datetime,
+    ) -> None:
+        domain = proposal.entity.split(".", 1)[0]
+        await ha.call_service(
+            domain, "set_value", {"entity_id": proposal.entity, "value": proposal.new}
+        )
+        original = state.setdefault("original", {})
+        original.setdefault(proposal.entity, proposal.old)
+        target = self.config.heat_curve.target_entity
+        outdoor_entity = self.config.heat_pump.outdoor_entity
+        state["probe"] = {
+            "entity": proposal.entity,
+            "delta": proposal.new - proposal.old,
+            "at": now.isoformat(),
+            "target": parse_numeric(rows.get(target, {}).get("state")) if target else None,
+            "outdoor": parse_numeric(rows.get(outdoor_entity, {}).get("state"))
+            if outdoor_entity
+            else None,
+        }
+        state["last_write"] = now.isoformat()
+        log = state.setdefault("log", [])
+        log.append(
+            {
+                "at": now.isoformat(),
+                "entity": proposal.entity,
+                "old": proposal.old,
+                "new": proposal.new,
+                "why": report.summary,
+            }
+        )
+        state["log"] = log[-30:]
+        self._save_curve_state(state)
+        _LOGGER.warning(
+            "heat curve: %s %s -> %s (%s)",
+            proposal.entity,
+            proposal.old,
+            proposal.new,
+            report.summary,
+        )
+
+    async def apply_curve_now(self) -> CurveReport:
+        """Write today's proposal now, whatever the mode (the panel's button)."""
+        report = await self.refresh_curve(allow_write=False)
+        if self.curve_proposal is None:
+            return report
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            rows = {row["entity_id"]: row for row in await ha.states_full()}
+            await self._write_curve(
+                ha, self.curve_proposal, self._curve_state(), rows, report, self._now()
+            )
+        return await self.refresh_curve(allow_write=False)
+
+    async def restore_curve(self) -> CurveReport:
+        """Put every curve setting back to where hemopt found it."""
+        state = self._curve_state()
+        original = state.get("original") or {}
+        async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+            for entity, value in original.items():
+                await ha.call_service(
+                    entity.split(".", 1)[0], "set_value", {"entity_id": entity, "value": value}
+                )
+                state.setdefault("log", []).append(
+                    {
+                        "at": self._now().isoformat(),
+                        "entity": entity,
+                        "old": None,
+                        "new": value,
+                        "why": "Återställd till ursprungsvärdet.",
+                    }
+                )
+        state["original"] = {}
+        state["last_write"] = self._now().isoformat()
+        state.pop("probe", None)
+        self._save_curve_state(state)
+        return await self.refresh_curve(allow_write=False)
+
+    def curve_payload(self) -> dict[str, Any]:
+        state = self._curve_state()
+        cfg = self.config.heat_curve
+        return {
+            "mode": cfg.mode,
+            "entities": {
+                "supply": cfg.supply_entity,
+                "target": cfg.target_entity,
+                "curve": cfg.curve_entity,
+                "fine": cfg.fine_entity,
+            },
+            "writable": bool(self.curve_knobs),
+            "knobs": [
+                {"entity": k.entity, "value": k.value, "gain": k.gain, "step": k.step}
+                for k in self.curve_knobs.values()
+            ],
+            "report": self.curve.as_dict(),
+            "proposal": self.curve_proposal.as_dict() if self.curve_proposal else None,
+            "original": state.get("original") or {},
+            "last_write": state.get("last_write"),
+            "log": list(reversed(state.get("log") or []))[:10],
+        }
+
+    async def _curve_loop(self) -> None:
+        await asyncio.sleep(300)
+        while True:
+            try:
+                await self.refresh_curve()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("heat curve check failed")
+            await asyncio.sleep(3600)
 
     async def refresh_fuse(self) -> FuseReport:
         """Update the per-phase history and the verdict on the main fuse."""
@@ -1887,6 +2184,7 @@ class Engine:
             self._plan_loop(),
             self._train_loop(),
             self._lk_arc_loop(),
+            self._curve_loop(),
         )
 
     async def _lk_arc_loop(self) -> None:
