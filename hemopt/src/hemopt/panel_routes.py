@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).parent / "static"
-VERSION = "0.5.1"
+VERSION = "0.6.0"
 
 
 class PriorityUpdate(BaseModel):
@@ -718,6 +718,12 @@ def register_panel_routes(
     async def apply_curve() -> dict[str, Any]:
         engine = require_engine()
         await engine.apply_curve_now()
+        return engine.curve_payload()
+
+    @app.post("/api/curve/points-set")
+    async def curve_points_set() -> dict[str, Any]:
+        engine = require_engine()
+        await engine.mark_points_set()
         return engine.curve_payload()
 
     @app.post("/api/curve/restore")

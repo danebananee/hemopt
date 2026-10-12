@@ -1394,3 +1394,11 @@ table.data tr.current td {
   font-size: 11px;
   fill: var(--ink-3);
 }
+
+.curve-points {
+  border-top: 1px solid var(--line-2);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

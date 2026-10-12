@@ -435,6 +435,25 @@ def discover(rows: list[dict], diagnosis: dict | None = None) -> Discovery:
     roles["curve_fine"] = ranked(
         [(1, row) for row in curve_rows if _has(_words(row), "fine", "fin", "parallel")]
     )
+    point_rows = [row for row in rows if _domain(row) in {"number", "input_number"}]
+    roles["curve_foot"] = ranked(
+        [
+            (1, row)
+            for row in point_rows
+            if _has(
+                _words(row), "fotpunkt", "foot_point", "foot point", "curve_start", "base_point"
+            )
+        ]
+    )
+    roles["curve_end"] = ranked(
+        [
+            (1, row)
+            for row in point_rows
+            if _has(
+                _words(row), "slutpunkt", "end_point", "end point", "endpoint", "dimensionerande"
+            )
+        ]
+    )
     roles["stove_temperature"] = ranked(
         [
             (1, row)

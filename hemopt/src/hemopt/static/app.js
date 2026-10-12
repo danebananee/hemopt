@@ -1467,6 +1467,10 @@ function renderCurve(payload) {
     body.replaceChildren(el("p", { class: "muted", text: "Avstängd. Slå på under Inställningar → Värmekurva." }));
     return;
   }
+  if (!report.summary) {
+    body.replaceChildren(el("p", { class: "muted", text: "Har inte räknat än. Det görs inom en timme efter start, eller tryck Räkna om." }));
+    return;
+  }
   const tone = CURVE_TONE[report.status] || "neutral";
   const nodes = [
     el("div", { class: "fuse-head" }, el("span", { class: `pill ${tone}`, text: { too_cold: "För låg", too_warm: "Kan sänkas", ok: "Rätt", no_heat: "Ingen värme", need_data: "Lär sig" }[report.status] || "—" }), el("b", { text: report.summary || "" })),
@@ -1499,6 +1503,47 @@ function renderCurve(payload) {
           ),
       ),
     );
+  }
+  const pts = payload.points;
+  if (pts) {
+    const now = payload.points_now || {};
+    const basis = {
+      default: "En rimlig golvvärmekurva att börja med. Den förfinas när hemopt sett hur huset beter sig.",
+      shifted: "Vanlig form, men nivån satt efter hur huset beter sig nu. Lutningen bestäms när vädret har varierat mer.",
+      measured: "Form och nivå efter hur huset beter sig vid olika utetemperaturer.",
+    }[pts.basis];
+    const box = el(
+      "div",
+      { class: "curve-points" },
+      el("p", { class: "stove-label", text: "Kurvans form" }),
+      el(
+        "dl",
+        { class: "facts" },
+        el("dt", { text: "Fotpunkt (vid +20 °C ute)" }),
+        el("dd", { text: `${fmt1.format(pts.foot_c)} °C${now.foot_c != null ? ` (nu ${fmt1.format(now.foot_c)})` : ""}` }),
+        el("dt", { text: `Slutpunkt (vid ${pts.design_outdoor_c} °C ute)` }),
+        el("dd", { text: `${fmt1.format(pts.end_c)} °C${now.end_c != null ? ` (nu ${fmt1.format(now.end_c)})` : ""}` }),
+      ),
+      el("p", { class: "muted", text: basis }),
+    );
+    if (!payload.points_writable) {
+      box.append(
+        el("p", { class: "muted", text: "Värmepumpen tar inte emot kurvans punkter från Home Assistant. Ställ in dem i värmepumpens kurvmeny och tryck sedan på knappen, så fortsätter hemopt finjustera nivån därifrån." }),
+      );
+      const done = el("button", { type: "button", class: "btn ghost", text: "Jag har ställt in kurvan" });
+      done.onclick = async () => {
+        done.disabled = true;
+        try {
+          renderCurve(await api("api/curve/points-set", { method: "POST" }));
+          toast("Noterat. hemopt finjusterar nivån från och med nu.");
+        } catch (error) {
+          toast(error.message);
+          done.disabled = false;
+        }
+      };
+      box.append(el("div", { class: "row-actions" }, done));
+    }
+    nodes.push(box);
   }
   const p = payload.proposal;
   const actions = el("div", { class: "row-actions" });
@@ -1549,7 +1594,7 @@ function renderCurve(payload) {
         { class: "windows" },
         ...log.slice(0, 5).map((row) => {
           const t = new Date(row.at);
-          return el("li", {}, el("span", { text: `${dayFmt.format(t)} kl ${hhmm(t)}` }), el("span", { class: "muted", text: `${row.entity.split(".")[1]}: ${row.old ?? "—"} → ${row.new}` }));
+          return el("li", {}, el("span", { text: `${dayFmt.format(t)} kl ${hhmm(t)}` }), el("span", { class: "muted", text: `${row.entity.split(".")[1] || row.entity}: ${row.old ?? "—"} → ${row.new}` }));
         }),
       ),
     );
@@ -1781,7 +1826,10 @@ function renderSetup() {
   f.hc_supply = entityField("Framledning till golvet", pick(hc.supply_entity, "supply_temperature"), "supply_temperature", { help: "Vattnets temperatur ut i slingorna." });
   f.hc_target = entityField("Kurvans börvärde", pick(hc.target_entity, "curve_target"), "curve_target", { help: "Framledningen kurvan begär (H66 0107). Valfri, men gör justeringen säkrare." });
   f.hc_curve = entityField("Värmekurva", pick(hc.curve_entity, "curve"), "curve", { help: "Skrivbar number-entitet (H66 2205)." });
-  f.hc_fine = entityField("Kurvans finjustering", pick(hc.fine_entity, "curve_fine"), "curve_fine", { help: "Skrivbar number-entitet (H66 0207). Används först." });
+  f.hc_fine = entityField("Flytta hela kurvan", pick(hc.fine_entity, "curve_fine"), "curve_fine", { help: "Finjustering eller, på IVT Rego 1000, värmepumpens rumsbörvärde. Justeras dagligen." });
+  f.hc_foot = entityField("Kurvans fotpunkt", hc.foot_entity, "curve_foot", { help: "Valfri. Skrivbar number-entitet, framledning vid +20 °C ute." });
+  f.hc_end = entityField("Kurvans slutpunkt", hc.end_entity, "curve_end", { help: "Valfri. Skrivbar number-entitet, framledning vid dimensionerande utetemperatur." });
+  f.hc_design = numberField("Dimensionerande utetemperatur", hc.design_outdoor_c ?? -20, { step: "1", unit: "°C", help: "Där kurvans slutpunkt ligger. Står i värmepumpens kurvmeny." });
   f.hp_power = entityField("Värmepumpens effekt", pick(st.heat_pump.power_entity, "heat_pump_power"), "heat_pump_power", { help: "Valfri, men gör planen noggrannare." });
   f.house_setpoint = entityField("Husets börvärde", st.heat_pump.room_setpoint_entity, "house_setpoint", { help: "Bara om rummen saknar egna termostater." });
   f.hw_enabled = checkField("Planera varmvattnet", st.hot_water.enabled);
@@ -1877,7 +1925,7 @@ function renderSetup() {
       el("div", { id: "room-editors" }),
     ),
     fieldset("Värmepump och varmvatten", "", f.outdoor, f.hp_power, f.house_setpoint, f.hw_enabled, f.hw_top, f.hw_setpoint),
-    fieldset("Värmekurva", "Hittar den lägsta kurva som håller alla rum varma, och ställer in den i värmepumpen.", f.hc_mode, f.hc_supply, f.hc_target, f.hc_curve, f.hc_fine),
+    fieldset("Värmekurva", "Hittar den lägsta kurva som håller alla rum varma, och ställer in den i värmepumpen.", f.hc_mode, f.hc_supply, f.hc_target, f.hc_fine, f.hc_foot, f.hc_end, f.hc_design, f.hc_curve),
     fieldset("Elmätare och väder", "", f.meter, f.weather, f.phase),
     battery,
     car,
@@ -1904,7 +1952,7 @@ function renderSetup() {
       heat_pump: { outdoor_entity: val(f.outdoor), power_entity: val(f.hp_power), room_setpoint_entity: val(f.house_setpoint) },
       hot_water: { enabled: f.hw_enabled.input.checked, top_temperature_entity: val(f.hw_top), setpoint_entity: val(f.hw_setpoint) },
       base_load: { total_power_entity: val(f.meter) },
-      heat_curve: { mode: val(f.hc_mode), supply_entity: val(f.hc_supply), target_entity: val(f.hc_target), curve_entity: val(f.hc_curve), fine_entity: val(f.hc_fine) },
+      heat_curve: { mode: val(f.hc_mode), supply_entity: val(f.hc_supply), target_entity: val(f.hc_target), curve_entity: val(f.hc_curve), fine_entity: val(f.hc_fine), foot_entity: val(f.hc_foot), end_entity: val(f.hc_end), design_outdoor_c: num(f.hc_design) ?? -20 },
       rooms: setup.rooms.map((r) => r._read()),
       battery: {
         enabled: f.bat_enabled.input.checked,

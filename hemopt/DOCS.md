@@ -125,11 +125,21 @@ avstängt. Under **Inställningar → Värmekurva** väljer du:
   framledning), och aldrig mer än 6 °C från där kurvan började.
   **Återställ kurvan** sätter tillbaka ursprungsvärdena.
 
-För att hemopt ska kunna skriva kurvan måste den finnas som en skrivbar
-`number`-entitet. Med Husdata H66: sätt `MQTT_SUBS = 1` i H66 och se till att
-registren 2205 (värmekurva) och 0207 (finjustering) finns som `number` i Home
-Assistant. Finns de bara som sensorer visar hemopt förslaget, som du då gör på
-värmepumpen.
+**Kurvans form** (fotpunkt vid +20 °C ute och slutpunkt vid dimensionerande
+utetemperatur) räknas fram ur hur huset beter sig. Innan det finns data är det
+en vanlig golvvärmekurva (20 och 32 °C). Med data från ett smalt
+temperaturintervall behålls den vanliga formen men nivån sätts efter huset,
+och när vädret har varierat minst 8 °C används också den uppmätta lutningen.
+Slutpunkten hålls under 40 °C. Kan värmepumpen ta emot punkterna (som
+`number`-entiteter) skriver hemopt dem själv i automatiskt läge, först en
+gång och sedan högst en gång i veckan. Annars visas värdena: ställ in dem i
+värmepumpens kurvmeny och tryck **Jag har ställt in kurvan**.
+
+**Nivån** finjusteras sedan dagligen genom att hela kurvan flyttas upp eller
+ned, med finjusteringen om värmepumpen har en, och på IVT Rego 1000 med
+värmepumpens eget rumsbörvärde (`climate.h66_hproom_temp_setpoint`). Det
+värdet ligger kvar i värmepumpen. hemopts **Styr värmen** skriver aldrig till
+samma entitet.
 
 Hittar hemopt att rummen begär värme men att vattnet till golvet är lika
 svalt som rummen säger den till: då står värmepumpen troligen i sommarläge

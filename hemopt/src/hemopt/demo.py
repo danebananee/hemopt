@@ -292,6 +292,9 @@ class DemoEngine(Engine):
         self.curve_proposal = propose(
             report, fine=knob, curve=None, original={}, max_daily_c=1.5, max_total_c=6.0
         )
+        from .curve import recommend_points
+
+        self.curve_points = recommend_points(report, self.config.heat_curve.design_outdoor_c)
         return report
 
     async def backfill_power_history(self, days: int = 400) -> int:

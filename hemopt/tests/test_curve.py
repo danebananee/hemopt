@@ -252,3 +252,72 @@ def test_a_curve_changed_by_hand_is_read_as_it_is_now():
     report = analyse(hours, ROOMS, now=NOW, since=None)
     a, b = report.current_line
     assert a + b * 5.0 == pytest.approx(true_need("salong", 5.0) + 2.0, abs=0.3)
+
+
+def test_points_start_from_a_reasonable_floor_heating_curve():
+    from hemopt.curve import CurveReport, recommend_points
+
+    points = recommend_points(CurveReport())
+    assert (points.foot_c, points.end_c, points.basis) == (20.0, 32.0, "default")
+    assert points.at(0.0) == pytest.approx(26.0)
+
+
+def test_points_follow_the_measured_need():
+    from hemopt.curve import recommend_points
+
+    report = analyse(house(-3.0), ROOMS, now=NOW, since=None)
+    points = recommend_points(report)
+    assert points.basis == "measured"
+    # Salong needs 21 + 0.55 * (20 - outdoor); the end point is capped for floor heating.
+    assert points.foot_c == pytest.approx(21.0, abs=0.7)
+    assert points.end_c == pytest.approx(40.0)
+
+
+def test_narrow_weather_keeps_the_usual_shape_at_the_measured_level():
+    from hemopt.curve import recommend_points
+
+    hours = house(-3.0, outdoor_mid=8.0)
+    for hour in hours:
+        hour.outdoor = 8.0 + 0.5 * math.sin(hour.moment.timestamp() / 3600)
+        hour.supply = hour.target = true_need("salong", hour.outdoor) - 3.0
+        for room in ROOMS:
+            hour.rooms[room.key] = room_response(room.key, hour.outdoor, hour.supply)
+    report = analyse(hours, ROOMS, now=NOW, since=None)
+    points = recommend_points(report)
+    assert points.basis == "shifted"
+    assert points.at(8.0) == pytest.approx(true_need("salong", 8.0), abs=0.6)
+    assert points.end_c - points.foot_c == pytest.approx(12.0, abs=0.1)
+
+
+def test_points_stay_within_floor_heating_limits():
+    from hemopt.curve import CurveReport, recommend_points
+
+    report = CurveReport(status="too_cold", need_line=(60.0, -2.0), slope_known=True, span_c=10.0)
+    points = recommend_points(report)
+    assert points.foot_c <= 28.0
+    assert points.end_c <= 40.0
+
+
+def test_a_room_setpoint_can_shift_the_curve():
+    report = analyse(house(-3.0), ROOMS, now=NOW, since=None)
+    room = Knob("climate.h66_room", 20.0, 10.0, 30.0, 0.5, gain=None, label="rumsbörvärdet")
+    step = propose(report, fine=room, curve=None, original={}, max_daily_c=1.5, max_total_c=6.0)
+    assert step.new == pytest.approx(20.5)
+    assert "rumsbörvärdet" in step.reason
+
+
+def test_shape_is_written_once_then_only_when_measured_and_weekly(tmp_path):
+    from hemopt.curve import CurvePoints
+    from hemopt.demo import DemoEngine, demo_config
+
+    engine = DemoEngine(demo_config(database_path=str(tmp_path / "t.db")))
+    foot = Knob("number.foot", 10.0, 0.0, 40.0, 0.5)
+    end = Knob("number.end", 28.7, 0.0, 60.0, 0.5)
+    engine.curve_points = CurvePoints(20.0, 32.0, -20.0, "default")
+    assert engine._points_due({}, foot, end, NOW)
+    state = {"points_at": NOW.isoformat()}
+    assert not engine._points_due(state, foot, end, NOW + timedelta(days=10))
+    engine.curve_points = CurvePoints(22.0, 35.0, -20.0, "measured")
+    assert not engine._points_due(state, foot, end, NOW + timedelta(days=3))
+    assert engine._points_due(state, foot, end, NOW + timedelta(days=8))
+    assert not engine._points_due(state, None, end, NOW + timedelta(days=8))

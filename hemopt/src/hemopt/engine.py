@@ -21,7 +21,17 @@ from . import baseload
 from .advice import AdviceReport, build_advice, samples_from_hourly
 from .climate_ids import repair_room_climate_entities, resolve_climate_entity
 from .config import Config, clamp_priority
-from .curve import CurveReport, CurveRoom, Knob, Proposal, build_hours, learn_gain, propose
+from .curve import (
+    CurvePoints,
+    CurveReport,
+    CurveRoom,
+    Knob,
+    Proposal,
+    build_hours,
+    learn_gain,
+    propose,
+    recommend_points,
+)
 from .curve import analyse as analyse_curve
 from .discovery import discover
 from .explain import explain_plan, explain_upcoming, headline
@@ -148,6 +158,7 @@ class Engine:
         self.curve = CurveReport()
         self.curve_proposal: Proposal | None = None
         self.curve_knobs: dict[str, Knob] = {}
+        self.curve_points: CurvePoints | None = None
         self.wood_stove = WoodStoveReport()
         self._wood_stove_lit = False
         self._ext_state: dict[str, bool] = {}
@@ -343,6 +354,8 @@ class Engine:
             self.config.heat_curve.target_entity,
             self.config.heat_curve.curve_entity,
             self.config.heat_curve.fine_entity,
+            self.config.heat_curve.foot_entity,
+            self.config.heat_curve.end_entity,
         ):
             if candidate:
                 entities.append(candidate)
@@ -850,9 +863,22 @@ class Engine:
             ("target_entity", "curve_target"),
             ("curve_entity", "curve"),
             ("fine_entity", "curve_fine"),
+            ("foot_entity", "curve_foot"),
+            ("end_entity", "curve_end"),
         ):
             if not getattr(cfg, attr) and found.get(role):
                 setattr(cfg, attr, found[role][0].entity_id)
+                changed = True
+        if not cfg.fine_entity:
+            # IVT Rego 1000 has no fine adjustment over H66, but its own room
+            # setpoint moves the whole curve and is kept in the heat pump.
+            setpoints = [
+                c.entity_id
+                for c in found.get("house_setpoint", [])
+                if c.entity_id.startswith("climate.") and "setpoint" in c.entity_id
+            ]
+            if setpoints:
+                cfg.fine_entity = setpoints[0]
                 changed = True
         if changed:
             self.config.save_profile()
@@ -870,11 +896,25 @@ class Engine:
             return None
         row = rows[entity]
         value = parse_numeric(row.get("state"))
-        if value is None:
-            return None
         attrs = row.get("attributes") or {}
-        writable = entity.split(".", 1)[0] in {"number", "input_number"}
-        if not writable:
+        if value is None and not entity.startswith("climate."):
+            return None
+        domain = entity.split(".", 1)[0]
+        if domain == "climate":
+            # A room setpoint: the value is an attribute, the state is the mode.
+            value = parse_numeric(attrs.get("temperature"))
+            if value is None:
+                return None
+            return Knob(
+                entity=entity,
+                value=value,
+                minimum=float(attrs.get("min_temp", 10.0)),
+                maximum=float(attrs.get("max_temp", 30.0)),
+                step=float(attrs.get("target_temp_step", 0.5) or 0.5),
+                gain=gain,
+                label="värmepumpens rumsbörvärde",
+            )
+        if domain not in {"number", "input_number"}:
             return None
         return Knob(
             entity=entity,
@@ -954,20 +994,106 @@ class Engine:
             )
             self.curve = report
             self.curve_proposal = proposal
+            self.curve_points = recommend_points(report, cfg.design_outdoor_c)
+            foot = self._knob(rows, cfg.foot_entity, None)
+            end = self._knob(rows, cfg.end_entity, None)
+            if foot is not None:
+                self.curve_knobs[foot.entity] = foot
+            if end is not None:
+                self.curve_knobs[end.entity] = end
 
             due = not state.get("last_write") or now - datetime.fromisoformat(
                 state["last_write"]
             ) >= timedelta(hours=20)
             local = now.astimezone(self.tz)
-            if (
-                allow_write
-                and cfg.mode == "auto"
-                and proposal is not None
-                and due
-                and local.hour >= cfg.write_hour
-            ):
-                await self._write_curve(ha, proposal, state, rows, report, now)
+            if allow_write and cfg.mode == "auto" and due and local.hour >= cfg.write_hour:
+                if self._points_due(state, foot, end, now):
+                    await self._write_points(ha, foot, end, fine, state, report, now)
+                elif proposal is not None:
+                    await self._write_curve(ha, proposal, state, rows, report, now)
         return self.curve
+
+    def _points_due(
+        self, state: dict[str, Any], foot: Knob | None, end: Knob | None, now: datetime
+    ) -> bool:
+        """Whether the curve's shape should be (re)written now.
+
+        The first time, a reasonable guess replaces whatever the pump had.
+        After that only when the weather has shown the slope, at most weekly,
+        and only for a real difference.
+        """
+        points = self.curve_points
+        if foot is None or end is None or points is None:
+            return False
+        differs = max(abs(foot.value - points.foot_c), abs(end.value - points.end_c)) >= 1.5
+        if not state.get("points_at"):
+            return differs
+        if points.basis != "measured":
+            return False
+        weekly = now - datetime.fromisoformat(state["points_at"]) >= timedelta(days=7)
+        return weekly and differs
+
+    async def _write_points(
+        self,
+        ha: HomeAssistantClient,
+        foot: Knob,
+        end: Knob,
+        fine: Knob | None,
+        state: dict[str, Any],
+        report: CurveReport,
+        now: datetime,
+    ) -> None:
+        """Write the curve's shape, and put the daily shift back to where it began."""
+        points = self.curve_points
+        assert points is not None
+        original = state.setdefault("original", {})
+        changes = [
+            (foot, round(points.foot_c, 1)),
+            (end, round(points.end_c, 1)),
+        ]
+        if fine is not None and fine.entity in original:
+            changes.append((fine, original[fine.entity]))
+        log = state.setdefault("log", [])
+        for knob, value in changes:
+            if abs(knob.value - value) < 1e-6:
+                continue
+            original.setdefault(knob.entity, knob.value)
+            await self._set_knob(ha, knob.entity, value)
+            log.append(
+                {
+                    "at": now.isoformat(),
+                    "entity": knob.entity,
+                    "old": knob.value,
+                    "new": value,
+                    "why": "Ny kurvform: "
+                    + {
+                        "default": "en rimlig golvvärmekurva att börja med.",
+                        "shifted": "rimlig form, nivå efter hur huset beter sig nu.",
+                        "measured": "form och nivå efter hur huset beter sig.",
+                    }[points.basis],
+                }
+            )
+        state["log"] = log[-30:]
+        state["points_at"] = now.isoformat()
+        state["last_write"] = now.isoformat()
+        state.pop("probe", None)
+        self._save_curve_state(state)
+        _LOGGER.warning(
+            "heat curve: shape set to %.1f °C at +20 and %.1f °C at %.0f (%s)",
+            points.foot_c,
+            points.end_c,
+            points.design_outdoor_c,
+            points.basis,
+        )
+
+    async def _set_knob(self, ha: HomeAssistantClient, entity: str, value: float) -> None:
+        domain = entity.split(".", 1)[0]
+        if domain == "climate":
+            await ha.call_service(
+                "climate", "set_temperature", {"entity_id": entity, "temperature": value}
+            )
+        else:
+            await ha.call_service(domain, "set_value", {"entity_id": entity, "value": value})
 
     def _learn_curve_gain(
         self, state: dict[str, Any], rows: dict[str, dict], report: CurveReport, now: datetime
@@ -1013,10 +1139,7 @@ class Engine:
         report: CurveReport,
         now: datetime,
     ) -> None:
-        domain = proposal.entity.split(".", 1)[0]
-        await ha.call_service(
-            domain, "set_value", {"entity_id": proposal.entity, "value": proposal.new}
-        )
+        await self._set_knob(ha, proposal.entity, proposal.new)
         original = state.setdefault("original", {})
         original.setdefault(proposal.entity, proposal.old)
         target = self.config.heat_curve.target_entity
@@ -1054,13 +1177,59 @@ class Engine:
     async def apply_curve_now(self) -> CurveReport:
         """Write today's proposal now, whatever the mode (the panel's button)."""
         report = await self.refresh_curve(allow_write=False)
-        if self.curve_proposal is None:
-            return report
+        cfg = self.config.heat_curve
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
             rows = {row["entity_id"]: row for row in await ha.states_full()}
-            await self._write_curve(
-                ha, self.curve_proposal, self._curve_state(), rows, report, self._now()
+            state = self._curve_state()
+            foot = self._knob(rows, cfg.foot_entity, None)
+            end = self._knob(rows, cfg.end_entity, None)
+            fine = self._knob(
+                rows, cfg.fine_entity, (state.get("gains") or {}).get(cfg.fine_entity or "")
             )
+            points = self.curve_points
+            if (
+                foot is not None
+                and end is not None
+                and points is not None
+                and max(abs(foot.value - points.foot_c), abs(end.value - points.end_c)) >= 1.0
+            ):
+                await self._write_points(ha, foot, end, fine, state, report, self._now())
+            elif self.curve_proposal is not None:
+                await self._write_curve(ha, self.curve_proposal, state, rows, report, self._now())
+            else:
+                return report
+        return await self.refresh_curve(allow_write=False)
+
+    async def mark_points_set(self) -> CurveReport:
+        """The household has entered the recommended curve on the heat pump by hand.
+
+        The daily shift starts over from where it began, so the new shape is
+        not raised or lowered twice.
+        """
+        state = self._curve_state()
+        cfg = self.config.heat_curve
+        original = state.get("original") or {}
+        now = self._now()
+        if cfg.fine_entity and cfg.fine_entity in original:
+            async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
+                await self._set_knob(ha, cfg.fine_entity, original[cfg.fine_entity])
+        points = self.curve_points
+        log = state.setdefault("log", [])
+        if points is not None:
+            log.append(
+                {
+                    "at": now.isoformat(),
+                    "entity": "kurvan",
+                    "old": None,
+                    "new": f"{points.foot_c:.0f}/{points.end_c:.0f} °C",
+                    "why": "Inställd för hand på värmepumpen.",
+                }
+            )
+        state["log"] = log[-30:]
+        state["points_at"] = now.isoformat()
+        state["last_write"] = now.isoformat()
+        state.pop("probe", None)
+        self._save_curve_state(state)
         return await self.refresh_curve(allow_write=False)
 
     async def restore_curve(self) -> CurveReport:
@@ -1069,9 +1238,7 @@ class Engine:
         original = state.get("original") or {}
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
             for entity, value in original.items():
-                await ha.call_service(
-                    entity.split(".", 1)[0], "set_value", {"entity_id": entity, "value": value}
-                )
+                await self._set_knob(ha, entity, value)
                 state.setdefault("log", []).append(
                     {
                         "at": self._now().isoformat(),
@@ -1082,6 +1249,7 @@ class Engine:
                     }
                 )
         state["original"] = {}
+        state.pop("points_at", None)
         state["last_write"] = self._now().isoformat()
         state.pop("probe", None)
         self._save_curve_state(state)
@@ -1097,8 +1265,18 @@ class Engine:
                 "target": cfg.target_entity,
                 "curve": cfg.curve_entity,
                 "fine": cfg.fine_entity,
+                "foot": cfg.foot_entity,
+                "end": cfg.end_entity,
             },
             "writable": bool(self.curve_knobs),
+            "points": self.curve_points.as_dict() if self.curve_points else None,
+            "points_writable": bool(cfg.foot_entity and cfg.end_entity)
+            and cfg.foot_entity in self.curve_knobs
+            and cfg.end_entity in self.curve_knobs,
+            "points_now": {
+                "foot_c": getattr(self.curve_knobs.get(cfg.foot_entity or ""), "value", None),
+                "end_c": getattr(self.curve_knobs.get(cfg.end_entity or ""), "value", None),
+            },
             "knobs": [
                 {"entity": k.entity, "value": k.value, "gain": k.gain, "step": k.step}
                 for k in self.curve_knobs.values()
@@ -2011,6 +2189,8 @@ class Engine:
             # No per-room actuators (common with LK sensors that are read-only):
             # write one house indoor target via H66 / Rego room controller.
             house_entity = self.config.heat_pump.room_setpoint_entity
+            if house_entity == self.config.heat_curve.fine_entity:
+                house_entity = None  # owned by the heating-curve tuner
             if house_entity and room_writes == 0:
                 target = self._house_room_setpoint(index)
                 if target is not None:

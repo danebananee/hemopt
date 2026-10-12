@@ -481,7 +481,14 @@ class HeatCurveConfig(BaseModel):
     # Writable curve settings: the curve itself (2205) and its parallel
     # fine adjustment (0207). number.* or input_number.* entities.
     curve_entity: str | None = None
+    # Anything that moves the whole curve up or down: a fine adjustment, or
+    # on IVT Rego 1000 the heat pump's own room setpoint (climate.*).
     fine_entity: str | None = None
+    # The curve's two points, if the heat pump exposes them as numbers:
+    # supply at +20 °C outside (foot) and at the design temperature (end).
+    foot_entity: str | None = None
+    end_entity: str | None = None
+    design_outdoor_c: float = Field(default=-20.0, ge=-35.0, le=-5.0)
     max_daily_change_c: float = Field(default=1.5, gt=0.0, le=5.0)
     max_total_change_c: float = Field(default=6.0, gt=0.0, le=15.0)
     # Local hour after which the day's change may be written.

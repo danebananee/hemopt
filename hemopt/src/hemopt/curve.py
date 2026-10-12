@@ -208,6 +208,8 @@ class CurveReport:
     slope_change: float = 0.0
     savings_pct: float = 0.0
     suspects: list[str] = field(default_factory=list)
+    slope_known: bool = False
+    span_c: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         def line(value):
@@ -228,6 +230,8 @@ class CurveReport:
             "slope_change": round(self.slope_change, 4),
             "savings_pct": round(self.savings_pct, 1),
             "suspects": self.suspects,
+            "slope_known": self.slope_known,
+            "span_c": round(self.span_c, 1),
         }
 
 
@@ -381,6 +385,8 @@ def analyse(
     reference = min(reference, HEATING_LIMIT_C)
     report.shift_c = (need_line[0] + need_line[1] * reference) - (cur_a + cur_b * reference)
     report.slope_change = need_line[1] - cur_b if fitted is not None else 0.0
+    report.slope_known = fitted is not None
+    report.span_c = span
     report.savings_pct = max(0.0, -report.shift_c) * COP_GAIN_PER_K * 100
 
     cold_rooms = [r["name"] for r in report.rooms if r["counted"] and r["below"] > 0.3]
@@ -458,6 +464,7 @@ class Knob:
     step: float
     # Degrees of supply temperature per unit, measured. None until learnt.
     gain: float | None = None
+    label: str = ""
 
 
 @dataclass(slots=True)
@@ -504,9 +511,10 @@ def propose(
     if report.status not in {"too_cold", "too_warm"}:
         return None
     shift = max(-max_daily_c, min(max_daily_c, report.shift_c))
-    for knob, label in ((fine, "finjusteringen"), (curve, "kurvan")):
+    for knob, default_label in ((fine, "finjusteringen"), (curve, "kurvan")):
         if knob is None:
             continue
+        label = knob.label or default_label
         gain = knob.gain if knob.gain and abs(knob.gain) > 0.05 else None
         units = shift / gain if gain else math.copysign(knob.step or 0.1, shift)
         start = original.get(knob.entity, knob.value)
@@ -524,6 +532,71 @@ def propose(
             reason=f"{direction} {label} från {knob.value:g} till {new:g}.",
         )
     return None
+
+
+# A reasonable floor-heating curve before anything is known about the house:
+# 20 °C to the floor at +20 °C outside, 32 °C at the design temperature.
+DEFAULT_FOOT_C = 20.0
+DEFAULT_END_C = 32.0
+FOOT_RANGE = (16.0, 28.0)
+END_RANGE = (24.0, 40.0)
+# The measured slope sets the curve's shape only after this much weather.
+SHAPE_SPAN_C = 8.0
+
+
+@dataclass(slots=True)
+class CurvePoints:
+    """The heat pump's curve as two points: +20 °C outside and the design temperature."""
+
+    foot_c: float
+    end_c: float
+    design_outdoor_c: float
+    basis: str  # default | shifted | measured
+
+    def at(self, outdoor: float) -> float:
+        span = 20.0 - self.design_outdoor_c
+        return self.foot_c + (self.end_c - self.foot_c) * (20.0 - outdoor) / span
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "foot_c": round(self.foot_c, 1),
+            "end_c": round(self.end_c, 1),
+            "design_outdoor_c": self.design_outdoor_c,
+            "basis": self.basis,
+        }
+
+
+def recommend_points(report: CurveReport, design_outdoor_c: float = -20.0) -> CurvePoints:
+    """The curve's two end points that fit what the house needs.
+
+    Before there is any data this is a typical floor-heating curve. With data
+    from a narrow range of weather the typical shape is moved up or down to
+    pass through what the house needs now; once the weather has spanned enough
+    temperatures, the measured slope is used as well. Both points are kept
+    within what floor heating sensibly runs at.
+    """
+
+    def clamp(value: float, bounds: tuple[float, float]) -> float:
+        return max(bounds[0], min(bounds[1], value))
+
+    span = 20.0 - design_outdoor_c
+    default_slope = (DEFAULT_FOOT_C - DEFAULT_END_C) / span  # per °C outdoor, negative
+    need = report.need_line
+    if need is None or report.status in {"need_data", "no_heat"}:
+        return CurvePoints(DEFAULT_FOOT_C, DEFAULT_END_C, design_outdoor_c, "default")
+    a, b = need
+    if not report.slope_known or report.span_c < SHAPE_SPAN_C:
+        b = default_slope
+        reference = report.outdoor_now if report.outdoor_now is not None else 5.0
+        a = (need[0] + need[1] * reference) - b * reference
+        basis = "shifted"
+    else:
+        basis = "measured"
+    foot = clamp(a + b * 20.0, FOOT_RANGE)
+    end = clamp(a + b * design_outdoor_c, END_RANGE)
+    if end < foot + 4.0:
+        end = foot + 4.0
+    return CurvePoints(foot, end, design_outdoor_c, basis)
 
 
 def learn_gain(
