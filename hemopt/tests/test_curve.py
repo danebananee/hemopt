@@ -243,3 +243,12 @@ def test_daily_steps_converge_without_overshooting():
     assert statuses[-1] == "ok"
     assert "too_warm" not in statuses
     assert abs(-4.0 + true_gain * offset_units) <= 0.8
+
+
+def test_a_curve_changed_by_hand_is_read_as_it_is_now():
+    hours = house(-3.0)
+    for hour in hours[-48:]:
+        hour.target = true_need("salong", hour.outdoor) + 2.0
+    report = analyse(hours, ROOMS, now=NOW, since=None)
+    a, b = report.current_line
+    assert a + b * 5.0 == pytest.approx(true_need("salong", 5.0) + 2.0, abs=0.3)

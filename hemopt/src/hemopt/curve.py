@@ -259,17 +259,19 @@ def analyse(
         return report
 
     # The curve as it is: its own target if reported, else the measured supply.
-    current_pts = []
+    # Only the most recent stretch counts, so a curve changed by hand (or by
+    # hemopt) is read as it is now, not blended with the old one.
+    current_pts: list[tuple[datetime, float, float]] = []
     for h in heating:
         if since is not None and h.moment < since:
             continue
-        y = h.target if h.target is not None else h.supply
+        if h.target is not None:
+            current_pts.append((h.moment, h.outdoor, h.target))
+            continue
         rooms_mean = _mean([r.temperature for r in h.rooms.values()])
-        if y is not None and rooms_mean is not None and y - rooms_mean >= MIN_LIFT_C:
-            current_pts.append((h.outdoor, y, 1.0))
-    report.current_line = _fit_line(current_pts) or (
-        (current_pts[0][1], 0.0) if current_pts else None
-    )
+        if h.supply - rooms_mean >= MIN_LIFT_C:
+            current_pts.append((h.moment, h.outdoor, h.supply))
+    report.current_line = _current_line(current_pts, now)
 
     # Heat delivered at all? Rooms calling but water no warmer than the rooms.
     calling = [
@@ -415,6 +417,26 @@ def analyse(
             "oftare beror på en felkopplad eller stängd slinga än på kurvan. Det räknas inte."
         )
     return report
+
+
+def _current_line(
+    points: list[tuple[datetime, float, float]], now: datetime
+) -> tuple[float, float] | None:
+    """The curve from the newest window that has enough weather in it."""
+    for window, minimum in ((timedelta(hours=48), 12), (timedelta(days=7), 24), (None, 1)):
+        recent = [p for p in points if window is None or now - p[0] <= window]
+        if len(recent) < minimum:
+            continue
+        outdoors = [p[1] for p in recent]
+        if window is not None and max(outdoors) - min(outdoors) < 2.0:
+            continue
+        line = _fit_line([(x, y, 1.0) for _, x, y in recent])
+        if line is not None:
+            return line
+    if not points:
+        return None
+    level = sum(p[2] for p in points[-12:]) / len(points[-12:])
+    return (level, 0.0)
 
 
 def _mean(values: list[float]) -> float:
