@@ -1402,3 +1402,72 @@ table.data tr.current td {
   flex-direction: column;
   gap: 6px;
 }
+
+/* What needs the household's attention, at the top of the overview. */
+.attention {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.attention h2 {
+  margin: 0 0 0.5rem;
+}
+
+.attention-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.attention-list li {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.attention-list li:first-child {
+  border-top: 0;
+}
+
+.attention-list li p {
+  margin: 0.2rem 0 0;
+  color: var(--ink-2, inherit);
+}
+
+.attention-list li.kind-alert b {
+  color: var(--bad);
+}
+
+.attention-list .btn {
+  flex: none;
+}
+
+/* Legend for the room bands. */
+.room-legend {
+  margin: 0 0 0.75rem;
+}
+
+.sw-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.sw-band {
+  width: 18px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--cheap-soft);
+  border: 1px solid var(--cheap);
+}
+
+.sw-target {
+  width: 2px;
+  height: 14px;
+  border-radius: 0;
+  background: var(--heat);
+}

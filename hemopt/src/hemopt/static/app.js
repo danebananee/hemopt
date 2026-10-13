@@ -638,14 +638,65 @@ function renderSummary() {
     sub.textContent = "Det kan ta några minuter på en Raspberry Pi.";
     return;
   }
-  line.textContent = s.model_action || "Planen är klar.";
+  const attention = attentionItems();
+  renderAttention(attention);
+  const urgent = attention.find((a) => a.kind === "alert");
+  line.textContent = urgent ? urgent.title : attention.length ? "Nästan allt ser bra ut" : "Allt ser bra ut";
   const parts = [];
-  if (!s.control_enabled) parts.push("Styrningen är av, så termostaterna rörs inte. Planen visar vad hemopt skulle göra.");
+  if (s.model_action && !urgent) parts.push(`Just nu: ${s.model_action.charAt(0).toLowerCase()}${s.model_action.slice(1)}.`);
+  if (!s.control_enabled) parts.push("hemopt räknar men ändrar inget i huset förrän du slår på «Styr värmen».");
   else if (s.rooms_with_climate) parts.push(`hemopt styr ${s.rooms_with_climate} rum.`);
   if (s.guard_blocking) parts.push(`Effektvakten håller emot: ${s.guard_reason}.`);
   if (!s.prices_available) parts.push("Spotpriserna kunde inte hämtas.");
   if (!s.home_assistant_online) parts.push("Home Assistant svarar inte.");
   sub.textContent = parts.join(" ");
+}
+
+function coldRooms() {
+  return (state.rooms || []).filter((r) => r.temperature !== null && r.temperature < r.comfort_min - 0.2);
+}
+
+/* What the household should know or do, most important first. */
+function attentionItems() {
+  const s = state.status;
+  if (!s) return [];
+  const items = [];
+  if (!s.home_assistant_online) {
+    items.push({ kind: "alert", title: "hemopt når inte Home Assistant", detail: "Inga mätvärden kommer in. Se fliken System.", tab: "system" });
+  }
+  if (s.curve_status === "no_heat") {
+    items.push({ kind: "alert", title: s.curve_summary || "Värmepumpen värmer inte huset", detail: s.curve_detail, tab: "rooms" });
+  } else if (s.curve_status === "too_cold") {
+    items.push({ kind: "warn", title: "Värmekurvan är för låg", detail: s.curve_summary, tab: "rooms" });
+  }
+  const cold = coldRooms();
+  if (cold.length >= 3 && s.curve_status !== "no_heat") {
+    items.push({
+      kind: "warn",
+      title: `${cold.length} rum är kallare än du vill`,
+      detail: `${cold.map((r) => `${r.name} ${deg(r.temperature)}`).join(", ")}.`,
+      tab: "rooms",
+    });
+  }
+  if (!s.prices_available) {
+    items.push({ kind: "warn", title: "Elpriset kunde inte hämtas", detail: "hemopt planerar på senast kända priser tills det går igen.", tab: "energy" });
+  }
+  return items;
+}
+
+function renderAttention(items) {
+  const card = $("#attention-card");
+  card.hidden = !items.length;
+  $("#attention-list").replaceChildren(
+    ...items.map((a) =>
+      el(
+        "li",
+        { class: `kind-${a.kind}` },
+        el("div", {}, el("b", { text: a.title }), a.detail ? el("p", { text: a.detail }) : null),
+        a.tab ? el("button", { type: "button", class: "btn ghost", text: "Visa", onclick: () => selectTab(a.tab) }) : null,
+      ),
+    ),
+  );
 }
 
 function figure(label, value, unit, note, tone) {
@@ -685,9 +736,9 @@ function renderFigures() {
     const note = cold.length ? `kallast: ${cold[0].name} ${deg(cold[0].temperature)}` : "alla rum inom sitt band";
     items.push(
       figure(
-        "Inomhus",
+        "Rum med rätt värme",
         `${inside.length}`,
-        `av ${measured.length} rum`,
+        `av ${measured.length}`,
         note,
         cold.length ? "warn" : "good",
       ),
@@ -716,7 +767,7 @@ function renderFigures() {
         "Värmepump",
         nf(1).format(s.planned_power_kw),
         "kW",
-        s.control_enabled ? "planerat just nu" : "vad planen vill just nu",
+        "så mycket el planen vill använda just nu",
       ),
     );
   }
@@ -731,16 +782,21 @@ function renderActions() {
     list.replaceChildren(el("li", { class: "empty", text: s && s.starting ? "Väntar på första planen…" : "Inget särskilt att berätta just nu." }));
     return;
   }
-  list.replaceChildren(
-    ...actions.map((a) =>
-      el(
-        "li",
-        { class: `kind-${a.kind || "info"}` },
-        el("span", { class: "when", text: WHEN[a.when] || a.when || "Nu" }),
-        el("span", { class: "what" }, el("b", { text: a.title }), a.detail ? el("span", { text: a.detail }) : null),
-      ),
-    ),
-  );
+  // The four most important are plenty; the rest is one click away.
+  const row = (a) =>
+    el(
+      "li",
+      { class: `kind-${a.kind || "info"}` },
+      el("span", { class: "when", text: WHEN[a.when] || a.when || "Nu" }),
+      el("span", { class: "what" }, el("b", { text: a.title }), a.detail ? el("span", { text: a.detail }) : null),
+    );
+  const shown = actions.slice(0, 4).map(row);
+  if (actions.length > 4) {
+    const more = el("button", { type: "button", class: "btn ghost", text: `Visa ${actions.length - 4} till` });
+    more.onclick = () => list.replaceChildren(...actions.map(row));
+    shown.push(el("li", { class: "more" }, more));
+  }
+  list.replaceChildren(...shown);
 }
 
 function renderErrors() {
@@ -920,6 +976,15 @@ function roomBand(room) {
   return el("div", { class: "band-wrap" }, band, labels);
 }
 
+/* How the room feels right now, in words. */
+function roomFeel(room) {
+  const t = room.temperature;
+  if (t === null || t === undefined) return { text: "Ingen mätning just nu", tone: "" };
+  if (t < room.comfort_min - 0.2) return { text: `${fmt1.format(room.comfort_min - t)} °C för kallt`, tone: "tone-warn" };
+  if (t > room.comfort_max + 0.3) return { text: `${fmt1.format(t - room.comfort_max)} °C varmare än du behöver`, tone: "" };
+  return { text: "Lagom varmt", tone: "tone-good" };
+}
+
 function roomRow(room) {
   const priority = el(
     "div",
@@ -1005,7 +1070,7 @@ function roomRow(room) {
   return el(
     "div",
     { class: "room" },
-    el("div", { class: "room-name" }, el("b", { text: room.name }), el("small", { text: PRIORITY_HELP[room.priority] })),
+    el("div", { class: "room-name" }, el("b", { text: room.name }), el("small", { class: roomFeel(room).tone, text: roomFeel(room).text })),
     roomBand(room),
     el("div", { class: "room-controls" }, priority),
     detail,
@@ -1025,7 +1090,15 @@ function renderRooms() {
     if (!floors.has(key)) floors.set(key, []);
     floors.get(key).push(room);
   }
+  const legend = el(
+    "div",
+    { class: "legend room-legend" },
+    el("span", {}, el("i", { class: "sw sw-dot" }), "Temperatur nu"),
+    el("span", {}, el("i", { class: "sw sw-band" }), "Det du vill ha"),
+    el("span", {}, el("i", { class: "sw sw-target" }), "Vad hemopt planerar"),
+  );
   host.replaceChildren(
+    legend,
     ...Array.from(floors.entries()).map(([name, list]) => {
       const types = new Set(list.map((r) => FLOOR_TYPE_TEXT[r.floor_type] || r.floor_type));
       return el(
@@ -1112,8 +1185,13 @@ function renderStove(report) {
       el(
         "div",
         { class: "stove-text" },
-        el("b", { text: `${report.summary || (lit ? "Brasan brinner" : "Släckt")}${source}` }),
-        report.detail ? el("p", { class: "muted", text: report.detail }) : null,
+        el("b", { text: `${lit ? "Brasan brinner" : "Brasan är släckt"}${source}` }),
+        el("p", {
+          class: "muted",
+          text: (report.effects || []).some((e) => e.k_stove_per_hour > 0)
+            ? "Du behöver inte trycka på något: hemopt märker själv när brasan brinner och drar ner värmepumpen. Knappen finns om den skulle ta fel."
+            : report.detail || "Tryck på knappen när du tänder, några gånger. Sedan märker hemopt brasan själv.",
+        }),
       ),
     ),
   ];
@@ -1124,15 +1202,22 @@ function renderStove(report) {
 
   const effects = (report.effects || []).filter((e) => e.k_stove_per_hour > 0);
   if (effects.length) {
-    nodes.push(el("p", { class: "stove-label", text: "Så mycket värmer brasan:" }));
     nodes.push(
       el(
-        "dl",
-        { class: "facts" },
-        ...effects.flatMap((e) => [
-          el("dt", { text: e.room_name }),
-          el("dd", { text: `+${fmt2.format(e.k_stove_per_hour)} °C/h${e.equivalent_kw ? `, som ${kw(e.equivalent_kw)} golvvärme` : ""}` }),
-        ]),
+        "details",
+        { class: "room-more" },
+        el("summary", { text: `Så mycket värmer brasan (lärt av ${report.sessions_observed || 0} brasor)` }),
+        el(
+          "dl",
+          { class: "facts" },
+          ...effects
+            .slice()
+            .sort((a, b) => b.k_stove_per_hour - a.k_stove_per_hour)
+            .flatMap((e) => [
+              el("dt", { text: e.room_name }),
+              el("dd", { text: `+${fmt1.format(e.k_stove_per_hour)} °C i timmen` }),
+            ]),
+        ),
       ),
     );
   } else if (report.status !== "not_started") {
@@ -1140,7 +1225,7 @@ function renderStove(report) {
   }
   const windows = report.windows || [];
   if (windows.length && effects.length) {
-    nodes.push(el("p", { class: "stove-label", text: "Bäst att tända:" }));
+    nodes.push(el("p", { class: "stove-label", text: "Bäst att elda (då är elen dyrast):" }));
     nodes.push(
       el(
         "ul",
@@ -1472,17 +1557,27 @@ function renderCurve(payload) {
     return;
   }
   const tone = CURVE_TONE[report.status] || "neutral";
+  if (report.status === "no_heat") {
+    body.replaceChildren(
+      el("div", { class: "fuse-head" }, el("span", { class: `pill ${tone}`, text: "Ingen värme" }), el("b", { text: report.summary })),
+      el("p", { text: report.detail }),
+    );
+    return;
+  }
+  const more = [];
   const nodes = [
     el("div", { class: "fuse-head" }, el("span", { class: `pill ${tone}`, text: { too_cold: "För låg", too_warm: "Kan sänkas", ok: "Rätt", no_heat: "Ingen värme", need_data: "Lär sig" }[report.status] || "—" }), el("b", { text: report.summary || "" })),
     report.detail ? el("p", { class: "muted", text: report.detail }) : null,
   ];
+  // Everything below the verdict is for the curious; it starts folded.
+  const verdictCount = nodes.length;
+  let chart = null;
   if ((report.bands || []).length && report.current_line) {
-    const chart = el("div", { class: "chart small" });
+    chart = el("div", { class: "chart small" });
     nodes.push(
       el("div", { class: "legend" }, el("span", {}, el("i", { class: "sw sw-line" }), "Kurvan nu"), el("span", {}, el("i", { class: "sw sw-heat" }), "Det huset behöver")),
       chart,
     );
-    requestAnimationFrame(() => drawCurve(chart, report));
   }
   const rooms = (report.rooms || []).filter((r) => r.counted);
   if (rooms.length) {
@@ -1545,6 +1640,7 @@ function renderCurve(payload) {
     }
     nodes.push(box);
   }
+  more.push(...nodes.splice(verdictCount));
   const p = payload.proposal;
   const actions = el("div", { class: "row-actions" });
   if (p) {
@@ -1567,7 +1663,7 @@ function renderCurve(payload) {
     }
   } else if (!payload.writable && ["too_cold", "too_warm"].includes(report.status)) {
     nodes.push(
-      el("p", { class: "muted", text: "Kurvinställningarna går inte att skriva från Home Assistant än. Gör H66-inställningen (MQTT_SUBS = 1 och number-blocket i husdata_h66.yaml) och välj dem under Inställningar → Värmekurva, eller ändra kurvan på värmepumpen enligt förslaget ovan." }),
+      el("p", { class: "muted", text: "hemopt kan inte ändra kurvan själv i din värmepump. Ändra den på värmepumpen enligt förslaget ovan." }),
     );
   }
   if (Object.keys(payload.original || {}).length) {
@@ -1587,8 +1683,8 @@ function renderCurve(payload) {
   if (actions.childNodes.length) nodes.push(actions);
   const log = payload.log || [];
   if (log.length) {
-    nodes.push(el("p", { class: "stove-label", text: "Senaste ändringar:" }));
-    nodes.push(
+    more.push(el("p", { class: "stove-label", text: "Senaste ändringar:" }));
+    more.push(
       el(
         "ul",
         { class: "windows" },
@@ -1598,6 +1694,12 @@ function renderCurve(payload) {
         }),
       ),
     );
+  }
+  if (more.length) {
+    const details = el("details", { class: "room-more" }, el("summary", { text: "Visa detaljer" }), ...more.filter(Boolean));
+    // A folded chart has no width; draw it when it is opened.
+    if (chart) details.addEventListener("toggle", () => details.open && drawCurve(chart, report));
+    nodes.push(details);
   }
   body.replaceChildren(...nodes.filter(Boolean));
 }

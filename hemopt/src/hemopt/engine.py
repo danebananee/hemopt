@@ -594,7 +594,7 @@ class Engine:
             async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
                 await ha.set_ext_port(entity, block)
         except Exception as exc:  # noqa: BLE001 - never let actuation kill the loop
-            self._record_error(f"EXT block: {exc}")
+            self._record_error(f"Blockeringsporten svarade inte: {exc}")
             return
 
         self._ext_state[entity] = block
@@ -1601,7 +1601,7 @@ class Engine:
             prices = await price_client.series(start, steps, settings.step_minutes)
         except RuntimeError as exc:
             self.status.prices_available = False
-            self._record_error(f"spot prices unavailable: {exc}")
+            self._record_error(f"Elpriset kunde inte hämtas: {exc}")
             return None
 
         self.prices = prices
@@ -1609,7 +1609,7 @@ class Engine:
 
         states = await self.current_states()
         if states is None:
-            self._record_error("Home Assistant unreachable, keeping previous plan")
+            self._record_error("Home Assistant svarade inte, den förra planen gäller")
             return None
         outdoor = await self.outdoor_forecast(states, prices.times)
 
@@ -1631,7 +1631,7 @@ class Engine:
             )
 
         if not rooms:
-            self._record_error("no room temperatures available")
+            self._record_error("Inga rumstemperaturer kunde läsas, givarna svarade inte")
             return None
 
         hot_water = self._hot_water_input(states, prices.times, prices.total)
@@ -1663,7 +1663,7 @@ class Engine:
         try:
             plan = solve(problem)
         except InfeasiblePlan as exc:
-            self._record_error(f"planning failed: {exc}")
+            self._record_error(f"Planen kunde inte räknas fram: {exc}")
             return None
 
         try:
@@ -2181,7 +2181,7 @@ class Engine:
                 known_states = await ha.states()
             except Exception as exc:  # noqa: BLE001
                 known_states = {}
-                self._record_error(f"states: {exc}")
+                self._record_error(f"Kunde inte läsa läget i Home Assistant: {exc}")
 
             for room_plan in self.plan.rooms:
                 room = self.config.room(room_plan.key)
@@ -2243,7 +2243,7 @@ class Engine:
                         await ha.set_temperature_entity(house_entity, target)
                         applied += 1
                     except Exception as exc:  # noqa: BLE001
-                        self._record_error(f"house room setpoint: {exc}")
+                        self._record_error(f"Värmepumpens rumsbörvärde: {exc}")
 
             if self.config.hot_water.setpoint_entity and self.plan.hot_water is not None:
                 charging = self.plan.hot_water.charge_fraction[index] > 0.05
@@ -2256,7 +2256,7 @@ class Engine:
                     await ha.set_temperature_entity(self.config.hot_water.setpoint_entity, target)
                     applied += 1
                 except Exception as exc:  # noqa: BLE001
-                    self._record_error(f"hot water setpoint: {exc}")
+                    self._record_error(f"Varmvattnets börvärde: {exc}")
 
             applied += await self._apply_storage(ha, index)
 

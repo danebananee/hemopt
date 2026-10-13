@@ -48,6 +48,11 @@
           <p class="now-sub" id="summary-sub"></p>
         </div>
 
+        <article class="panel attention" id="attention-card" hidden>
+          <h2>Behöver din uppmärksamhet</h2>
+          <ul class="attention-list" id="attention-list"></ul>
+        </article>
+
         <article class="panel welcome" id="welcome-card" hidden>
           <h2>Välkommen till hemopt</h2>
           <p>
@@ -161,8 +166,8 @@
             <div>
               <h2>Rum</h2>
               <p class="muted">
-                Prioritet avgör vilka rum som får svaja när elen är dyr. «Håll» rubbas inte,
-                «Flexibel» bär mest av lastflytten.
+                Välj för varje rum hur noga temperaturen ska hållas när elen är dyr:
+                «Håll» = alltid lagom, «Normal» = får svaja lite, «Flexibel» = får svaja mest.
               </p>
             </div>
           </header>
@@ -174,8 +179,8 @@
             <div>
               <h2>Värmekurva</h2>
               <p class="muted">
-                Den lägsta kurva som ändå håller varje rum varmt. Inställningen ligger kvar i
-                värmepumpen även när Home Assistant är avstängt.
+                Hur varmt vatten värmepumpen skickar till golvet. Lagom varmt räcker – för
+                varmt kostar el i onödan.
               </p>
             </div>
             <button type="button" class="btn ghost" id="curve-btn">Räkna om</button>
@@ -198,7 +203,7 @@
             <header class="panel-head">
               <div>
                 <h2 id="stove-title">Braskamin</h2>
-                <p class="muted" id="stove-sub">Hur mycket brasan värmer och när det lönar sig att tända.</p>
+                <p class="muted" id="stove-sub">hemopt känner själv av när brasan brinner.</p>
               </div>
             </header>
             <div id="stove-body"><p class="empty">Hämtar…</p></div>
