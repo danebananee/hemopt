@@ -210,3 +210,12 @@ def test_setpoints_are_read_from_state_attributes():
         {"entity_id": "sensor.c", "state": "3", "attributes": {"temperature": 9}},
     ]
     assert climate_setpoints(rows) == {"climate.a": 21.5}
+
+
+def test_numbers_from_attributes_are_accepted():
+    from hemopt.ha import parse_numeric
+
+    assert parse_numeric(28.0) == 28.0
+    assert parse_numeric(21) == 21.0
+    assert parse_numeric(float("nan")) is None
+    assert parse_numeric("21,5") == 21.5

@@ -121,6 +121,19 @@ def _is_numeric(row: dict) -> bool:
 
 # Name fragments per role. Order in each list does not matter; the score does.
 _OUTDOOR = ("outdoor", "outside", "utomhus", "ute_", "_ute", "utetemp", "hpoutdoor", "exterior")
+# Words that rule an entity out as the house's own room setpoint.
+_NOT_HOUSE_SETPOINT = (
+    "pool",
+    "warm_water",
+    "warm water",
+    "hot_water",
+    "hot water",
+    "varmvatten",
+    "setpoint_2",
+    "setpoint 2",
+    "influence",
+)
+
 _HEAT_PUMP = (
     "heat_pump",
     "heatpump",
@@ -304,11 +317,14 @@ def discover(rows: list[dict], diagnosis: dict | None = None) -> Discovery:
     )
     roles["house_setpoint"] = ranked(
         [
-            (1, row)
+            (2 if _has(_words(row), "room", "rum", "inne", "indoor") else 1, row)
             for row in rows
             if _domain(row) in {"climate", "number"}
             and _has(_words(row), *_HEAT_PUMP)
             and _has(_words(row), "room", "rum", "inne", "indoor", "setpoint")
+            # A pool, the hot water or the second heating circuit is not the
+            # house's room setpoint, however much its name looks like one.
+            and not _has(_words(row), *_NOT_HOUSE_SETPOINT)
         ]
     )
 
@@ -436,6 +452,15 @@ def discover(rows: list[dict], diagnosis: dict | None = None) -> Discovery:
         [(1, row) for row in curve_rows if _has(_words(row), "fine", "fin", "parallel")]
     )
     point_rows = [row for row in rows if _domain(row) in {"number", "input_number"}]
+    # Husdata H66 exposes the curve's two end points of an IVT heat pump as
+    # thermostats: "Heat set 1, CurveL" (foot) and "Heat set 2, CurveR" (end).
+    # The "_2" copies belong to the second heating circuit.
+    h66_points = [
+        row
+        for row in rows
+        if _domain(row) == "climate"
+        and not _has(_words(row), "curvel_2", "curver_2", "curvel 2", "curver 2")
+    ]
     roles["curve_foot"] = ranked(
         [
             (1, row)
@@ -444,6 +469,7 @@ def discover(rows: list[dict], diagnosis: dict | None = None) -> Discovery:
                 _words(row), "fotpunkt", "foot_point", "foot point", "curve_start", "base_point"
             )
         ]
+        + [(1, row) for row in h66_points if _has(_words(row), "curvel", "heat_set_1")]
     )
     roles["curve_end"] = ranked(
         [
@@ -453,6 +479,7 @@ def discover(rows: list[dict], diagnosis: dict | None = None) -> Discovery:
                 _words(row), "slutpunkt", "end_point", "end point", "endpoint", "dimensionerande"
             )
         ]
+        + [(1, row) for row in h66_points if _has(_words(row), "curver", "heat_set_2")]
     )
     roles["stove_temperature"] = ranked(
         [

@@ -113,6 +113,9 @@ from .woodstove import (
 LEDGER_VERSION = 2
 _LOGGER = logging.getLogger(__name__)
 
+# Entity id fragments that can never be the curve's parallel shift.
+_NOT_A_CURVE_SHIFT = ("pool", "warm_water", "hot_water", "setpoint_2")
+
 # How far back the room models are fitted, from hemopt's own log.
 TRAINING_DAYS = 60
 WEATHER_SAMPLE_IDS = ("weather:cloud_coverage", "weather:wind_ms")
@@ -861,6 +864,12 @@ class Engine:
         cfg = self.config.heat_curve
         found = discover(rows).roles
         changed = False
+        if cfg.fine_entity and any(word in cfg.fine_entity for word in _NOT_A_CURVE_SHIFT):
+            # Versions before 0.6.1 could take the pool's setpoint for the
+            # house's; forget it so the right one is picked below.
+            _LOGGER.warning("heat curve: %s is not a curve shift, dropped", cfg.fine_entity)
+            cfg.fine_entity = None
+            changed = True
         for attr, role in (
             ("supply_entity", "supply_temperature"),
             ("target_entity", "curve_target"),
@@ -971,11 +980,17 @@ class Engine:
             since = None
             if state.get("last_write"):
                 since = datetime.fromisoformat(state["last_write"]) + timedelta(hours=1)
+            foot = self._knob(rows, cfg.foot_entity, None)
+            end = self._knob(rows, cfg.end_entity, None)
+            known_slope = None
+            if foot is not None and end is not None and cfg.design_outdoor_c < 20.0:
+                known_slope = (end.value - foot.value) / (cfg.design_outdoor_c - 20.0)
             report = analyse_curve(
                 hours,
                 [CurveRoom(r.key, r.name, clamp_priority(r.priority)) for r in self.config.rooms],
                 now=now,
                 since=since,
+                known_slope=known_slope,
             )
             if not cfg.supply_entity:
                 report.status = "need_data"
@@ -998,8 +1013,6 @@ class Engine:
             self.curve = report
             self.curve_proposal = proposal
             self.curve_points = recommend_points(report, cfg.design_outdoor_c)
-            foot = self._knob(rows, cfg.foot_entity, None)
-            end = self._knob(rows, cfg.end_entity, None)
             if foot is not None:
                 self.curve_knobs[foot.entity] = foot
             if end is not None:
@@ -1027,6 +1040,11 @@ class Engine:
         """
         points = self.curve_points
         if foot is None or end is None or points is None:
+            return False
+        if not all(k.entity.split(".", 1)[0] in {"number", "input_number"} for k in (foot, end)):
+            # Points exposed as thermostats (Husdata H66) are written only when
+            # someone presses the button: the shape is a bigger change than
+            # the daily shift, and worth a person's look first.
             return False
         differs = max(abs(foot.value - points.foot_c), abs(end.value - points.end_c)) >= 1.5
         if not state.get("points_at"):

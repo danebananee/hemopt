@@ -179,3 +179,27 @@ def test_the_engine_adopts_a_new_setup_without_restart(tmp_path, monkeypatch):
     assert engine.models["salong"] is not None and "salong" in before
     assert engine.models["gaststuga"].tau_slab_hours < 1.0, "an upper floor gets the light prior"
     assert (tmp_path / "profile.json").exists()
+
+
+def _climate(entity_id: str, name: str, temperature: float) -> dict:
+    return {
+        "entity_id": entity_id,
+        "state": "off",
+        "attributes": {"friendly_name": name, "temperature": temperature},
+    }
+
+
+def test_husdata_curve_points_and_room_setpoint_are_told_apart():
+    rows = [
+        _climate("climate.h66_hppool_temp_setpoint", "H66 HPPool temp setpoint", 28.0),
+        _climate("climate.h66_hproom_temp_setpoint", "H66 HPRoom temp setpoint", 20.0),
+        _climate("climate.h66_hproom_temp_setpoint_2", "H66 HPRoom temp setpoint 2", 25.0),
+        _climate("climate.h66_hpheat_set_1_curvel", "H66 HPHeat set 1, CurveL", 20.0),
+        _climate("climate.h66_hpheat_set_2_curver", "H66 HPHeat set 2, CurveR", 53.6),
+        _climate("climate.h66_hpheat_set_1_curvel_2", "H66 HPHeat set 1, CurveL 2", 22.0),
+        _climate("climate.h66_hpheat_set_2_curver_2", "H66 HPHeat set 2, CurveR 2", 35.0),
+    ]
+    roles = discover(rows).roles
+    assert [c.entity_id for c in roles["house_setpoint"]] == ["climate.h66_hproom_temp_setpoint"]
+    assert [c.entity_id for c in roles["curve_foot"]] == ["climate.h66_hpheat_set_1_curvel"]
+    assert [c.entity_id for c in roles["curve_end"]] == ["climate.h66_hpheat_set_2_curver"]

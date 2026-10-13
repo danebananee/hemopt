@@ -321,3 +321,56 @@ def test_shape_is_written_once_then_only_when_measured_and_weekly(tmp_path):
     assert not engine._points_due(state, foot, end, NOW + timedelta(days=3))
     assert engine._points_due(state, foot, end, NOW + timedelta(days=8))
     assert not engine._points_due(state, None, end, NOW + timedelta(days=8))
+
+
+def test_a_pump_that_ignores_its_curve_is_reported_not_tuned():
+    # What a real house showed in October: the curve asks for 30 °C, the pump
+    # only makes hot water, and the floor water stays at 21 °C.
+    hours = []
+    for index in range(36):
+        moment = NOW - timedelta(hours=36 - index)
+        sample = HourSample(moment=moment, outdoor=6.0, supply=21.0, target=30.0)
+        for room in ROOMS:
+            sample.rooms[room.key] = RoomHour(18.0, 21.0, 1.0)
+        hours.append(sample)
+    report = analyse(hours, ROOMS, now=NOW, since=None)
+    assert report.status == "no_heat"
+    assert "30 °C" in report.detail and "21 °C" in report.detail
+
+
+def test_a_curve_changed_by_hand_is_read_from_after_the_change():
+    from hemopt.curve import curve_changed_at
+
+    hours = house(curve_offset=0.0, days=4)
+    jump_at = hours[60].moment
+    for h in hours[60:]:
+        h.target = h.target + 8.0
+    assert curve_changed_at(hours) == jump_at
+    report = analyse(hours, ROOMS, now=NOW, since=None)
+    level_now = report.current_line[0] + report.current_line[1] * 5.0
+    assert level_now == pytest.approx(true_need("salong", 5.0) + 8.0, abs=1.5)
+
+
+def test_an_impossible_slope_from_little_weather_is_not_believed():
+    from hemopt.curve import SLOPE_RANGE, _current_line
+
+    # The target ramping up while it gets a little colder looks like -3 °C/°C.
+    points = [(NOW - timedelta(hours=20 - i), 9.0 - 0.25 * i, 25.0 + 0.75 * i) for i in range(20)]
+    line = _current_line(points, NOW)
+    assert SLOPE_RANGE[0] <= line[1] <= SLOPE_RANGE[1]
+    with_known = _current_line(points, NOW, known_slope=-0.84)
+    assert with_known[1] == -0.84
+
+
+def test_the_supply_ignores_a_hot_water_spike():
+    start = NOW - timedelta(hours=1)
+    supply = [(start + timedelta(minutes=5 * i), 50.0 if i in (3, 4) else 30.0) for i in range(12)]
+    hours = build_hours(
+        outdoor=[(start, 5.0)],
+        supply=supply,
+        target=[(start, 30.0)],
+        rooms={},
+        start=start,
+        end=NOW,
+    )
+    assert hours[0].supply == pytest.approx(30.0)

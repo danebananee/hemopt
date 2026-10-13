@@ -53,6 +53,19 @@ MIN_LIFT_C = 2.0
 DEADBAND_C = 0.7
 # A room needing this much more than the next is reported, not followed.
 OUTLIER_C = 5.0
+# A jump this large in the curve's own target within an hour is a change of
+# the curve (by hand or by hemopt), not the weather.
+CHANGE_JUMP_C = 3.0
+# After a change the heat pump ramps its target for a few hours.
+CHANGE_SETTLE = timedelta(hours=2)
+# A curve slope outside this range (°C supply per °C outdoor) is noise from
+# too little weather, not the curve.
+SLOPE_RANGE = (-1.5, 0.05)
+# The pump is not following its curve when, with rooms calling, the water
+# stays this far below the curve's target for most hours.
+NOT_FOLLOWING_C = 5.0
+NOT_FOLLOWING_SHARE = 0.5
+NOT_FOLLOWING_MIN_HOURS = 8
 # Rule of thumb for a ground-source heat pump: each degree lower supply
 # temperature saves about this share of its electricity.
 COP_GAIN_PER_K = 0.025
@@ -145,10 +158,21 @@ def build_hours(
             def mean(values: list[float]) -> float | None:
                 return sum(values) / len(values) if len(values) >= 6 else None
 
+            def median(values: list[float]) -> float | None:
+                # Hot water production sends 50 °C water past the supply
+                # sensor for a few minutes; the median ignores it.
+                if len(values) < 6:
+                    return None
+                ordered = sorted(values)
+                middle = len(ordered) // 2
+                if len(ordered) % 2:
+                    return ordered[middle]
+                return (ordered[middle - 1] + ordered[middle]) / 2
+
             sample = HourSample(
                 moment=hour,
                 outdoor=sum(sums["out"]) / len(sums["out"]),
-                supply=mean(sums["sup"]),
+                supply=median(sums["sup"]),
                 target=mean(sums["tgt"]),
             )
             for key, values in room_sums.items():
@@ -235,13 +259,33 @@ class CurveReport:
         }
 
 
+def curve_changed_at(hours: list[HourSample]) -> datetime | None:
+    """The last hour the curve's own target jumped, i.e. the curve was changed."""
+    changed = None
+    previous = None
+    for h in hours:
+        if h.target is None:
+            continue
+        if previous is not None and abs(h.target - previous) >= CHANGE_JUMP_C:
+            changed = h.moment
+        previous = h.target
+    return changed
+
+
 def analyse(
-    hours: list[HourSample], rooms: list[CurveRoom], *, now: datetime, since: datetime | None
+    hours: list[HourSample],
+    rooms: list[CurveRoom],
+    *,
+    now: datetime,
+    since: datetime | None,
+    known_slope: float | None = None,
 ) -> CurveReport:
     """What supply temperature the house needs, against what the curve gives.
 
-    `since` is when the curve was last changed; the current curve is only
-    read from hours after it.
+    `since` is when hemopt last changed the curve; a change made by hand is
+    found from the jump in the curve's own target. The current curve is only
+    read from hours after the latest change. `known_slope` is the curve's
+    slope when its two end points can be read from the heat pump.
     """
     report = CurveReport()
     names = {room.key: room.name for room in rooms}
@@ -265,6 +309,10 @@ def analyse(
     # The curve as it is: its own target if reported, else the measured supply.
     # Only the most recent stretch counts, so a curve changed by hand (or by
     # hemopt) is read as it is now, not blended with the old one.
+    changed = curve_changed_at(hours)
+    if changed is not None:
+        changed += CHANGE_SETTLE
+        since = changed if since is None else max(since, changed)
     current_pts: list[tuple[datetime, float, float]] = []
     for h in heating:
         if since is not None and h.moment < since:
@@ -275,7 +323,35 @@ def analyse(
         rooms_mean = _mean([r.temperature for r in h.rooms.values()])
         if h.supply - rooms_mean >= MIN_LIFT_C:
             current_pts.append((h.moment, h.outdoor, h.supply))
-    report.current_line = _current_line(current_pts, now)
+    report.current_line = _current_line(current_pts, now, known_slope)
+
+    # Is the pump following its own curve at all? Rooms calling, the curve
+    # asking for warm water, and the water staying cold: then the pump has
+    # been told not to heat (summer mode, heat stop), and no curve helps.
+    asking = [
+        h
+        for h in heating
+        if (since is None or h.moment >= since)
+        and h.target is not None
+        and h.rooms
+        and max(r.duty for r in h.rooms.values()) > 0.9
+        and h.target > _mean([r.temperature for r in h.rooms.values()]) + MIN_LIFT_C
+    ]
+    short = [h for h in asking if h.target - h.supply >= NOT_FOLLOWING_C]
+    if len(short) >= NOT_FOLLOWING_MIN_HOURS and len(short) >= NOT_FOLLOWING_SHARE * len(asking):
+        target = _mean([h.target for h in short])
+        supply = _mean([h.supply for h in short])
+        report.status = "no_heat"
+        report.summary = "Värmepumpen värmer inte huset."
+        report.detail = (
+            f"Rummen vill ha värme och värmepumpens kurva begär cirka {target:.0f} °C till "
+            f"golvet, men vattnet håller bara {supply:.0f} °C ({len(short)} av "
+            f"{len(asking)} timmar). Värmepumpen gör troligen bara varmvatten. Kontrollera "
+            "i värmepumpens meny att värmen är på: sommarläge av, och att gränsen för "
+            "värmestopp ligger över dagens utetemperatur. Kurvan ändras inte förrän "
+            "värmen går igen."
+        )
+        return report
 
     # Heat delivered at all? Rooms calling but water no warmer than the rooms.
     calling = [
@@ -426,23 +502,39 @@ def analyse(
 
 
 def _current_line(
-    points: list[tuple[datetime, float, float]], now: datetime
+    points: list[tuple[datetime, float, float]],
+    now: datetime,
+    known_slope: float | None = None,
 ) -> tuple[float, float] | None:
-    """The curve from the newest window that has enough weather in it."""
-    for window, minimum in ((timedelta(hours=48), 12), (timedelta(days=7), 24), (None, 1)):
-        recent = [p for p in points if window is None or now - p[0] <= window]
-        if len(recent) < minimum:
-            continue
-        outdoors = [p[1] for p in recent]
-        if window is not None and max(outdoors) - min(outdoors) < 2.0:
-            continue
-        line = _fit_line([(x, y, 1.0) for _, x, y in recent])
-        if line is not None:
-            return line
+    """The curve from the newest window that has enough weather in it.
+
+    With the slope known from the heat pump's own settings only the level is
+    read from the data. Otherwise the slope is fitted, but a slope no heating
+    curve has (it comes from a day or two of nearly the same weather, or the
+    pump ramping after a change) is not believed: the level is read with a
+    typical floor-heating slope instead.
+    """
     if not points:
         return None
-    level = sum(p[2] for p in points[-12:]) / len(points[-12:])
-    return (level, 0.0)
+    recent = [p for p in points if now - p[0] <= timedelta(hours=48)]
+    if len(recent) < 6:
+        recent = points[-24:]
+    if known_slope is not None:
+        level = sum(y - known_slope * x for _, x, y in recent) / len(recent)
+        return (level, known_slope)
+    for window, minimum in ((timedelta(hours=48), 12), (timedelta(days=7), 24), (None, 1)):
+        chosen = [p for p in points if window is None or now - p[0] <= window]
+        if len(chosen) < minimum:
+            continue
+        outdoors = [p[1] for p in chosen]
+        if max(outdoors) - min(outdoors) < 4.0:
+            continue
+        line = _fit_line([(x, y, 1.0) for _, x, y in chosen])
+        if line is not None and SLOPE_RANGE[0] <= line[1] <= SLOPE_RANGE[1]:
+            return line
+    slope = (DEFAULT_FOOT_C - DEFAULT_END_C) / 40.0
+    level = sum(y - slope * x for _, x, y in recent) / len(recent)
+    return (level, slope)
 
 
 def _mean(values: list[float]) -> float:

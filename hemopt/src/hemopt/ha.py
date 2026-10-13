@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -42,15 +43,18 @@ class ForecastPoint:
     wind_ms: float | None = None
 
 
-def parse_numeric(state: str | None) -> float | None:
-    """Coerce a Home Assistant state string to a number.
+def parse_numeric(state: str | float | int | None) -> float | None:
+    """Coerce a Home Assistant state, or attribute, to a number.
 
     Binary states map to 1.0 and 0.0 so a compressor sensor and a temperature
-    sensor can go through the same pipeline.
+    sensor can go through the same pipeline. Attributes such as a thermostat's
+    `temperature` already arrive as numbers and are passed through.
     """
-    if state is None:
+    if state is None or isinstance(state, bool):
         return None
-    text = state.strip().lower()
+    if isinstance(state, (int, float)):
+        return float(state) if math.isfinite(state) else None
+    text = str(state).strip().lower()
     if text in UNAVAILABLE:
         return None
     if text in TRUTHY:

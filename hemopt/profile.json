@@ -331,6 +331,6 @@
     "apply_controls": true,
     "move_penalty_sek": 0.08
   },
-  "database_path": "/tmp/pytest-of-root/pytest-1/test_peak_settings_round_trip0/test.db",
+  "database_path": "/tmp/pytest-of-root/pytest-5/test_peak_settings_round_trip0/test.db",
   "panel_managed": []
 }

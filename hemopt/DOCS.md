@@ -142,8 +142,16 @@ värdet ligger kvar i värmepumpen. hemopts **Styr värmen** skriver aldrig till
 samma entitet.
 
 Hittar hemopt att rummen begär värme men att vattnet till golvet är lika
-svalt som rummen säger den till: då står värmepumpen troligen i sommarläge
-eller stoppar värmen över en viss utetemperatur (värmestopp).
+svalt som rummen, eller att det håller långt under vad värmepumpens egen kurva
+begär, säger den till: då gör värmepumpen troligen bara varmvatten (sommarläge,
+eller värmestopp över en viss utetemperatur). Kurvan rörs inte förrän värmen
+går igen.
+
+Med Husdata H66 på en IVT läses kurvans fotpunkt och slutpunkt
+(`Heat set 1, CurveL` och `Heat set 2, CurveR`). hemopt använder dem för att
+veta kurvans lutning, och skriver dem bara när du trycker **Gör ändringen
+nu**, aldrig av sig själv. Ändrar du kurvan för hand märker hemopt det på
+språnget i värmepumpens måltemperatur och bedömer bara tiden efter ändringen.
 
 ## Sensorer i Home Assistant
 
