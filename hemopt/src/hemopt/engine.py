@@ -1124,9 +1124,23 @@ class Engine:
         self, state: dict[str, Any], rows: dict[str, dict], report: CurveReport, now: datetime
     ) -> None:
         """After a write, measure how far the curve's own target moved."""
+        if state.get("gain_version") != 2:
+            # Gains learnt before 0.7.1 came from 0.1-unit steps in the middle
+            # of the pump's own ramp and are not to be trusted.
+            state["gains"] = {}
+            state["gain_version"] = 2
+            self._save_curve_state(state)
         probe = state.get("probe")
         target = self.config.heat_curve.target_entity
         if not probe or not target or target not in rows:
+            return
+        if report.changed_at is not None and report.changed_at > datetime.fromisoformat(
+            probe["at"]
+        ) - timedelta(hours=6):
+            # The curve was changed by hand around the probe; the pump is still
+            # ramping, so the target moved for other reasons.
+            state.pop("probe", None)
+            self._save_curve_state(state)
             return
         if now - datetime.fromisoformat(probe["at"]) < timedelta(minutes=20):
             return

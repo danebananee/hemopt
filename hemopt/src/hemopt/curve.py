@@ -65,7 +65,7 @@ SLOPE_RANGE = (-1.5, 0.05)
 # stays this far below the curve's target for most hours.
 NOT_FOLLOWING_C = 5.0
 NOT_FOLLOWING_SHARE = 0.5
-NOT_FOLLOWING_MIN_HOURS = 8
+NOT_FOLLOWING_MIN_HOURS = 6
 # Rule of thumb for a ground-source heat pump: each degree lower supply
 # temperature saves about this share of its electricity.
 COP_GAIN_PER_K = 0.025
@@ -234,6 +234,8 @@ class CurveReport:
     suspects: list[str] = field(default_factory=list)
     slope_known: bool = False
     span_c: float = 0.0
+    # When the curve was last changed, by hand or by hemopt, if seen.
+    changed_at: datetime | None = None
 
     def as_dict(self) -> dict[str, Any]:
         def line(value):
@@ -310,6 +312,7 @@ def analyse(
     # Only the most recent stretch counts, so a curve changed by hand (or by
     # hemopt) is read as it is now, not blended with the old one.
     changed = curve_changed_at(hours)
+    report.changed_at = changed
     if changed is not None:
         changed += CHANGE_SETTLE
         since = changed if since is None else max(since, changed)
@@ -466,6 +469,37 @@ def analyse(
     report.savings_pct = max(0.0, -report.shift_c) * COP_GAIN_PER_K * 100
 
     cold_rooms = [r["name"] for r in report.rooms if r["counted"] and r["below"] > 0.3]
+    # Rooms below their setpoint with the loop open are short of heat, whatever
+    # the curve's target says. Judged on the last day, room by room.
+    calling_cold = []
+    for key in demanding:
+        values = [h.rooms[key] for h in recent if key in h.rooms]
+        if len(values) >= MIN_BAND_HOURS:
+            below = _mean([v.setpoint - v.temperature for v in values])
+            duty = _mean([v.duty for v in values])
+            if below > 0.3 and duty > 0.8:
+                calling_cold.append(names[key])
+    counted = [key for key in demanding if any(key in h.rooms for h in recent)]
+    if report.shift_c < -DEADBAND_C and calling_cold:
+        if len(calling_cold) * 2 >= max(len(counted), 1):
+            report.status = "no_heat"
+            report.summary = "Rummen är kalla fast kurvan är hög: värmen når inte golven."
+            report.detail = (
+                f"{', '.join(calling_cold)} ligger under sitt börvärde med slingan öppen, "
+                "fast värmepumpens kurva begär varmare vatten än rummen behöver. Vattnet "
+                "kommer alltså inte fram: troligen gör pumpen bara varmvatten (sommarläge "
+                "eller värmestopp), eller så står golvvärmens cirkulationspump still. "
+                "Kurvan ändras inte förrän det är löst."
+            )
+            return report
+        report.status = "ok"
+        report.summary = "Kurvan sänks inte medan rum är kalla."
+        report.detail = (
+            f"{', '.join(calling_cold)} ligger under sitt börvärde med slingan öppen. "
+            "Övriga rum klarar sig på lägre kurva, så det kan vara en slinga som inte "
+            "öppnar eller en termostat på fel rum."
+        )
+        return report
     if report.shift_c > DEADBAND_C:
         report.status = "too_cold"
         report.summary = (
@@ -608,7 +642,10 @@ def propose(
             continue
         label = knob.label or default_label
         gain = knob.gain if knob.gain and abs(knob.gain) > 0.05 else None
-        units = shift / gain if gain else math.copysign(knob.step or 0.1, shift)
+        # Until the gain is known, the first step must be large enough that its
+        # effect stands out from the target's 0.1 °C resolution.
+        probe = max(knob.step or 0.1, 0.5 if knob.entity.startswith("climate.") else 0.0)
+        units = shift / gain if gain else math.copysign(probe, shift)
         start = original.get(knob.entity, knob.value)
         budget = max_total_c / gain if gain else 10 * (knob.step or 0.1)
         new = _snap(knob.value + units, knob, start - abs(budget), start + abs(budget))
@@ -704,7 +741,10 @@ def learn_gain(
     if abs(delta_units) < 1e-6:
         return None
     corrected = (after - before) - slope * (outdoor_after - outdoor_before)
+    if abs(corrected) < 0.15:
+        # Within the target's resolution and the pump's own drift: no measurement.
+        return None
     gain = corrected / delta_units
-    if not math.isfinite(gain) or abs(gain) < 0.05 or abs(gain) > 30:
+    if not math.isfinite(gain) or abs(gain) < 0.2 or abs(gain) > 15:
         return None
     return gain

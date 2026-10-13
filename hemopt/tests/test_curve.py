@@ -374,3 +374,52 @@ def test_the_supply_ignores_a_hot_water_spike():
         end=NOW,
     )
     assert hours[0].supply == pytest.approx(30.0)
+
+
+def test_a_high_curve_with_cold_rooms_is_never_lowered():
+    # October: the curve asks for 40 °C, the water only reaches 28 °C, every
+    # room is 2–3 °C under its setpoint with the loop wide open.
+    hours = []
+    for index in range(30 * 24):
+        moment = NOW - timedelta(hours=30 * 24 - index)
+        outdoor = 6.0 + 4.0 * math.sin(2 * math.pi * index / 24)
+        sample = HourSample(moment=moment, outdoor=outdoor, supply=28.0, target=40.0)
+        for room in ROOMS:
+            sample.rooms[room.key] = RoomHour(18.5, 21.0, 1.0)
+        hours.append(sample)
+    report = analyse(hours, ROOMS, now=NOW, since=None, known_slope=-0.84)
+    assert report.status != "too_warm"
+    assert (
+        propose(report, fine=None, curve=None, original={}, max_daily_c=1.5, max_total_c=6) is None
+    )
+
+
+def test_a_tenth_of_a_degree_teaches_no_gain():
+    assert (
+        learn_gain(
+            before=40.3,
+            after=40.2,
+            outdoor_before=8.0,
+            outdoor_after=8.0,
+            slope=-0.84,
+            delta_units=-0.1,
+        )
+        is None
+    )
+    gain = learn_gain(
+        before=30.0,
+        after=30.65,
+        outdoor_before=8.0,
+        outdoor_after=8.0,
+        slope=-0.84,
+        delta_units=0.5,
+    )
+    assert gain == pytest.approx(1.3)
+
+
+def test_the_first_step_on_the_pumps_room_setpoint_is_half_a_degree():
+    report = analyse(house(curve_offset=-6.0), ROOMS, now=NOW, since=None)
+    knob = Knob("climate.h66_hproom_temp_setpoint", 20.0, 13.0, 29.0, 0.1)
+    proposal = propose(report, fine=knob, curve=None, original={}, max_daily_c=1.5, max_total_c=6)
+    assert proposal is not None
+    assert abs(proposal.new - proposal.old) == pytest.approx(0.5)
