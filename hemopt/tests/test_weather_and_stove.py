@@ -15,6 +15,7 @@ from hemopt.woodstove import (
     FireDetector,
     RoomExcess,
     StoveSession,
+    fire_pattern,
     fire_signal,
     lit_at,
     open_session,
@@ -134,6 +135,62 @@ def test_the_detector_needs_a_sustained_signal_both_ways():
     assert detector.update(0.1) is True
     assert detector.update(0.1) is False
     assert detector.update(None) is False
+
+
+# What a fire did to five rooms in a real house, K/h at full fire.
+STOVE_K = [0.72, 0.47, 0.44, 0.43, 0.21]
+
+
+def _rooms(rises: list[float]) -> list[RoomExcess]:
+    return [RoomExcess(k, rise, 0.0, 0.5) for k, rise in zip(STOVE_K, rises, strict=True)]
+
+
+def test_a_fire_warms_the_stove_room_most():
+    # Saturday evening with the fire going: the stove's room leads.
+    assert fire_pattern(_rooms([0.45, 0.3, 0.3, 0.25, 0.1])) is True
+
+
+def test_afternoon_sun_upstairs_is_not_a_fire():
+    # A sunny weekday afternoon: the upstairs office warms, the stove room hardly.
+    rooms = _rooms([0.05, 0.1, 0.2, 0.3, 0.6])
+    assert fire_signal(rooms) > 0.5, "on its own the warming would look like a fire"
+    assert fire_pattern(rooms) is False
+
+
+def test_too_few_rooms_have_no_pattern():
+    assert fire_pattern(_rooms([0.4, 0.3, 0.3, 0.2, 0.1])[:2]) is None
+
+
+def test_the_detector_wants_the_fire_pattern_to_light():
+    detector = FireDetector()
+    assert detector.update(0.9, pattern=False) is False
+    assert detector.update(0.9, pattern=False) is False
+    assert detector.update(0.9, pattern=True) is False
+    assert detector.update(0.9, pattern=True) is True
+    # Once lit, a dying fire's uneven warming does not put it out.
+    assert detector.update(0.6, pattern=False) is True
+
+
+def test_sunshine_asks_for_stronger_evidence():
+    detector = FireDetector()
+    detector.update(0.6, pattern=True, sun=0.4)
+    assert detector.update(0.6, pattern=True, sun=0.4) is False
+    detector.update(0.6, pattern=True, sun=0.0)
+    assert detector.update(0.6, pattern=True, sun=0.0) is True
+
+
+def test_a_recognised_fire_is_remembered_for_training(tmp_path):
+    from hemopt.demo import DemoEngine, demo_config
+
+    engine = DemoEngine(demo_config(database_path=str(tmp_path / "s.db")))
+    start = datetime(2026, 10, 10, 15, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    engine._remember_detected_fire(start, start + timedelta(hours=5))
+    assert [(s.start, s.end) for s in engine.stove_sessions] == [
+        (start, start + timedelta(hours=5))
+    ]
+    # The same fire marked by hand is not counted again.
+    engine._remember_detected_fire(start + timedelta(hours=1), start + timedelta(hours=4))
+    assert len(engine.stove_sessions) == 1
 
 
 def test_marking_a_fire_through_the_engine(tmp_path):

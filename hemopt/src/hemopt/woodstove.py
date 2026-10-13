@@ -8,6 +8,7 @@ most heat-pump work.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -418,9 +419,51 @@ def fire_signal(rooms: list[RoomExcess]) -> float | None:
     return total / total_weight
 
 
+def fire_pattern(rooms: list[RoomExcess]) -> bool | None:
+    """Whether the rooms warm the way a fire warms them.
+
+    A fire heats the rooms in proportion to what it has been seen to do to
+    each: the stove's own room most, rooms further away less. Sun through
+    the windows, or the heat pump catching up, warms a different set of rooms.
+    So the unexplained warming must line up with the learnt fire response
+    across the rooms, and the room the fire reaches best must itself have
+    warmed by at least half a fire's worth. With fewer than three rooms there
+    is no pattern to read and the answer is None.
+    """
+    usable = [room for room in rooms if room.k_stove_per_hour > 0 and room.hours > 0]
+    if len(usable) < 3:
+        return None
+    ks = [room.k_stove_per_hour for room in usable]
+    rates = [(room.observed_rise - room.predicted_rise) / room.hours for room in usable]
+    mean_k = sum(ks) / len(ks)
+    mean_r = sum(rates) / len(rates)
+    cov = sum((k - mean_k) * (r - mean_r) for k, r in zip(ks, rates, strict=True))
+    var_k = sum((k - mean_k) ** 2 for k in ks)
+    var_r = sum((r - mean_r) ** 2 for r in rates)
+    if var_k <= 1e-12 or var_r <= 1e-12:
+        return False
+    correlation = cov / math.sqrt(var_k * var_r)
+    main = max(usable, key=lambda room: room.k_stove_per_hour)
+    main_strength = (main.observed_rise - main.predicted_rise) / (
+        main.k_stove_per_hour * main.hours
+    )
+    return correlation >= PATTERN_MIN_CORRELATION and main_strength >= 0.5
+
+
+# How closely the rooms' extra warming must follow the fire's learnt pattern.
+PATTERN_MIN_CORRELATION = 0.3
+
+
 @dataclass(slots=True)
 class FireDetector:
-    """Hysteresis around the fire signal so one warm gust is not a fire."""
+    """Hysteresis around the fire signal so one warm gust is not a fire.
+
+    A fire is only recognised when the warming also has the fire's pattern
+    across the rooms; once lit it burns until the signal has stayed low for a
+    while, since a dying fire warms the rooms less evenly. Sun through the
+    windows looks most like a fire, so the more the sun shines the stronger
+    the warming must be before it counts.
+    """
 
     on_above: float = 0.5
     off_below: float = 0.2
@@ -429,10 +472,21 @@ class FireDetector:
     lit: bool = False
     _streak: int = 0
 
-    def update(self, signal: float | None) -> bool:
+    def update(self, signal: float | None, pattern: bool | None = None, sun: float = 0.0) -> bool:
         if signal is None:
             self._streak = 0
             return self.lit
+        if not self.lit:
+            threshold = self.on_above * (1.0 + 2.0 * max(0.0, min(1.0, sun)))
+            looks_like_fire = signal >= threshold and pattern is not False
+            self._streak = self._streak + 1 if looks_like_fire else 0
+            if self._streak >= self.confirm:
+                self.lit, self._streak = True, 0
+        else:
+            self._streak = self._streak + 1 if signal <= self.off_below else 0
+            if self._streak >= self.release:
+                self.lit, self._streak = False, 0
+        return self.lit
         if not self.lit:
             self._streak = self._streak + 1 if signal >= self.on_above else 0
             if self._streak >= self.confirm:

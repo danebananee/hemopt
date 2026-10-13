@@ -99,6 +99,7 @@ from .woodstove import (
     WoodStoveReport,
     build_report,
     detect_lit,
+    fire_pattern,
     fire_signal,
     lit_at,
     open_session,
@@ -190,6 +191,8 @@ class Engine:
             self.store.setting("stove_sessions")
         )
         self._fire_detector = FireDetector()
+        # When the detector last recognised a fire that is still burning.
+        self._detected_since: datetime | None = None
         self._fire_checked: datetime | None = None
 
         self._mqtt: MqttBridge | None = None
@@ -1904,7 +1907,29 @@ class Engine:
             excess.append(
                 RoomExcess(model.k_stove_per_hour, last - first, predicted - first, hours)
             )
-        self._fire_detector.update(fire_signal(excess))
+        was_lit = self._fire_detector.lit
+        lit = self._fire_detector.update(fire_signal(excess), fire_pattern(excess), sun=sun)
+        if lit and not was_lit:
+            # The warming the detector reacted to began about half an hour ago.
+            self._detected_since = since
+        elif was_lit and not lit and self._detected_since is not None:
+            self._remember_detected_fire(self._detected_since, now)
+
+    def _remember_detected_fire(self, start: datetime, end: datetime) -> None:
+        """Keep a recognised fire like a marked one, so the models learn from it.
+
+        Nobody has to press the button: each fire hemopt recognises sharpens
+        what it knows about the stove. A fire the household already marked is
+        not counted twice.
+        """
+        self._detected_since = None
+        hours = self.config.wood_stove.manual_session_hours
+        if any(s.start < end and start < s.until(hours) for s in self.stove_sessions):
+            return
+        self.stove_sessions.append(StoveSession(start=start, end=end))
+        self.stove_sessions.sort(key=lambda session: session.start)
+        self.store.set_setting("stove_sessions", sessions_to_setting(self.stove_sessions))
+        _LOGGER.info("wood stove: recognised a fire %s – %s", start, end)
 
     def mark_stove(self, lit: bool) -> WoodStoveReport:
         """The household says a fire has been lit, or has gone out."""
@@ -1917,6 +1942,8 @@ class Engine:
             current.end = now
         if not lit:
             # Marked out by hand: trust that over the detector.
+            if self._fire_detector.lit and self._detected_since is not None:
+                self._remember_detected_fire(self._detected_since, now)
             self._fire_detector.lit = False
         self.store.set_setting("stove_sessions", sessions_to_setting(self.stove_sessions))
         self.wood_stove.reading = WoodStoveReading(lit=lit, source="manual", updated_at=now)
