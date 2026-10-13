@@ -138,3 +138,14 @@ async def test_history_includes_peak_lines_and_live_power(client):
     assert body["peak_n"] >= 1
     assert len(body["live_points"]) >= 10
     assert body["live_points"][0]["kw"] == pytest.approx(2.4)
+
+
+def test_the_panel_reports_the_add_on_version():
+    from pathlib import Path
+
+    import yaml
+
+    from hemopt.panel_routes import VERSION
+
+    addon = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
+    assert VERSION == addon["version"]

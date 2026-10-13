@@ -44,7 +44,7 @@ skillnaden och redovisar hur väl den förutsäger rummet fyra timmar framåt.
 **Räknar fram vad du hade sparat.** Så länge du har dygns- eller månadspris
 ger lastflytt ingenting på energidelen. hemopt bokför därför varje kvart vad
 huset hade kostat med kvartspris, dels med samma förbrukning, dels med
-hemopts styrning, och visar skillnaden per dag under fliken *Besparing*. Se
+hemopts styrning, och visar skillnaden per dag under fliken *Pengar*. Se
 [Besparingskalkylen](#besparingskalkylen).
 
 **Lär sig vädret.** Varje rum lär sig hur mycket solen värmer det (utifrån

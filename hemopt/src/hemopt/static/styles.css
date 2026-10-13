@@ -1471,3 +1471,373 @@ table.data tr.current td {
   border-radius: 0;
   background: var(--heat);
 }
+
+/* ==========================================================================
+ * Calmer look, three tabs. Later rules win over the ones above.
+ * ========================================================================== */
+
+:root {
+  --paper: #f1f4f8;
+  --surface-2: #f7f9fc;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 2px 8px rgba(16, 24, 40, 0.05);
+  --radius-l: 18px;
+  --radius-m: 14px;
+  --gap: 18px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-2: #1d232b;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+body {
+  font-size: 15.5px;
+}
+
+/* Header: name and the one switch that matters, tabs as a button group. */
+.masthead {
+  border-bottom: 0;
+  box-shadow: var(--shadow);
+}
+
+.masthead-row {
+  padding: 14px 20px 8px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--cheap), #5aa0d8 60%, var(--heat));
+  flex: none;
+}
+
+.brand h1 {
+  font-size: 1.15rem;
+}
+
+.tabs {
+  padding: 4px 20px 12px;
+  gap: 6px;
+}
+
+.tab {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 18px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--ink);
+  color: var(--surface);
+  border-bottom-color: transparent;
+}
+
+/* Cards */
+.panel {
+  border: 0;
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow);
+  padding: 20px 22px 22px;
+}
+
+.panel-head {
+  margin-bottom: 14px;
+}
+
+.panel-head h2 {
+  font-size: 1.1rem;
+}
+
+.btn {
+  border-radius: 999px;
+  padding: 8px 16px;
+}
+
+.btn.small {
+  padding: 5px 12px;
+  font-size: 0.85rem;
+}
+
+.split {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  align-items: start;
+}
+
+.split > .panel {
+  height: 100%;
+}
+
+/* The headline: how the house is, in one sentence. */
+.hero {
+  padding: 6px 2px 0;
+}
+
+.hero-line {
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.hero-sub {
+  margin-top: 6px;
+  color: var(--ink-2);
+}
+
+/* Attention: a warm card with a clear left edge. */
+.attention {
+  background: var(--surface);
+  border-left: 6px solid var(--warn);
+}
+
+.attention-list li p {
+  color: var(--ink-2);
+}
+
+/* Status tiles */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 12px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  border: 0;
+  border-radius: var(--radius-m);
+  padding: 14px 16px 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  border-top: 4px solid var(--line);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.tile:hover {
+  background: var(--surface-2);
+}
+
+.tile-label {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tile-value {
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.tile-value small {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  margin-left: 4px;
+}
+
+.tile-note {
+  color: var(--ink-3);
+  font-size: 0.82rem;
+}
+
+.tile-good {
+  border-top-color: var(--good);
+}
+
+.tile-warn {
+  border-top-color: var(--warn);
+}
+
+.tile-bad {
+  border-top-color: var(--bad);
+}
+
+.tile-bad .tile-value {
+  color: var(--bad);
+}
+
+.tile-heat {
+  border-top-color: var(--heat);
+}
+
+/* Rooms as a grid of small cards */
+.floor + .floor {
+  margin-top: 18px;
+}
+
+.floor-head {
+  margin-bottom: 10px;
+}
+
+.room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  gap: 12px;
+}
+
+.room-card {
+  background: var(--surface-2);
+  border-radius: var(--radius-m);
+  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid transparent;
+}
+
+.room-card.tone-warn {
+  border-color: var(--warn-soft);
+  color: inherit;
+}
+
+.room-card.tone-good {
+  color: inherit;
+}
+
+.room-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.room-title {
+  font-size: 1rem;
+}
+
+.room-temp {
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.room-feel {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.room-card .band {
+  height: 28px;
+}
+
+.room-card .band-labels {
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+
+.room-card .room-more {
+  margin-top: 4px;
+}
+
+.room-card .room-more summary {
+  font-size: 0.85rem;
+  color: var(--cheap);
+  font-weight: 600;
+}
+
+.room-card .room-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.room-card .segmented {
+  width: 100%;
+}
+
+.room-card .segmented button {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 0.8rem;
+}
+
+.field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-top: 4px;
+}
+
+.muted.small {
+  font-size: 0.8rem;
+}
+
+.room-model summary {
+  font-size: 0.8rem;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.room-legend {
+  flex-wrap: wrap;
+}
+
+/* Lists inside cards breathe a little more. */
+.timeline li {
+  padding: 10px 0;
+}
+
+.foot {
+  padding-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .hero-line {
+    font-size: 1.35rem;
+  }
+
+  .tabs {
+    padding: 2px 16px 10px;
+  }
+
+  .tab {
+    flex: 1;
+    padding: 8px 10px;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+}
+
+.room-card .segmented {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+.btn {
+  white-space: nowrap;
+}
+
+.hero-line {
+  margin: 0;
+}
+
+.room-edit > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+
+.room-edit[open] > summary {
+  margin-bottom: 8px;
+}

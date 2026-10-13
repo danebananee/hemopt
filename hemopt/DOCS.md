@@ -23,7 +23,7 @@ inte för att panelen ska fungera.
 
 ## Kom igång
 
-Första gången visar panelen **Välkommen till hemopt** och en knapp,
+Första gången visar panelen **Välkommen** och en knapp,
 **Kom igång**. Den öppnar fliken **Inställningar**, där hemopt redan har letat
 igenom Home Assistant och fyllt i det den hittat:
 
@@ -50,7 +50,7 @@ hemopt styr ingenting förrän du slår på **Styr värmen** högst upp i panele
 Låt den gå en vecka eller två först. Under tiden:
 
 - lär sig modellen hur varje rum reagerar på värme, sol, blåst och brasa,
-- räknar fliken **Besparing** ut vad du hade sparat med kvartspris och styrning
+- räknar fliken **Pengar** ut vad du hade sparat med kvartspris och styrning
   jämfört med ditt nuvarande avtal,
 - kan du jämföra planen med hur huset faktiskt beter sig.
 
@@ -94,15 +94,16 @@ bäst när en kall period har passerat. Byte av säkring beställs hos nätbolag
 
 ## Braskamin
 
-Tryck **Jag har tänt brasan** under **Rum och värme** när du eldar (eller slå
+Tryck **Jag har tänt brasan** på fliken **Hem** när du eldar (eller slå
 på `switch.hemopt_wood_stove_lit` i Home Assistant) och **Brasan har slocknat**
 när den brunnit ut. Efter några kvällar vet hemopt hur mycket brasan värmer
-varje rum, känner själv igen en tänd brasa och tipsar om när det lönar sig
+varje rum. Därefter känner den själv igen en tänd brasa (du behöver inte
+trycka), skiljer den från sol genom fönstren, och tipsar om när det lönar sig
 att elda. Har du en givare vid kaminen kan den anges i Inställningar.
 
 ## Värmekurva
 
-Under **Rum och värme → Värmekurva** räknar hemopt ut den lägsta värmekurva
+På fliken **Hem**, i kortet **Värmepumpen**, räknar hemopt ut den lägsta värmekurva
 som ändå håller varje rum varmt, och jämför med kurvan värmepumpen har nu.
 Den tittar på hur stor del av tiden varje rums termostat har slingan öppen och
 om rummet når sitt börvärde, vid olika utetemperaturer:
@@ -171,7 +172,7 @@ Med MQTT får du bland annat:
 | Symptom | Att göra |
 | --- | --- |
 | Panelen fastnar på «Läser in…» | Ladda om sidan med **Ctrl+Shift+R** (mobil: dra ned). |
-| Home Assistant, väder eller MQTT är röda under **System** | Öppna tilläggets **Log**. Står det `SUPERVISOR_TOKEN length=0`, se nedan. |
+| Home Assistant, väder eller MQTT är röda under **Inställningar → Fungerar allt?** | Öppna tilläggets **Log**. Står det `SUPERVISOR_TOKEN length=0`, se nedan. |
 | Inga rum hittas | Kontrollera att termostaterna syns under **Settings → Devices & services**. Rum kan också läggas till för hand med **Lägg till rum**. |
 | Ingen elmätare | Välj den under **Inställningar → Elmätare och väder**. |
 | Spotpris saknas | Tillägget behöver nå elprisetjustnu.se; se **Log**. |

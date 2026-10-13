@@ -15,37 +15,34 @@
     <header class="masthead">
       <div class="masthead-row">
         <div class="brand">
-          <h1>Kostnadsoptimering</h1>
-          <p class="brand-sub" id="brand-sub">Värme och varmvatten när elen är billig</p>
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Hemmets el och värme</h1>
+            <p class="brand-sub" id="brand-sub">Värme och varmvatten när elen är billig</p>
+          </div>
         </div>
-        <div class="control">
-          <label class="switch" title="Låt hemopt ställa termostaterna">
-            <input type="checkbox" id="control-toggle" />
-            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-            <span class="switch-text">
-              <strong id="control-label">Styr värmen</strong>
-              <small id="control-hint">Av – hemopt räknar bara</small>
-            </span>
-          </label>
-          <button type="button" class="btn" id="replan-btn">Räkna om</button>
-        </div>
+        <label class="switch" title="Låt hemopt ställa termostaterna">
+          <input type="checkbox" id="control-toggle" />
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="switch-text">
+            <strong id="control-label">Styr värmen</strong>
+            <small id="control-hint">Av – hemopt räknar bara</small>
+          </span>
+        </label>
       </div>
       <nav class="tabs" id="tab-nav" aria-label="Vyer">
-        <button type="button" class="tab" data-tab="overview" aria-selected="true">Översikt</button>
-        <button type="button" class="tab" data-tab="savings" aria-selected="false">Besparing</button>
-        <button type="button" class="tab" data-tab="rooms" aria-selected="false">Rum och värme</button>
-        <button type="button" class="tab" data-tab="energy" aria-selected="false">El och effekt</button>
-        <button type="button" class="tab" data-tab="system" aria-selected="false">System</button>
-        <button type="button" class="tab" data-tab="setup" aria-selected="false">Inställningar</button>
+        <button type="button" class="tab" data-tab="home" aria-selected="true">Hem</button>
+        <button type="button" class="tab" data-tab="money" aria-selected="false">Pengar</button>
+        <button type="button" class="tab" data-tab="settings" aria-selected="false">Inställningar</button>
       </nav>
     </header>
 
     <main>
-      <!-- Översikt ---------------------------------------------------------->
-      <section class="view" data-tab="overview">
-        <div class="now">
-          <p class="now-line" id="summary-line">Läser in…</p>
-          <p class="now-sub" id="summary-sub"></p>
+      <!-- Hem --------------------------------------------------------------->
+      <section class="view" data-tab="home">
+        <div class="hero">
+          <p class="hero-line" id="summary-line">Läser in…</p>
+          <p class="hero-sub" id="summary-sub"></p>
         </div>
 
         <article class="panel attention" id="attention-card" hidden>
@@ -54,7 +51,7 @@
         </article>
 
         <article class="panel welcome" id="welcome-card" hidden>
-          <h2>Välkommen till hemopt</h2>
+          <h2>Välkommen</h2>
           <p>
             hemopt behöver veta vilka rum, givare och apparater huset har. Guiden hittar det mesta
             själv i Home Assistant – du bekräftar bara.
@@ -62,13 +59,23 @@
           <button type="button" class="btn" id="welcome-btn">Kom igång</button>
         </article>
 
-        <div class="figures" id="figures" aria-label="Nyckeltal"></div>
+        <div class="tiles" id="figures" aria-label="Läget just nu"></div>
 
         <article class="panel">
           <header class="panel-head">
             <div>
-              <h2>Kommande dygn</h2>
-              <p class="muted" id="horizon-sub">Elpris och när värmepumpen planeras gå</p>
+              <h2>Rummen</h2>
+              <p class="muted">Tryck på ett rum för att ändra hur varmt det ska vara.</p>
+            </div>
+          </header>
+          <div id="rooms"></div>
+        </article>
+
+        <article class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Elpriset och planen</h2>
+              <p class="muted" id="horizon-sub">När elen är billig och när värmepumpen planeras gå</p>
             </div>
             <div class="legend" id="horizon-legend">
               <span><i class="sw sw-cheap"></i>Billigt</span>
@@ -81,15 +88,50 @@
           <ul class="notes" id="plan-notes"></ul>
         </article>
 
-        <article class="panel">
-          <header class="panel-head">
-            <div>
-              <h2>Vad händer just nu</h2>
-              <p class="muted" id="actions-sub">Det hemopt gör med värmen och varmvattnet</p>
-            </div>
-          </header>
-          <ol class="timeline" id="model-body"><li class="empty">Väntar på första planen…</li></ol>
-        </article>
+        <div class="split">
+          <article class="panel" id="curve-card">
+            <header class="panel-head">
+              <div>
+                <h2>Värmepumpen</h2>
+                <p class="muted">Hur varmt vatten den skickar till golvet. Lagom räcker – för varmt kostar el i onödan.</p>
+              </div>
+              <button type="button" class="btn ghost small" id="curve-btn">Kolla igen</button>
+            </header>
+            <div id="curve-body"><p class="empty">Hämtar…</p></div>
+          </article>
+
+          <article class="panel" id="stove-card">
+            <header class="panel-head">
+              <div>
+                <h2 id="stove-title">Braskamin</h2>
+                <p class="muted" id="stove-sub">hemopt känner själv av när brasan brinner.</p>
+              </div>
+            </header>
+            <div id="stove-body"><p class="empty">Hämtar…</p></div>
+          </article>
+        </div>
+
+        <div class="split">
+          <article class="panel">
+            <header class="panel-head">
+              <div>
+                <h2>Just nu</h2>
+                <p class="muted" id="actions-sub">Det hemopt gör med värmen och varmvattnet</p>
+              </div>
+            </header>
+            <ol class="timeline" id="model-body"><li class="empty">Väntar på första planen…</li></ol>
+          </article>
+
+          <article class="panel">
+            <header class="panel-head">
+              <div>
+                <h2>Varmvatten</h2>
+                <p class="muted" id="dhw-sub">—</p>
+              </div>
+            </header>
+            <div class="chart small" id="dhw-chart"></div>
+          </article>
+        </div>
 
         <article class="panel" id="storage-card" hidden>
           <header class="panel-head">
@@ -112,15 +154,14 @@
         </article>
       </section>
 
-      <!-- Besparing --------------------------------------------------------->
-      <section class="view" data-tab="savings" hidden>
+      <!-- Pengar ------------------------------------------------------------>
+      <section class="view" data-tab="money" hidden>
         <article class="panel">
           <header class="panel-head">
             <div>
               <h2>Vad hade du sparat?</h2>
               <p class="muted" id="savings-sub">
-                hemopt räknar varje kvart vad huset hade kostat med kvartspris och styrning,
-                jämfört med ditt nuvarande avtal.
+                Vad huset hade kostat med kvartspris och hemopts styrning, jämfört med ditt avtal i dag.
               </p>
             </div>
             <div class="segmented" id="savings-period" role="group" aria-label="Period">
@@ -136,92 +177,39 @@
           <ul class="notes" id="savings-notes"></ul>
         </article>
 
-        <article class="panel">
-          <header class="panel-head">
-            <div>
-              <h2>Elavtal</h2>
-              <p class="muted" id="advice-sub">Vad din uppmätta förbrukning hade kostat med olika sorters elavtal.</p>
-            </div>
-            <button type="button" class="btn ghost" id="advice-btn">Räkna om</button>
-          </header>
-          <div id="advice-body"><p class="empty">Hämtar…</p></div>
-        </article>
-
-        <article class="panel" id="fuse-card">
-          <header class="panel-head">
-            <div>
-              <h2>Huvudsäkring</h2>
-              <p class="muted">Bedöms från strömmen per fas som elmätaren mäter.</p>
-            </div>
-            <button type="button" class="btn ghost" id="fuse-btn">Räkna om</button>
-          </header>
-          <div id="fuse-body"><p class="empty">Hämtar…</p></div>
-        </article>
-      </section>
-
-      <!-- Rum och värme ----------------------------------------------------->
-      <section class="view" data-tab="rooms" hidden>
-        <article class="panel">
-          <header class="panel-head">
-            <div>
-              <h2>Rum</h2>
-              <p class="muted">
-                Välj för varje rum hur noga temperaturen ska hållas när elen är dyr:
-                «Håll» = alltid lagom, «Normal» = får svaja lite, «Flexibel» = får svaja mest.
-              </p>
-            </div>
-          </header>
-          <div id="rooms"></div>
-        </article>
-
-        <article class="panel" id="curve-card">
-          <header class="panel-head">
-            <div>
-              <h2>Värmekurva</h2>
-              <p class="muted">
-                Hur varmt vatten värmepumpen skickar till golvet. Lagom varmt räcker – för
-                varmt kostar el i onödan.
-              </p>
-            </div>
-            <button type="button" class="btn ghost" id="curve-btn">Räkna om</button>
-          </header>
-          <div id="curve-body"><p class="empty">Hämtar…</p></div>
-        </article>
-
         <div class="split">
           <article class="panel">
             <header class="panel-head">
               <div>
-                <h2>Varmvatten</h2>
-                <p class="muted" id="dhw-sub">—</p>
+                <h2>Elavtal</h2>
+                <p class="muted" id="advice-sub">Vad din förbrukning hade kostat med andra avtal.</p>
               </div>
+              <button type="button" class="btn ghost small" id="advice-btn">Räkna om</button>
             </header>
-            <div class="chart small" id="dhw-chart"></div>
+            <div id="advice-body"><p class="empty">Hämtar…</p></div>
           </article>
 
-          <article class="panel" id="stove-card">
+          <article class="panel" id="fuse-card">
             <header class="panel-head">
               <div>
-                <h2 id="stove-title">Braskamin</h2>
-                <p class="muted" id="stove-sub">hemopt känner själv av när brasan brinner.</p>
+                <h2>Huvudsäkring</h2>
+                <p class="muted">Räcker säkringen, eller kan den bli mindre och billigare?</p>
               </div>
+              <button type="button" class="btn ghost small" id="fuse-btn">Räkna om</button>
             </header>
-            <div id="stove-body"><p class="empty">Hämtar…</p></div>
+            <div id="fuse-body"><p class="empty">Hämtar…</p></div>
           </article>
         </div>
-      </section>
 
-      <!-- El och effekt ----------------------------------------------------->
-      <section class="view" data-tab="energy" hidden>
         <article class="panel">
           <header class="panel-head">
             <div>
               <h2>Elpris</h2>
-              <p class="muted" id="price-sub">Pris per kvart inklusive påslag, skatt och moms</p>
+              <p class="muted" id="price-sub">Pris per kvart med påslag, skatt och moms</p>
             </div>
             <div class="segmented" id="price-period" role="group" aria-label="Period">
               <button type="button" data-back="0" aria-pressed="true">Idag och imorgon</button>
-              <button type="button" data-back="6">Senaste veckan</button>
+              <button type="button" data-back="6">Veckan</button>
               <button type="button" data-back="29">30 dagar</button>
             </div>
           </header>
@@ -248,7 +236,7 @@
         <article class="panel">
           <header class="panel-head">
             <div>
-              <h2>Effekttoppar</h2>
+              <h2>Effektavgift</h2>
               <p class="muted" id="peak-sub">—</p>
             </div>
           </header>
@@ -256,18 +244,35 @@
         </article>
       </section>
 
-      <!-- System ------------------------------------------------------------>
-      <section class="view" data-tab="system" hidden>
+      <!-- Inställningar ----------------------------------------------------->
+      <section class="view" data-tab="settings" hidden>
         <article class="panel">
           <header class="panel-head">
             <div>
-              <h2>Anslutningar</h2>
+              <h2>Fungerar allt?</h2>
               <p class="muted">Det hemopt läser och styr, och om det fungerar just nu.</p>
             </div>
-            <button type="button" class="btn ghost" id="train-btn">Lär om modellerna</button>
+            <div class="row-actions">
+              <button type="button" class="btn ghost small" id="replan-btn">Räkna om planen</button>
+              <button type="button" class="btn ghost small" id="train-btn">Lär om rummen</button>
+            </div>
           </header>
           <ul class="checklist" id="systems-body"></ul>
         </article>
+
+        <article class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>Det hemopt vet om huset</h2>
+              <p class="muted">
+                hemopt har letat i Home Assistant och fyllt i det den hittat. Kontrollera, ändra om
+                något är fel och spara.
+              </p>
+            </div>
+          </header>
+          <ul class="checklist" id="setup-checklist"></ul>
+        </article>
+        <form id="setup-form" class="setup" autocomplete="off"></form>
 
         <div class="split">
           <article class="panel" id="meter-card">
@@ -290,23 +295,6 @@
             <dl class="facts" id="peak-settings"></dl>
           </article>
         </div>
-      </section>
-
-      <!-- Inställningar ----------------------------------------------------->
-      <section class="view" data-tab="setup" hidden>
-        <article class="panel">
-          <header class="panel-head">
-            <div>
-              <h2>Inställningar</h2>
-              <p class="muted">
-                hemopt har letat i Home Assistant och fyllt i det den hittat. Kontrollera, ändra om
-                något är fel och spara. Inget här kräver att du kan YAML.
-              </p>
-            </div>
-          </header>
-          <ul class="checklist" id="setup-checklist"></ul>
-        </article>
-        <form id="setup-form" class="setup" autocomplete="off"></form>
       </section>
     </main>
 

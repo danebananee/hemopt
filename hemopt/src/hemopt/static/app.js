@@ -8,11 +8,11 @@
 
 const REFRESH_STATUS_MS = 30_000;
 const REFRESH_PLAN_MS = 120_000;
-const PRIORITY_LABELS = { 1: "Håll", 2: "Normal", 3: "Flexibel" };
+const PRIORITY_LABELS = { 1: "Alltid lagom", 2: "Lite svaj", 3: "Får svaja" };
 const PRIORITY_HELP = {
-  1: "Temperaturen hålls inom komfortbandet.",
-  2: "Får svaja lite när elen är dyr.",
-  3: "Bär mest av lastflytten.",
+  1: "Rummet hålls alltid inom önskad temperatur.",
+  2: "Rummet får bli lite svalare när elen är dyr.",
+  3: "Rummet får svaja mest – här sparas mest pengar.",
 };
 const CONTRACT_SHORT = {
   fixed: "fastpris",
@@ -662,12 +662,18 @@ function attentionItems() {
   if (!s) return [];
   const items = [];
   if (!s.home_assistant_online) {
-    items.push({ kind: "alert", title: "hemopt når inte Home Assistant", detail: "Inga mätvärden kommer in. Se fliken System.", tab: "system" });
+    items.push({ kind: "alert", title: "hemopt når inte Home Assistant", detail: "Inga mätvärden kommer in. Se Inställningar.", tab: "settings", target: "#systems-body" });
   }
   if (s.curve_status === "no_heat") {
-    items.push({ kind: "alert", title: s.curve_summary || "Värmepumpen värmer inte huset", detail: s.curve_detail, tab: "rooms" });
+    items.push({
+      kind: "alert",
+      title: s.curve_summary || "Värmepumpen värmer inte huset.",
+      detail: "Den gör bara varmvatten, så rummen blir kalla. Kolla i värmepumpens meny att sommarläge är av och att värmestoppet inte slår till vid dagens utetemperatur.",
+      tab: "home",
+      target: "#curve-card",
+    });
   } else if (s.curve_status === "too_cold") {
-    items.push({ kind: "warn", title: "Värmekurvan är för låg", detail: s.curve_summary, tab: "rooms" });
+    items.push({ kind: "warn", title: "Värmekurvan är för låg", detail: s.curve_summary, tab: "home", target: "#curve-card" });
   }
   const cold = coldRooms();
   if (cold.length >= 3 && s.curve_status !== "no_heat") {
@@ -675,13 +681,21 @@ function attentionItems() {
       kind: "warn",
       title: `${cold.length} rum är kallare än du vill`,
       detail: `${cold.map((r) => `${r.name} ${deg(r.temperature)}`).join(", ")}.`,
-      tab: "rooms",
+      tab: "home",
+      target: "#rooms",
     });
   }
   if (!s.prices_available) {
-    items.push({ kind: "warn", title: "Elpriset kunde inte hämtas", detail: "hemopt planerar på senast kända priser tills det går igen.", tab: "energy" });
+    items.push({ kind: "warn", title: "Elpriset kunde inte hämtas", detail: "hemopt planerar på senast kända priser tills det går igen.", tab: "money", target: "#price-chart" });
   }
   return items;
+}
+
+/* Switch to a tab and bring one part of it into view. */
+function goTo(tab, target) {
+  if (currentTab() !== (TAB_ALIASES[tab] || tab)) selectTab(tab);
+  const node = target ? $(target) : null;
+  if (node) requestAnimationFrame(() => node.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
 function renderAttention(items) {
@@ -693,7 +707,7 @@ function renderAttention(items) {
         "li",
         { class: `kind-${a.kind}` },
         el("div", {}, el("b", { text: a.title }), a.detail ? el("p", { text: a.detail }) : null),
-        a.tab ? el("button", { type: "button", class: "btn ghost", text: "Visa", onclick: () => selectTab(a.tab) }) : null,
+        a.tab ? el("button", { type: "button", class: "btn ghost small", text: "Visa", onclick: () => goTo(a.tab, a.target) }) : null,
       ),
     ),
   );
@@ -709,6 +723,18 @@ function figure(label, value, unit, note, tone) {
   );
 }
 
+function tile(label, value, unit, note, tone, onclick) {
+  const node = el(
+    onclick ? "button" : "div",
+    { class: `tile ${tone ? `tile-${tone}` : ""}`, type: onclick ? "button" : undefined },
+    el("span", { class: "tile-label", text: label }),
+    el("span", { class: "tile-value" }, value, unit ? el("small", { text: unit }) : null),
+    note ? el("span", { class: "tile-note", text: note }) : null,
+  );
+  if (onclick) node.addEventListener("click", onclick);
+  return node;
+}
+
 function renderFigures() {
   const s = state.status;
   const plan = state.plan;
@@ -718,59 +744,53 @@ function renderFigures() {
 
   if (s.current_price_sek !== undefined) {
     let tone = null;
-    let note = "inklusive skatt och nät";
+    let note = "med skatt och nät";
     if (plan && plan.price) {
       const cls = priceClasses(plan.price)(s.current_price_sek);
-      tone = cls === "mid" ? null : cls;
+      tone = { cheap: "good", dear: "bad" }[cls] || null;
       note = `${CLASS_WORD[cls]} jämfört med kommande dygn`;
     }
-    items.push(figure("Elpris nu", ore(s.current_price_sek), "öre/kWh", note, tone));
+    items.push(tile("Elpriset nu", ore(s.current_price_sek), "öre/kWh", note, tone, () => goTo("money", "#price-chart")));
   }
 
   if (state.rooms && state.rooms.length) {
     const measured = state.rooms.filter((r) => r.temperature !== null);
-    const inside = measured.filter((r) => r.temperature >= r.comfort_min - 0.2 && r.temperature <= r.comfort_max + 0.3);
-    const cold = measured
-      .filter((r) => r.temperature < r.comfort_min - 0.2)
-      .sort((a, b) => a.temperature - a.comfort_min - (b.temperature - b.comfort_min));
-    const note = cold.length ? `kallast: ${cold[0].name} ${deg(cold[0].temperature)}` : "alla rum inom sitt band";
+    const cold = coldRooms();
+    const ok = measured.length - cold.length;
     items.push(
-      figure(
-        "Rum med rätt värme",
-        `${inside.length}`,
-        `av ${measured.length}`,
-        note,
+      tile(
+        "Rummen",
+        `${ok}`,
+        `av ${measured.length} lagom`,
+        cold.length ? `${cold.length} för kalla` : "alla har rätt värme",
         cold.length ? "warn" : "good",
+        () => goTo("home", "#rooms"),
       ),
     );
   }
 
-  const sav = state.savings;
-  if (sav && sav.totals && sav.totals.measured_days > 0) {
-    const perDay = sav.saving_per_day_sek;
-    items.push(
-      figure(
-        `Hade sparat, ${fmt0.format(Math.min(sav.totals.measured_days, state.savingsDays))} dagar`,
-        fmt0.format(sav.totals.total_sek),
-        "kr",
-        perDay !== null ? `≈ ${kr(perDay, 1)} per dygn med kvartspris och styrning` : "med kvartspris och styrning",
-        sav.totals.total_sek > 0 ? "good" : null,
-      ),
-    );
-  } else {
-    items.push(figure("Besparing", "–", "", "bokföringen har precis börjat"));
+  const heating = {
+    no_heat: ["Värmer inte", "kolla värmepumpens meny", "bad"],
+    too_cold: ["För svag", "kurvan behöver höjas", "warn"],
+    too_warm: ["Kan sänkas", "lägre kurva sparar el", "good"],
+    ok: ["Går som den ska", "kurvan ligger rätt", "good"],
+  }[s.curve_status];
+  if (heating) {
+    items.push(tile("Värmepumpen", heating[0], "", heating[1], heating[2], () => goTo("home", "#curve-card")));
+  } else if (s.planned_power_kw !== undefined) {
+    items.push(tile("Värmepumpen", nf(1).format(s.planned_power_kw), "kW", "planerad effekt just nu", null, () => goTo("home", "#curve-card")));
   }
 
-  if (s.planned_power_kw !== undefined) {
-    items.push(
-      figure(
-        "Värmepump",
-        nf(1).format(s.planned_power_kw),
-        "kW",
-        "så mycket el planen vill använda just nu",
-      ),
-    );
-  }
+  items.push(
+    tile(
+      "Braskaminen",
+      s.wood_stove_lit ? "Brinner" : "Släckt",
+      "",
+      s.wood_stove_lit ? "värmepumpen tar det lugnt" : "känns av automatiskt",
+      s.wood_stove_lit ? "heat" : null,
+      () => goTo("home", "#stove-card"),
+    ),
+  );
   box.replaceChildren(...items);
 }
 
@@ -792,7 +812,7 @@ function renderActions() {
     );
   const shown = actions.slice(0, 4).map(row);
   if (actions.length > 4) {
-    const more = el("button", { type: "button", class: "btn ghost", text: `Visa ${actions.length - 4} till` });
+    const more = el("button", { type: "button", class: "btn ghost small", text: `Visa ${actions.length - 4} till` });
     more.onclick = () => list.replaceChildren(...actions.map(row));
     shown.push(el("li", { class: "more" }, more));
   }
@@ -970,8 +990,8 @@ function roomBand(room) {
   const labels = el(
     "div",
     { class: "band-labels" },
-    el("span", {}, "Komfort ", el("b", { text: `${fmt1.format(room.comfort_min)}–${fmt1.format(room.comfort_max)}` })),
-    el("span", {}, room.temperature !== null ? el("b", { text: deg(room.temperature) }) : "ingen mätning", room.humidity ? ` · ${fmt0.format(room.humidity)} %` : ""),
+    el("span", { text: `Önskat ${fmt1.format(room.comfort_min)}–${fmt1.format(room.comfort_max)} °C` }),
+    el("span", { text: room.humidity ? `Fukt ${fmt0.format(room.humidity)} %` : "" }),
   );
   return el("div", { class: "band-wrap" }, band, labels);
 }
@@ -1029,20 +1049,24 @@ function roomRow(room) {
     }
   });
 
+  const feel = roomFeel(room);
   const detail = el(
     "details",
     { class: "room-more" },
-    el("summary", { text: "Komfort och modell" }),
+    el("summary", { text: "Ändra" }),
     el(
       "div",
       { class: "room-detail" },
+      el("p", { class: "field-label", text: "När elen är dyr" }),
+      priority,
+      el("p", { class: "muted small", text: PRIORITY_HELP[room.priority] }),
+      el("p", { class: "field-label", text: "Önskad temperatur (°C)" }),
+      el("div", { class: "comfort-form" }, minInput, "–", maxInput, save),
+      status,
       el(
-        "div",
-        {},
-        el("p", { class: "muted", text: "Komfortband (°C)" }),
-        el("div", { class: "comfort-form" }, minInput, "–", maxInput, save),
-        status,
-      ),
+        "details",
+        { class: "room-model" },
+        el("summary", { text: "Hur rummet beter sig" }),
       el(
         "dl",
         { class: "facts" },
@@ -1063,16 +1087,22 @@ function roomRow(room) {
         el("dt", { text: "Termostat" }),
         el("dd", { text: room.thermostat_setpoint !== null ? deg(room.thermostat_setpoint) : "okänd" }),
       ),
-      el("p", { class: "muted", text: `${fitted} ${quality}` }),
+        el("p", { class: "muted", text: `${fitted} ${quality}` }),
+      ),
     ),
   );
 
   return el(
     "div",
-    { class: "room" },
-    el("div", { class: "room-name" }, el("b", { text: room.name }), el("small", { class: roomFeel(room).tone, text: roomFeel(room).text })),
+    { class: `room-card ${feel.tone}`, "data-key": room.key },
+    el(
+      "div",
+      { class: "room-top" },
+      el("b", { class: "room-title", text: room.name }),
+      el("span", { class: "room-temp", text: room.temperature !== null ? deg(room.temperature) : "–" }),
+    ),
+    el("span", { class: `room-feel ${feel.tone}`, text: feel.text }),
     roomBand(room),
-    el("div", { class: "room-controls" }, priority),
     detail,
   );
 }
@@ -1084,6 +1114,12 @@ function renderRooms() {
     host.replaceChildren(el("p", { class: "empty", text: "Inga rum konfigurerade." }));
     return;
   }
+  // Keep whatever the household has open across the periodic refresh.
+  const open = new Set(
+    $$(".room-card", host)
+      .filter((card) => $(".room-more", card)?.open)
+      .map((card) => card.dataset.key),
+  );
   const floors = new Map();
   for (const room of rooms) {
     const key = room.floor || "Rum";
@@ -1105,10 +1141,13 @@ function renderRooms() {
         "div",
         { class: "floor" },
         el("div", { class: "floor-head" }, el("h3", { text: name }), el("span", { text: Array.from(types).join(", ") })),
-        ...list.map(roomRow),
+        el("div", { class: "room-grid" }, ...list.map(roomRow)),
       );
     }),
   );
+  for (const card of $$(".room-card", host)) {
+    if (open.has(card.dataset.key)) $(".room-more", card).open = true;
+  }
 }
 
 async function setPriority(room, priority) {
@@ -1843,7 +1882,8 @@ function suggestion(role) {
 }
 
 function roomRowEditor(room) {
-  const tr = el("div", { class: "room-edit" });
+  // Saved rooms start folded so the list stays short; a new one opens.
+  const tr = el("details", { class: "room-edit", open: !room.key });
   const fields = {
     name: el("input", { type: "text", value: room.name || "", placeholder: "Namn" }),
     temperature_entity: entityField("Temperaturgivare", room.temperature_entity, "temperature"),
@@ -1860,7 +1900,7 @@ function roomRowEditor(room) {
     floor_type: selectField("Golv", room.floor_type || "", [["", "Gissa"], ["concrete", "Betongplatta"], ["light", "Lätt bjälklag"]]),
     comfort_min: numberField("Lägst", room.comfort_min ?? 20, { step: "0.5", unit: "°C" }),
     comfort_max: numberField("Högst", room.comfort_max ?? 22.5, { step: "0.5", unit: "°C" }),
-    priority: selectField("Prioritet", room.priority || 1, [[1, "Håll"], [2, "Normal"], [3, "Flexibel"]]),
+    priority: selectField("När elen är dyr", room.priority || 1, [[1, PRIORITY_LABELS[1]], [2, PRIORITY_LABELS[2]], [3, PRIORITY_LABELS[3]]]),
   };
   const remove = el("button", { type: "button", class: "btn ghost small", text: "Ta bort" });
   remove.addEventListener("click", () => {
@@ -1868,6 +1908,7 @@ function roomRowEditor(room) {
     renderRoomEditors();
   });
   tr.append(
+    el("summary", { text: room.name || "Nytt rum" }),
     el("div", { class: "room-edit-head" }, fields.name, remove),
     el("div", { class: "fields" }, fields.temperature_entity, fields.climate_entity, el("label", { class: "field" }, el("span", { text: "Våning" }), fields.floor), fields.floor_type, fields.comfort_min, fields.comfort_max, fields.priority),
   );
@@ -2127,7 +2168,7 @@ async function loadStatus() {
   renderActions();
   renderErrors();
   renderFooter();
-  if (currentTab() === "system") renderSystems();
+  if (currentTab() === "settings") renderSystems();
 }
 
 async function loadPlan() {
@@ -2141,7 +2182,7 @@ async function loadPlan() {
   drawStorage(state.plan, now);
   renderPlanNotes();
   renderFigures();
-  if (currentTab() === "rooms") {
+  if (currentTab() === "home") {
     drawDhw(state.plan, now);
     renderDhwSub();
   }
@@ -2154,7 +2195,7 @@ async function loadRooms() {
     state.rooms = null;
   }
   renderFigures();
-  if (currentTab() === "rooms") renderRooms();
+  if (currentTab() === "home") renderRooms();
 }
 
 async function loadSavings() {
@@ -2164,7 +2205,7 @@ async function loadSavings() {
     state.savings = null;
   }
   renderFigures();
-  if (currentTab() === "savings") renderSavings();
+  if (currentTab() === "money") renderSavings();
 }
 
 async function loadAdvice(recompute = false) {
@@ -2228,45 +2269,50 @@ function nowDate() {
 
 function currentTab() {
   const active = $(".tab[aria-selected='true']");
-  return active ? active.dataset.tab : "overview";
+  return active ? active.dataset.tab : "home";
 }
 
 const TAB_LOADERS = {
-  overview: () => {
-    drawHorizon(state.plan, nowDate());
-    drawStorage(state.plan, nowDate());
-  },
-  savings: () => {
-    renderSavings();
-    loadSavings();
-    loadAdvice();
-    loadFuse();
-  },
-  rooms: () => {
+  home: () => {
     renderRooms();
     loadRooms();
+    drawHorizon(state.plan, nowDate());
+    drawStorage(state.plan, nowDate());
     drawDhw(state.plan, nowDate());
     renderDhwSub();
     loadStove();
     loadCurve();
   },
-  energy: () => {
+  money: () => {
+    renderSavings();
+    loadSavings();
+    loadAdvice();
+    loadFuse();
     loadPrices();
     loadHistory();
     loadPeaks();
   },
-  system: () => {
+  settings: () => {
     renderSystems();
+    loadSetup();
     renderMeters();
     renderPeakSettings();
   },
-  setup: () => {
-    loadSetup();
-  },
+};
+
+// Links and bookmarks from before the panel had three tabs.
+const TAB_ALIASES = {
+  overview: "home",
+  rooms: "home",
+  savings: "money",
+  energy: "money",
+  system: "settings",
+  setup: "settings",
 };
 
 function selectTab(name, { push = true } = {}) {
-  if (!TAB_LOADERS[name]) name = "overview";
+  name = TAB_ALIASES[name] || name;
+  if (!TAB_LOADERS[name]) name = "home";
   for (const tab of $$(".tab")) tab.setAttribute("aria-selected", tab.dataset.tab === name ? "true" : "false");
   for (const view of $$(".view")) view.hidden = view.dataset.tab !== name;
   if (push) history.replaceState(null, "", `#${name}`);
@@ -2314,7 +2360,7 @@ function bind() {
     }
     await Promise.all([loadStatus(), loadPlan(), loadRooms()]);
     button.disabled = false;
-    button.textContent = "Räkna om";
+    button.textContent = "Räkna om planen";
   });
 
   $("#train-btn").addEventListener("click", async (event) => {
@@ -2328,13 +2374,13 @@ function bind() {
       alert(`Inlärningen misslyckades: ${error.message}`);
     }
     button.disabled = false;
-    button.textContent = "Lär om modellerna";
+    button.textContent = "Lär om rummen";
   });
 
   $("#advice-btn").addEventListener("click", () => loadAdvice(true));
   $("#fuse-btn").addEventListener("click", () => loadFuse(true));
   $("#curve-btn").addEventListener("click", () => loadCurve(true));
-  $("#welcome-btn").addEventListener("click", () => selectTab("setup"));
+  $("#welcome-btn").addEventListener("click", () => goTo("settings", "#setup-checklist"));
 
   bindSegmented("#savings-period", ({ days }) => {
     state.savingsDays = Number(days);
@@ -2349,7 +2395,7 @@ function bind() {
     loadHistory();
   });
 
-  window.addEventListener("hashchange", () => selectTab((location.hash || "#overview").slice(1), { push: false }));
+  window.addEventListener("hashchange", () => selectTab((location.hash || "#home").slice(1), { push: false }));
 
   let resizeTimer = null;
   window.addEventListener("resize", () => {
@@ -2360,7 +2406,7 @@ function bind() {
 
 async function start() {
   bind();
-  const initial = (location.hash || "#overview").slice(1);
+  const initial = (location.hash || "#home").slice(1);
   await loadStatus();
   selectTab(initial, { push: false });
   await Promise.all([loadPlan(), loadRooms(), loadSavings()]);

@@ -181,14 +181,14 @@ async def test_train_endpoint_returns_model_summary(client):
 
 
 async def test_panel_groups_views_into_tabs(client):
-    """The dashboard is task-oriented: one tab per question a household asks."""
+    """Three tabs: how the house is, what it costs, and the settings."""
     http, _ = client
     body = (await http.get("/")).text
 
-    for tab in ("overview", "savings", "rooms", "energy", "system"):
+    for tab in ("home", "money", "settings"):
         assert f'data-tab="{tab}"' in body
     assert 'id="summary-line"' in body
-    assert "Vad händer just nu" in body
+    assert 'id="attention-card"' in body
 
 
 async def test_savings_ledger_is_booked_and_served(client):
