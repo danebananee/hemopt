@@ -1344,35 +1344,47 @@ class Engine:
                 unit = (row.get("attributes") or {}).get("unit_of_measurement")
                 if unit:
                     self._phase_units[row["entity_id"]] = str(unit)
-            if online and not (site.phase_current_entities or site.phase_power_entities):
-                # Adopt the meter's phase currents the first time they exist,
-                # or its per-phase power when the currents are not there.
+            if online:
+                # Adopt the meter's phase currents and per-phase power the
+                # first time each exists. Power usually has a long history in
+                # Home Assistant's statistics; currents are exact but are often
+                # switched on later (HomeWizard ships them disabled).
                 found = discover(states)
-                if found.phase_currents or found.phase_powers:
+                changed = False
+                if not site.phase_current_entities and found.phase_currents:
                     site.phase_current_entities = found.phase_currents
-                    site.phase_power_entities = [] if found.phase_currents else found.phase_powers
+                    changed = True
+                if not site.phase_power_entities and found.phase_powers:
+                    site.phase_power_entities = found.phase_powers
+                    changed = True
+                if changed:
                     self.config.save_profile()
                     _LOGGER.info(
-                        "adopted phase sensors %s",
-                        ", ".join(site.phase_current_entities or site.phase_power_entities),
+                        "phase sensors: currents %s, power %s",
+                        site.phase_current_entities,
+                        site.phase_power_entities,
                     )
-            entities = list(site.phase_current_entities or site.phase_power_entities)
+            # Power first, currents last: where both cover an hour the
+            # measured current replaces the one worked out from power.
+            sources = [site.phase_power_entities, site.phase_current_entities]
             to_amps = self._phase_to_amps
             written = 0
             if online:
-                for phase, entity in enumerate(entities, start=1):
-                    rows = await ha.statistics(
-                        entity, now - timedelta(days=400), types=("max", "mean")
-                    )
-                    written += self.store.record_phase_hours(
-                        PhaseHour(
-                            moment.astimezone(self.tz),
-                            phase,
-                            to_amps(entity, values.get("max", values.get("mean", 0.0))),
-                            to_amps(entity, values.get("mean", values.get("max", 0.0))),
+                for entities in sources:
+                    for phase, entity in enumerate(entities, start=1):
+                        rows = await ha.statistics(
+                            entity, now - timedelta(days=400), types=("max", "mean")
                         )
-                        for moment, values in rows
-                    )
+                        written += self.store.record_phase_hours(
+                            PhaseHour(
+                                moment.astimezone(self.tz),
+                                phase,
+                                to_amps(entity, values.get("max", values.get("mean", 0.0))),
+                                to_amps(entity, values.get("mean", values.get("max", 0.0))),
+                            )
+                            for moment, values in rows
+                        )
+        entities = list(site.phase_current_entities or site.phase_power_entities)
         if not written and entities:
             # No statistics: fall back on hemopt's own minute log.
             samples = {
