@@ -194,6 +194,8 @@ class Engine:
             self.store.setting("stove_sessions")
         )
         self._fire_detector = FireDetector()
+        # Units of the phase sensors, as Home Assistant last reported them.
+        self._phase_units: dict[str, str] = {}
         # When the detector last recognised a fire that is still burning.
         self._detected_since: datetime | None = None
         self._fire_checked: datetime | None = None
@@ -342,6 +344,8 @@ class Engine:
             if room.climate_entity:
                 entities.append(room.climate_entity)
         entities.extend(self.config.site.phase_current_entities)
+        if not self.config.site.phase_current_entities:
+            entities.extend(self.config.site.phase_power_entities)
         battery, ev = self.config.battery, self.config.ev
         if battery.enabled:
             entities.extend(e for e in (battery.soc_entity, battery.power_entity) if e)
@@ -1318,20 +1322,42 @@ class Engine:
                 _LOGGER.exception("heat curve check failed")
             await asyncio.sleep(3600)
 
+    def _phase_to_amps(self, entity: str, value: float) -> float:
+        """A phase reading in amperes; per-phase power is divided by the voltage."""
+        site = self.config.site
+        if entity in site.phase_current_entities:
+            return abs(value)
+        watts = abs(value) * (1000.0 if self._phase_unit(entity) == "kW" else 1.0)
+        return watts / (site.voltage or 230.0)
+
+    def _phase_unit(self, entity: str) -> str:
+        return self._phase_units.get(entity, "W")
+
     async def refresh_fuse(self) -> FuseReport:
         """Update the per-phase history and the verdict on the main fuse."""
         now = self._now()
-        entities = list(self.config.site.phase_current_entities)
+        site = self.config.site
         async with HomeAssistantClient(self.config.home_assistant, self._ha_http) as ha:
             online = await ha.ping()
-            if online and not entities:
-                # Adopt the meter's phase currents the first time they exist.
-                found = discover(await ha.states_full())
-                if found.phase_currents:
-                    entities = found.phase_currents
-                    self.config.site.phase_current_entities = entities
+            states = await ha.states_full() if online else []
+            for row in states:
+                unit = (row.get("attributes") or {}).get("unit_of_measurement")
+                if unit:
+                    self._phase_units[row["entity_id"]] = str(unit)
+            if online and not (site.phase_current_entities or site.phase_power_entities):
+                # Adopt the meter's phase currents the first time they exist,
+                # or its per-phase power when the currents are not there.
+                found = discover(states)
+                if found.phase_currents or found.phase_powers:
+                    site.phase_current_entities = found.phase_currents
+                    site.phase_power_entities = [] if found.phase_currents else found.phase_powers
                     self.config.save_profile()
-                    _LOGGER.info("adopted phase currents %s", ", ".join(entities))
+                    _LOGGER.info(
+                        "adopted phase sensors %s",
+                        ", ".join(site.phase_current_entities or site.phase_power_entities),
+                    )
+            entities = list(site.phase_current_entities or site.phase_power_entities)
+            to_amps = self._phase_to_amps
             written = 0
             if online:
                 for phase, entity in enumerate(entities, start=1):
@@ -1342,15 +1368,18 @@ class Engine:
                         PhaseHour(
                             moment.astimezone(self.tz),
                             phase,
-                            abs(values.get("max", values.get("mean", 0.0))),
-                            abs(values.get("mean", values.get("max", 0.0))),
+                            to_amps(entity, values.get("max", values.get("mean", 0.0))),
+                            to_amps(entity, values.get("mean", values.get("max", 0.0))),
                         )
                         for moment, values in rows
                     )
         if not written and entities:
             # No statistics: fall back on hemopt's own minute log.
             samples = {
-                phase: self.store.samples(entity, now - timedelta(days=120))
+                phase: [
+                    (moment, to_amps(entity, value))
+                    for moment, value in self.store.samples(entity, now - timedelta(days=120))
+                ]
                 for phase, entity in enumerate(entities, start=1)
             }
             self.store.record_phase_hours(hours_from_samples(samples))
@@ -1549,6 +1578,7 @@ class Engine:
             load,
             spot,
             peak_kw=max(history.values()) if history else None,
+            fuse=self.fuse,
         )
         self.status.last_advice = self._now()
         return self.advice
@@ -2560,12 +2590,8 @@ def _heat_fraction(
 
 
 def _measured_days(history: dict[datetime, float]) -> float:
-    """Calendar span covered by the stored hourly means."""
-    if len(history) < 2:
-        return len(history) / 24.0
-    moments = sorted(history)
-    span = moments[-1] - moments[0]
-    return (span.total_seconds() + 3600.0) / 86400.0
+    """Days of stored hourly means; gaps in the history do not count."""
+    return len(history) / 24.0
 
 
 def _hourly_prices(plan: Plan) -> list[tuple[datetime, float]]:

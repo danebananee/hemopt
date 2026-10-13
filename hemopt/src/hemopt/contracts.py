@@ -125,13 +125,20 @@ def settle(
 
 
 def _span_days(load: list[LoadSample]) -> float:
+    """Days actually measured: the samples times their spacing.
+
+    Gaps in the history (Home Assistant off for months) are not days lived
+    without electricity, so they must not dilute the cost per day or the
+    standing charges.
+    """
     if len(load) < 2:
-        return 0.0
-    span = max(s.start for s in load) - min(s.start for s in load)
-    # The last sample covers a step too, which for a month-long comparison is
-    # the difference between 30 and 31 days of standing charge.
-    step = span / (len(load) - 1)
-    return (span + step).total_seconds() / 86400.0
+        return len(load) / 24.0
+    moments = sorted(s.start for s in load)
+    steps = sorted(b - a for a, b in zip(moments, moments[1:], strict=False) if b > a)
+    if not steps:
+        return len(load) / 24.0
+    step = steps[len(steps) // 2]
+    return len(load) * step.total_seconds() / 86400.0
 
 
 def compare(

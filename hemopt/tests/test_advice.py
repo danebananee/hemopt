@@ -457,3 +457,33 @@ def test_measured_days_counts_the_span_not_the_samples():
     history = {now - timedelta(hours=hour): 1.0 for hour in range(47)}
 
     assert _measured_days(history) == pytest.approx(2.0, rel=0.05)
+
+
+def test_one_busy_phase_keeps_the_fuse_where_it_is():
+    """4.9 kW over the house fits 16 A, but 25 A on one phase does not."""
+    from hemopt.advice import AdviceReport, _fuse_action
+    from hemopt.fuse import PhaseHour, assess
+
+    config = make_config()
+    hours = [
+        PhaseHour(
+            START + timedelta(hours=h), phase, 25.0 if phase == 1 and h % 50 == 0 else 6.0, 5.0
+        )
+        for h in range(24 * 120)
+        for phase in (1, 2, 3)
+    ]
+    fuse = assess(hours, 25)
+    report = AdviceReport(measured_days=120.0, current_contract="monthly")
+    without = _fuse_action(config, report, peak_kw=4.9)
+    with_phases = _fuse_action(config, report, peak_kw=4.9, fuse=fuse)
+    assert without.status == "change"
+    assert with_phases.status == "ok"
+    assert "fas L1" in with_phases.detail
+
+
+def test_gaps_in_the_history_are_not_counted_as_days():
+    from hemopt.advice import _span_days
+
+    load, _ = year_of_load(days=10)
+    later = [type(s)(start=s.start + timedelta(days=200), kwh=s.kwh) for s in load]
+    assert _span_days(load + later) == pytest.approx(20.0)

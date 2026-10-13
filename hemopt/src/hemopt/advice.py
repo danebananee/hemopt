@@ -24,6 +24,7 @@ from .contracts import (
     settle,
     shift_flexible_load,
 )
+from .fuse import FuseReport
 
 # Ranked so the panel can show the most trustworthy advice first.
 CONFIDENCE_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -177,11 +178,20 @@ class AdviceReport:
 
 
 def _span_days(load: list[LoadSample]) -> float:
+    """Days actually measured: the samples times their spacing.
+
+    Gaps in the history (Home Assistant off for months) are not days lived
+    without electricity, so they must not dilute the cost per day or the
+    standing charges.
+    """
     if len(load) < 2:
-        return 0.0
-    span = max(s.start for s in load) - min(s.start for s in load)
-    step = span / (len(load) - 1)
-    return (span + step).total_seconds() / 86400.0
+        return len(load) / 24.0
+    moments = sorted(s.start for s in load)
+    steps = sorted(b - a for a, b in zip(moments, moments[1:], strict=False) if b > a)
+    if not steps:
+        return len(load) / 24.0
+    step = steps[len(steps) // 2]
+    return len(load) * step.total_seconds() / 86400.0
 
 
 def build_advice(
@@ -190,13 +200,16 @@ def build_advice(
     spot: list[float],
     *,
     peak_kw: float | None = None,
+    fuse: FuseReport | None = None,
 ) -> AdviceReport:
     """Everything worth changing about the contracts, given measured load.
 
     `load` and `spot` must be aligned and should cover as long a span as you
     have. `peak_kw` is the largest short-term draw observed, which is what a
     fuse actually has to survive; without it the fuse advice is withheld rather
-    than guessed from hourly means.
+    than guessed from hourly means. `fuse` is the verdict from the current on
+    each phase; when there is one it decides which fuse sizes are safe, since
+    one busy phase blows a fuse long before the house's total says so.
     """
     report = AdviceReport(
         measured_days=_span_days(load),
@@ -225,7 +238,7 @@ def build_advice(
         )
 
     settlement_action = _settlement_action(config, report, load, spot)
-    fuse_action = _fuse_action(config, report, peak_kw)
+    fuse_action = _fuse_action(config, report, peak_kw, fuse)
     report.actions = [settlement_action, fuse_action]
 
     candidates = [
@@ -407,7 +420,7 @@ def _settlement_action(
     if averaging:
         detail = (
             f"Du har {current_name}, där varje kWh debiteras till periodens "
-            f"medelpris. Att flytta last till en billig timme sanker darfor "
+            f"medelpris. Att flytta last till en billig timme sänker därför "
             f"inte kostnaden med en krona. Med {best_name} och aktiv styrning "
             f"hade perioden kostat {_kr(optimised[best_contract].total_sek)} kr "
             f"i stället för {_kr(as_used.total_sek)} kr."
@@ -518,7 +531,7 @@ def _fuse_action_need_data(
         )
     return SavingAction(
         key="fuse",
-        title="Huvudsakring",
+        title="Huvudsäkring",
         status="need_data",
         summary=summary,
         detail=(
@@ -537,8 +550,20 @@ def _fuse_action_need_data(
     )
 
 
-def _fuse_options(config: Config, peak_kw: float) -> list[dict]:
-    """Evaluate each configured fuse size against the measured peak."""
+def _phase_verdicts(fuse: FuseReport | None) -> dict[int, str]:
+    """Fuse size -> level from the per-phase currents, if they were measured."""
+    if fuse is None or fuse.status in {"no_data", "learning"}:
+        return {}
+    return {verdict.amps: verdict.level for verdict in fuse.verdicts}
+
+
+def _fuse_options(config: Config, peak_kw: float, fuse: FuseReport | None = None) -> list[dict]:
+    """Evaluate each configured fuse size against the measured peak.
+
+    With per-phase currents a size is safe only if the busiest phase stays
+    comfortably within it; the house total alone would miss an uneven load.
+    """
+    verdicts = _phase_verdicts(fuse)
     settings = config.advice
     voltage = config.site.voltage
     phases = config.site.phases
@@ -549,6 +574,8 @@ def _fuse_options(config: Config, peak_kw: float) -> list[dict]:
         capacity = option.capacity_kw(voltage, phases)
         required = peak_kw + settings.fuse_margin_kw
         ok = capacity >= required
+        if option.fuse_amps in verdicts:
+            ok = verdicts[option.fuse_amps] in {"comfortable", "ok"}
         rows.append(
             {
                 "amps": option.fuse_amps,
@@ -564,7 +591,12 @@ def _fuse_options(config: Config, peak_kw: float) -> list[dict]:
     return rows
 
 
-def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) -> SavingAction:
+def _fuse_action(
+    config: Config,
+    report: AdviceReport,
+    peak_kw: float | None,
+    fuse: FuseReport | None = None,
+) -> SavingAction:
     """Whether a smaller main fuse is safe — always returns a panel action."""
     settings = config.advice
     current_amps = config.site.main_fuse_amps
@@ -577,7 +609,7 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
         action = _fuse_action_need_data(config, report.measured_days, peak_kw, reason="history")
         # Still show provisional option table so the household sees the direction.
         meta = dict(action.meta)
-        meta["options"] = _fuse_options(config, peak_kw)
+        meta["options"] = _fuse_options(config, peak_kw, fuse)
         meta["peak_kw"] = round(peak_kw, 2)
         return SavingAction(
             key=action.key,
@@ -588,7 +620,7 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
             meta=meta,
         )
 
-    options = _fuse_options(config, peak_kw)
+    options = _fuse_options(config, peak_kw, fuse)
     smaller_ok = [row for row in options if row["amps"] < current_amps and row["ok"]]
     confidence = "high" if report.measured_days >= 300 else "low"
     meta = {
@@ -600,24 +632,43 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
         "options": options,
     }
 
+    phase_text = ""
+    if _phase_verdicts(fuse) and fuse is not None:
+        phase_text = (
+            f"Strömmen per fas har nått {fuse.peak_a:.0f} A"
+            + (f" på fas L{fuse.peak_phase}" if fuse.peak_phase else "")
+            + f", och legat på {fuse.sustained_a:.0f} A en hel timme. "
+        )
     if not smaller_ok:
         too_small = [row for row in options if row["amps"] < current_amps and not row["ok"]]
+        if phase_text:
+            return SavingAction(
+                key="fuse",
+                title="Huvudsäkring",
+                status="ok",
+                summary=f"Behåll {current_amps:.0f} A — en mindre säkring klarar inte toppen.",
+                detail=phase_text
+                + "En mindre säkring skulle kunna lösa ut när flera stora apparater går "
+                "samtidigt på samma fas.",
+                confidence=confidence,
+                meta=meta,
+            )
         parts = []
         for row in too_small:
             parts.append(
                 f"{row['amps']} A klarar {row['capacity_kw']:.1f} kW men topp "
                 f"{peak_kw:.1f} kW + {settings.fuse_margin_kw:.0f} kW marginal "
-                f"kraver {row['required_kw']:.1f} kW"
+                f"kräver {row['required_kw']:.1f} kW"
             )
         detail = (
             f"Högsta uppmätta effekt på {report.measured_days:.0f} dygn är "
             f"{peak_kw:.1f} kW. "
             + ("; ".join(parts) + ". " if parts else "")
-            + f"Behall {current_amps} A."
+            + f"Behåll {current_amps} A."
         )
         return SavingAction(
             key="fuse",
-            title="Huvudsakring",
+            title="Huvudsäkring",
             status="ok",
             summary=f"Du ligger rätt på {current_amps} A — mindre säkring tar för snävt.",
             detail=detail,
@@ -654,7 +705,9 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
             f"cirka {_kr(saving)} kr/år i abonnemang."
         ),
         detail=(
-            f"Högsta uppmätta effekt på {report.measured_days:.0f} dygn är "
+            phase_text + f"{best['amps']} A klarar det med marginal.{also_txt}"
+            if phase_text
+            else f"Högsta uppmätta effekt på {report.measured_days:.0f} dygn är "
             f"{peak_kw:.1f} kW. {best['amps']} A klarar {best['capacity_kw']:.1f} kW "
             f"({best['headroom_kw']:.1f} kW marginal).{also_txt}"
         ),
@@ -662,12 +715,12 @@ def _fuse_action(config: Config, report: AdviceReport, peak_kw: float | None) ->
         confidence=confidence,
         action=(
             "Så byter du säkring: 1) begär lägre säkringsabonnemang hos nätbolaget, "
-            "2) de skickar en bekraftelse och ny tariff, 3) en behorig elektriker byter "
+            "2) de skickar en bekräftelse och ny tariff, 3) en behörig elektriker byter "
             "säkringarna i elcentralen. Har du 25 A i dag är nästa steg 20 A."
         ),
         caveat=(
             "Mätdata måste täcka en vinter för att vara rättvisande. "
-            "Elbilsladdning och laddbox som startar samtidigt som varmepumpen "
+            "Elbilsladdning och laddbox som startar samtidigt som värmepumpen "
             "är det som slår ut en mindre säkring."
         ),
         meta=meta,

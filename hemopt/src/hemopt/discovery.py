@@ -64,6 +64,7 @@ class Discovery:
     rooms: list[RoomSuggestion] = field(default_factory=list)
     roles: dict[str, list[Candidate]] = field(default_factory=dict)
     phase_currents: list[str] = field(default_factory=list)
+    phase_powers: list[str] = field(default_factory=list)
     location_known: bool = False
 
     def as_dict(self) -> dict[str, Any]:
@@ -74,7 +75,25 @@ class Discovery:
                 for role, candidates in self.roles.items()
             },
             "phase_currents": self.phase_currents,
+            "phase_powers": self.phase_powers,
         }
+
+
+def _phase_group(rows: list[dict], units: set[str]) -> list[str]:
+    """Three sensors in `units` marked L1/L2/L3 from one device, meter first."""
+    groups: dict[str, list[str]] = {}
+    for row in rows:
+        if not (_domain(row) == "sensor" and _is_numeric(row)):
+            continue
+        if (row.get("attributes") or {}).get("unit_of_measurement") not in units:
+            continue
+        name = _fold(row["entity_id"].split(".", 1)[1])
+        if not _PHASE.search(name):
+            continue
+        groups.setdefault(_PHASE.sub(" ", name).strip(), []).append(row["entity_id"])
+    complete = [sorted(ids) for ids in groups.values() if len(ids) == 3]
+    complete.sort(key=lambda ids: 0 if _has(ids[0], "p1", "meter") else 1)
+    return complete[0] if complete else []
 
 
 def _fold(text: str) -> str:
@@ -353,6 +372,7 @@ def discover(rows: list[dict], diagnosis: dict | None = None) -> Discovery:
     complete = [sorted(ids) for ids in groups.values() if len(ids) in (1, 3)]
     complete.sort(key=lambda ids: (-len(ids), 0 if _has(ids[0], "p1", "meter") else 1))
     result.phase_currents = complete[0] if complete else []
+    result.phase_powers = _phase_group(rows, {"W", "kW"})
 
     soc_rows = [
         row

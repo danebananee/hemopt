@@ -139,6 +139,10 @@ class SiteConfig(BaseModel):
     # Per-phase current sensors from the electricity meter, for keeping an
     # eye on whether the main fuse is the right size.
     phase_current_entities: list[str] = Field(default_factory=list)
+    # Per-phase power, used instead when the meter's currents are not
+    # available (HomeWizard ships its current sensors disabled). The current
+    # is then the power divided by the voltage.
+    phase_power_entities: list[str] = Field(default_factory=list)
     # The house's position, for the sun model. Taken from Home Assistant's
     # own settings when left out.
     latitude: float | None = None

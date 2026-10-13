@@ -203,3 +203,20 @@ def test_husdata_curve_points_and_room_setpoint_are_told_apart():
     assert [c.entity_id for c in roles["house_setpoint"]] == ["climate.h66_hproom_temp_setpoint"]
     assert [c.entity_id for c in roles["curve_foot"]] == ["climate.h66_hpheat_set_1_curvel"]
     assert [c.entity_id for c in roles["curve_end"]] == ["climate.h66_hpheat_set_2_curver"]
+
+
+def test_phase_power_is_found_when_the_meter_has_no_currents():
+    rows = [
+        {
+            "entity_id": f"sensor.p1_meter_power_phase_{n}",
+            "state": "300",
+            "attributes": {
+                "unit_of_measurement": "W",
+                "friendly_name": f"P1 meter Power phase {n}",
+            },
+        }
+        for n in (1, 2, 3)
+    ]
+    found = discover(rows)
+    assert found.phase_currents == []
+    assert found.phase_powers == [f"sensor.p1_meter_power_phase_{n}" for n in (1, 2, 3)]
